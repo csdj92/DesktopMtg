@@ -45,8 +45,14 @@ jobs:
         
     - name: List build outputs
       run: |
+        echo "Current working directory:"
+        Get-Location
+        echo "Contents of current directory:"
+        Get-ChildItem
         echo "Contents of out directory:"
-        dir out /s
+        if (Test-Path "out") { Get-ChildItem -Recurse "out" } else { echo "out directory not found" }
+        echo "Contents of dist directory:"
+        if (Test-Path "dist") { Get-ChildItem -Recurse "dist" } else { echo "dist directory not found" }
         
     - name: Publish Electron app to GitHub
       run: npm run publish
