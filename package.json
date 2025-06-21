@@ -83,7 +83,9 @@
   "config": {
     "forge": {
       "packagerConfig": {
-        "asar": true
+        "asar": {
+          "unpack": "scripts/**/*"
+        }
       },
       "rebuildConfig": {},
       "makers": [
