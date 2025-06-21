@@ -594,7 +594,8 @@ const ensurePythonDatabase = () => {
 
       const resolvePythonExecutable = () => {
         if (app.isPackaged) {
-          const portableDir = path.join(process.resourcesPath, 'python');
+          // Fix: Use the actual directory name that exists in the project
+          const portableDir = path.join(process.resourcesPath, 'python-3.8.9-embed-amd64');
           if (process.platform === 'win32') {
             const exePath = path.join(portableDir, 'python.exe');
             if (fsSync.existsSync(exePath)) return exePath;
@@ -662,6 +663,12 @@ const createWindow = () => {
     },
   });
 
+  // Add error handling for window loading
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+    log.error('Failed to load page:', errorCode, errorDescription, validatedURL);
+    console.error('Failed to load page:', errorCode, errorDescription, validatedURL);
+  });
+
   // In development, load the Vite dev server URL.
   // In production, load the built HTML file.
   if (process.env.NODE_ENV === 'development') {
@@ -669,7 +676,29 @@ const createWindow = () => {
     // Open the DevTools.
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+    // Fix: Use proper path resolution for packaged app
+    const indexPath = app.isPackaged 
+      ? path.join(process.resourcesPath, 'dist', 'index.html')
+      : path.join(__dirname, '..', 'dist', 'index.html');
+    
+    log.info('Loading index.html from:', indexPath);
+    console.log('Loading index.html from:', indexPath);
+    
+    // Check if the file exists before trying to load it
+    if (fsSync.existsSync(indexPath)) {
+      mainWindow.loadFile(indexPath);
+    } else {
+      log.error('index.html not found at:', indexPath);
+      console.error('index.html not found at:', indexPath);
+      // Try fallback path
+      const fallbackPath = path.join(__dirname, '..', 'dist', 'index.html');
+      if (fsSync.existsSync(fallbackPath)) {
+        log.info('Using fallback path:', fallbackPath);
+        mainWindow.loadFile(fallbackPath);
+      } else {
+        log.error('Fallback path also not found:', fallbackPath);
+      }
+    }
   }
 
   // No need to set up IPC handlers here - they're already set up above
@@ -711,67 +740,81 @@ const broadcast = (payload) => {
 
 app.on('ready', async () => {
   console.log('App is ready. Starting initialization...');
+  log.info('App is ready. Starting initialization...');
 
-  const mainWindow = createWindow();
-
-  // ---------------------------------------------------------------
-  // STEP 1: Make sure the SQLite database is built via Python first
-  // ---------------------------------------------------------------
-  broadcast({ task: 'python-db', state: 'start' });
   try {
-    await ensurePythonDatabase();
-    broadcast({ task: 'python-db', state: 'done' });
-  } catch (err) {
-    broadcast({ task: 'python-db', state: 'fail' });
-  }
+    const mainWindow = createWindow();
 
-  // Initialize bulk data service
-  if (process.env.SKIP_BULK_DATA !== 'true') {
+    // ---------------------------------------------------------------
+    // STEP 1: Make sure the SQLite database is built via Python first
+    // ---------------------------------------------------------------
+    broadcast({ task: 'python-db', state: 'start' });
     try {
-      console.log('Initializing bulk data service...');
-      await bulkDataService.initialize();
-      console.log('Bulk data service initialized successfully.');
-    } catch (error) {
-      console.error('Bulk data initialization failed:', error);
-      // Decide if the app should continue without it. For now, we'll log and continue.
+      await ensurePythonDatabase();
+      broadcast({ task: 'python-db', state: 'done' });
+    } catch (err) {
+      log.error('Python database initialization failed:', err);
+      broadcast({ task: 'python-db', state: 'fail' });
     }
-  } else {
-    console.log('Skipping bulk data initialization (SKIP_BULK_DATA=true)');
-  }
 
-  // Initialize collection importer
-  try {
-    console.log('Initializing collection importer...');
-    await collectionImporter.initialize();
-    console.log('Collection importer initialized successfully.');
-  } catch (error) {
-    console.error('Collection importer initialization failed:', error);
-    // This is more critical, maybe we should not proceed. For now, log and continue.
-  }
-
-  // Auto-import text file collections
-  try {
-    console.log('Starting auto-import of .txt collections...');
-    await autoImportTxtCollections();
-    console.log('Auto-import finished.');
-  } catch (error) {
-    console.error('Auto-import of collections failed:', error);
-  }
-
-  console.log('All initializations complete. Creating main window...');
-
-  // -------------------------------------------
-  // Trigger auto-update after startup activities
-  // -------------------------------------------
-  if (app.isPackaged && !process.argv.includes('--squirrel-firstrun')) {
-    // Delay check a bit so first-run tasks (DB build) don't block
-    setTimeout(() => {
+    // Initialize bulk data service
+    if (process.env.SKIP_BULK_DATA !== 'true') {
       try {
-        autoUpdater.checkForUpdatesAndNotify();
-      } catch (e) {
-        log.error('Failed to start update check:', e);
+        console.log('Initializing bulk data service...');
+        await bulkDataService.initialize();
+        console.log('Bulk data service initialized successfully.');
+      } catch (error) {
+        console.error('Bulk data initialization failed:', error);
+        log.error('Bulk data initialization failed:', error);
+        // Decide if the app should continue without it. For now, we'll log and continue.
       }
-    }, 30000); // 30 seconds after launch
+    } else {
+      console.log('Skipping bulk data initialization (SKIP_BULK_DATA=true)');
+    }
+
+    // Initialize collection importer
+    try {
+      console.log('Initializing collection importer...');
+      await collectionImporter.initialize();
+      console.log('Collection importer initialized successfully.');
+    } catch (error) {
+      console.error('Collection importer initialization failed:', error);
+      log.error('Collection importer initialization failed:', error);
+      // This is more critical, maybe we should not proceed. For now, log and continue.
+    }
+
+    // Auto-import text file collections
+    try {
+      console.log('Starting auto-import of .txt collections...');
+      await autoImportTxtCollections();
+      console.log('Auto-import finished.');
+    } catch (error) {
+      console.error('Auto-import of collections failed:', error);
+      log.error('Auto-import of collections failed:', error);
+    }
+
+    console.log('All initializations complete. Creating main window...');
+    log.info('All initializations complete.');
+
+    // -------------------------------------------
+    // Trigger auto-update after startup activities
+    // -------------------------------------------
+    if (app.isPackaged && !process.argv.includes('--squirrel-firstrun')) {
+      // Delay check a bit so first-run tasks (DB build) don't block
+      setTimeout(() => {
+        try {
+          autoUpdater.checkForUpdatesAndNotify();
+        } catch (e) {
+          log.error('Failed to start update check:', e);
+        }
+      }, 30000); // 30 seconds after launch
+    }
+  } catch (error) {
+    console.error('Critical error during app initialization:', error);
+    log.error('Critical error during app initialization:', error);
+    // Show error dialog
+    const { dialog } = require('electron');
+    dialog.showErrorBox('Startup Error', `Failed to initialize application: ${error.message}`);
   }
 });
 
