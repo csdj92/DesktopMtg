@@ -43,6 +43,11 @@ jobs:
     - name: Make Electron distributables
       run: npm run make
         
+    - name: List build outputs
+      run: |
+        echo "Contents of out directory:"
+        dir out /s
+        
     - name: Publish Electron app to GitHub
       run: npm run publish
       env:
