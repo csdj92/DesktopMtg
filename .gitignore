@@ -24,6 +24,6 @@ dist-ssr
 *.sw?
 
 out/
-python-3.8.9-embed-amd64/*
+# python-3.8.9-embed-amd64/*  # COMMENTED OUT - need Python for build
 resources/*
 *.md
