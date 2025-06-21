@@ -17,10 +17,8 @@
     "build-db": "python scripts/build_card_database.py",
     "setup-python": "pip install -r scripts/requirements.txt",
     "package": "electron-forge package",
-    "package:win": "npm run build && electron-builder --win --x64",
-    "package:mac": "npm run build && electron-builder --mac",
-    "package:linux": "npm run build && electron-builder --linux",
-    "make": "electron-forge make"
+    "make": "electron-forge make",
+    "publish": "electron-forge publish"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.20.0",
@@ -36,10 +34,13 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "csv-parse": "^5.5.6",
+    "electron-log": "^5.1.6",
     "electron-squirrel-startup": "^1.0.1",
+    "electron-updater": "^6.2.3",
     "framer-motion": "^12.18.1",
     "lodash.debounce": "^4.0.8",
     "lucide-react": "^0.517.0",
+    "python-shell": "^5.0.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-window": "^1.8.11",
@@ -47,10 +48,7 @@
     "sqlite": "^5.1.1",
     "sqlite3": "^5.1.7",
     "stream-json": "^1.9.1",
-    "tailwind-merge": "^3.3.1",
-    "electron-updater": "^6.2.3",
-    "electron-log": "^5.1.6",
-    "python-shell": "^5.0.0"
+    "tailwind-merge": "^3.3.1"
   },
   "devDependencies": {
     "@electron-forge/cli": "^7.8.1",
@@ -60,6 +58,7 @@
     "@electron-forge/maker-zip": "^7.8.1",
     "@electron-forge/plugin-auto-unpack-natives": "^7.8.1",
     "@electron-forge/plugin-fuses": "^7.8.1",
+    "@electron-forge/publisher-github": "^7.8.1",
     "@electron/fuses": "^1.8.0",
     "@eslint/js": "^9.25.0",
     "@tailwindcss/postcss": "^4.1.10",
@@ -137,50 +136,18 @@
             "OnlyLoadAppFromAsar": true
           }
         }
+      ],
+      "publishers": [
+        {
+          "name": "@electron-forge/publisher-github",
+          "config": {
+            "repository": {
+              "owner": "csdj92",
+              "name": "DesktopMtg"
+            }
+          }
+        }
       ]
     }
-  },
-  "build": {
-    "appId": "com.desktopmtg.app",
-    "productName": "Desktop MTG",
-    "asar": true,
-    "files": [
-      "dist/**",
-      "electron/**",
-      "scripts/**",
-      "package.json"
-    ],
-    "asarUnpack": [
-      "scripts/**"
-    ],
-    "extraResources": [
-      {
-        "from": "vectordb",
-        "to": "vectordb"
-      },
-      {
-        "from": "resources/python",
-        "to": "python"
-      }
-    ],
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
-    },
-    "win": {
-      "target": "nsis"
-    },
-    "mac": {
-      "target": "dmg"
-    },
-    "linux": {
-      "target": "AppImage"
-    },
-    "publish": [
-      {
-        "provider": "generic",
-        "url": "https://your-domain.com/desktopmtg-updates/"
-      }
-    ]
   }
 }
