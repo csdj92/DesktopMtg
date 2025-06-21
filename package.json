@@ -1,9 +1,9 @@
 {
-  "name": "Magic the Gathering Desktop Deck Builder",
+  "name": "desktopmtg",
   "description": "Desktop Magic: The Gathering collection manager and deck builder",
   "author": "C.J Davis",
   "private": true,
-  "version": "0.0.2",
+  "version": "0.0.3",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -96,16 +96,12 @@
           ],
           "config": {
             "name": "desktopmtg",
-            "setupExe": "DesktopMTG_Setup.exe"
+            "setupExe": "DesktopMTG_Setup.exe",
+            "authors": "C.J Davis",
+            "description": "Desktop Magic: The Gathering collection manager and deck builder"
           }
         },
-        {
-          "name": "@electron-forge/maker-zip",
-          "platforms": [
-            "win32",
-            "darwin"
-          ]
-        },
+
         {
           "name": "@electron-forge/maker-deb",
           "platforms": [
@@ -146,7 +142,9 @@
             "repository": {
               "owner": "csdj92",
               "name": "DesktopMtg"
-            }
+            },
+            "prerelease": false,
+            "draft": false
           }
         }
       ]
