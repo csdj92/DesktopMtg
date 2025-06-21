@@ -1,0 +1,114 @@
+.search-controls-wrapper {
+  background-color: var(--color-surface);
+  padding: 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+}
+
+.search-main {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.search-input {
+  flex-grow: 1;
+  padding: 0.75rem 1rem;
+  background-color: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text-primary);
+  font-size: 1rem;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.database-info {
+  font-size: 0.9rem;
+  color: var(--color-text-secondary);
+}
+
+.search-advanced {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.search-field input,
+.search-field select {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background-color: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text-primary);
+}
+
+.color-selector {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.color-button {
+  flex: 1;
+  padding: 0.5rem;
+  border: 1px solid var(--color-border);
+  background-color: transparent;
+  color: var(--color-text-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.color-button.selected {
+  color: #fff;
+  border-color: #fff;
+  font-weight: bold;
+}
+
+.color-button:nth-child(1).selected { background-color: #f8f7f4; border-color: #f8f7f4; color: #333; }
+.color-button:nth-child(2).selected { background-color: #0e68ab; border-color: #0e68ab; }
+.color-button:nth-child(3).selected { background-color: #150b00; border-color: #150b00; }
+.color-button:nth-child(4).selected { background-color: #d3202a; border-color: #d3202a; }
+.color-button:nth-child(5).selected { background-color: #00733e; border-color: #00733e; }
+
+.search-field,
+.search-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.search-field-group {
+    flex-direction: row;
+    gap: 0.5rem;
+}
+
+.search-field input::placeholder {
+  color: var(--color-text-secondary);
+}
+
+.collapse-button {
+  padding: 0.4rem 0.6rem;
+  background-color: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  transition: background-color 0.2s;
+}
+
+.collapse-button:hover {
+  background-color: var(--color-surface);
+}
+
+/* When collapsed, reduce bottom margin */
+.search-controls-wrapper.collapsed .search-main {
+  margin-bottom: 0;
+} 
