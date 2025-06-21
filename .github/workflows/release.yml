@@ -39,22 +39,10 @@ jobs:
       
     - name: Build React app
       run: npm run build
-      
-    - name: Build database (Windows)
-      if: matrix.os == 'windows-latest'
-      run: python scripts/build_card_database.py
-      env:
-        DESKTOPMTG_DATA_DIR: ${{ github.workspace }}/temp-data
-        
-    - name: Build database (macOS/Linux)
-      if: matrix.os != 'windows-latest'
-      run: python scripts/build_card_database.py
-      env:
-        DESKTOPMTG_DATA_DIR: ${{ github.workspace }}/temp-data
         
     - name: Build and Publish Electron app with Forge
       run: npm run publish
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         
- 
+ dfdf
