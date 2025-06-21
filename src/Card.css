@@ -1,0 +1,149 @@
+/* Card.css - Styles for the Card component */
+
+.card-container {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 63 / 88;
+  background-color: var(--color-surface);
+  border-radius: 4.75% / 3.5%;
+  overflow: hidden;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.4);
+  transition: transform 0.2s ease-out, box-shadow 0.2s ease-out;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.card-container:hover {
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  z-index: 10;
+}
+
+.card-image-background {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 1;
+}
+
+.card-header, .card-footer {
+  position: relative;
+  z-index: 3;
+  padding: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, transparent 100%);
+}
+
+.card-footer {
+  background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.8) 50%, transparent 100%);
+  align-items: flex-end;
+}
+
+.badges {
+  display: flex;
+  gap: 6px;
+}
+
+.quantity-badge {
+  background-color: rgba(0, 0, 0, 0.7);
+  color: var(--color-text-primary);
+  font-weight: bold;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--color-text-primary);
+  font-size: 0.9rem;
+}
+
+.flip-button {
+  background-color: rgba(0, 0, 0, 0.7);
+  color: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  transition: background-color 0.2s;
+}
+
+.flip-button:hover {
+  background-color: var(--color-accent);
+  color: var(--color-background);
+}
+
+.name-and-type {
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+}
+
+.footer-card-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.footer-type-line {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  margin: 2px 0 0 0;
+}
+
+.footer-price {
+  font-size: 0.9rem;
+  font-weight: bold;
+  color: var(--color-accent);
+  background-color: rgba(0, 0, 0, 0.7);
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.error-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--border-color);
+  color: var(--text-secondary);
+}
+
+/* Full Art Preview on Hover */
+.full-art-preview {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 350px; /* Adjust size as needed */
+  z-index: 1000;
+  pointer-events: none; /* Allows mouse events to pass through */
+  display: none; /* Hidden by default */
+  opacity: 0;
+  transition: opacity 0.2s ease-in-out;
+}
+
+.card-container:hover .full-art-preview {
+  display: block;
+  opacity: 1;
+}
+
+.full-art-preview img {
+  width: 100%;
+  height: auto;
+  border-radius: 15px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.7);
+}
