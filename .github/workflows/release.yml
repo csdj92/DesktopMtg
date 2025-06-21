@@ -50,10 +50,9 @@ jobs:
         echo "Contents of current directory:"
         Get-ChildItem
         echo "Contents of out directory:"
-        if (Test-Path "out") { Get-ChildItem -Recurse "out" } else { echo "out directory not found" }
+        if (Test-Path "out") { Get-ChildItem -Recurse -Path "out" } else { echo "out directory not found" }
         echo "Contents of dist directory:"
-        if (Test-Path "dist") { Get-ChildItem -Recurse "dist" } else { echo "dist directory not found" }
-        
+        if (Test-Path "dist") { Get-ChildItem -Recurse -Path "dist" } else { echo "dist directory not found" }
     - name: Publish Electron app to GitHub
       run: npm run publish
       env:
