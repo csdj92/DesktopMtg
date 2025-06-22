@@ -1,6 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import './CollectionManager.css';
 
+// Some browser environments (e.g., Electron with certain sandbox policies) may
+// disable the blocking `window.prompt`/`window.confirm` APIs. Provide safe
+// wrappers that fall back to defaults when these functions are unavailable.
+const safePrompt = (message, defaultValue = '') => {
+  try {
+    // Using `window` guard for SSR safety
+    if (typeof window !== 'undefined' && typeof window.prompt === 'function') {
+      return window.prompt(message, defaultValue);
+    }
+  } catch (_) {
+    /* ignored */
+  }
+  // Fallback – return the default value (empty string yields validation later)
+  return defaultValue;
+};
+
 const safeConfirm = (message) => {
   try {
     if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
@@ -89,15 +105,8 @@ const CollectionManager = () => {
       const filePath = result.filePaths[0];
       const fileName = filePath.split(/[/\\]/).pop().replace('.csv', '');
       
-      // Show native dialog to confirm collection name
-      const nameResult = await window.electronAPI.showCollectionNameDialog(fileName);
-      if (!nameResult.confirmed) {
-        setIsImporting(false);
-        setImportProgress('');
-        return;
-      }
-      
-      const collectionName = nameResult.name;
+      // Prompt for collection name
+      const collectionName = safePrompt('Enter a name for this collection:', fileName) || fileName;
       
       if (!collectionName.trim()) {
         setIsImporting(false);
@@ -158,15 +167,8 @@ const CollectionManager = () => {
       const filePath = result.filePaths[0];
       const fileName = filePath.split(/[/\\]/).pop().replace('.txt', '');
       
-      // Show native dialog to confirm collection name
-      const nameResult = await window.electronAPI.showCollectionNameDialog(fileName);
-      if (!nameResult.confirmed) {
-        setIsImporting(false);
-        setImportProgress('');
-        return;
-      }
-      
-      const collectionName = nameResult.name;
+      // Prompt for collection name and format
+      const collectionName = safePrompt('Enter a name for this collection:', fileName) || fileName;
       
       if (!collectionName.trim()) {
         setIsImporting(false);
@@ -174,15 +176,21 @@ const CollectionManager = () => {
         return;
       }
 
-      // Show native dialog for format choice
-      const formatResult = await window.electronAPI.showFormatChoiceDialog();
-      if (!formatResult.confirmed) {
-        setIsImporting(false);
-        setImportProgress('');
-        return;
-      }
+      // Prompt for format
+      const formatOptions = [
+        'simple - Just card names (one per line)',
+        'mtgo - "4x Lightning Bolt" format',
+        'detailed - "4 Lightning Bolt (M10) 123 [foil]" format',
+        'deckbox - "1x Lightning Bolt [M10]" format'
+      ];
       
-      const format = formatResult.format;
+      const formatChoice = safePrompt(
+        'Choose format:\n' + formatOptions.map((opt, i) => `${i + 1}. ${opt}`).join('\n') + '\n\nEnter number (1-4):',
+        '1'
+      );
+      
+      const formats = ['simple', 'mtgo', 'detailed', 'deckbox'];
+      const format = formats[parseInt(formatChoice) - 1] || 'simple';
 
       setImportProgress('Importing TXT file...');
 

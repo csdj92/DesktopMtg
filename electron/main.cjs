@@ -9,6 +9,25 @@ const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
 const { PythonShell } = require('python-shell');
 
+// Disable hardware acceleration before the app is ready.
+app.disableHardwareAcceleration();
+
+// Handle Squirrel startup events on Windows
+if (require('electron-squirrel-startup')) {
+  app.quit();
+}
+
+// Global error handling
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  log.error('Uncaught Exception:', error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  log.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 // IPC Handlers
 // =================================================================
 
@@ -370,6 +389,8 @@ async function autoImportTxtCollections(format = 'simple') {
 
 // Semantic Search and Card Lookup
 ipcMain.handle('search-cards-semantic', async (event, query, options) => {
+  // Lazily initialize the semantic search service on the first call
+  await bulkDataService.ensureSemanticSearchInitialized();
   return await bulkDataService.searchCardsSemantic(query, options);
 });
 
@@ -403,168 +424,6 @@ ipcMain.handle('show-open-dialog', async (event, options) => {
   return result;
 });
 
-// Native dialog handlers for collection management
-ipcMain.handle('show-collection-name-dialog', async (event, defaultName) => {
-  const { BrowserWindow } = require('electron');
-  
-  // Create a new dialog window for text input
-  const parent = BrowserWindow.getFocusedWindow();
-  const inputWindow = new BrowserWindow({
-    width: 400,
-    height: 200,
-    modal: true,
-    parent: parent,
-    show: false,
-    resizable: false,
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
-    }
-  });
-
-  // Create HTML content for the input dialog
-  const htmlContent = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <style>
-        body {
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          margin: 0;
-          padding: 20px;
-          background: #f5f5f5;
-        }
-        .container {
-          background: white;
-          padding: 20px;
-          border-radius: 8px;
-          box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        h3 {
-          margin: 0 0 15px 0;
-          color: #333;
-        }
-        input {
-          width: 100%;
-          padding: 8px 12px;
-          border: 1px solid #ddd;
-          border-radius: 4px;
-          font-size: 14px;
-          margin-bottom: 15px;
-          box-sizing: border-box;
-        }
-        .buttons {
-          display: flex;
-          gap: 10px;
-          justify-content: flex-end;
-        }
-        button {
-          padding: 8px 16px;
-          border: none;
-          border-radius: 4px;
-          cursor: pointer;
-          font-size: 14px;
-        }
-        .ok-btn {
-          background: #007acc;
-          color: white;
-        }
-        .ok-btn:hover {
-          background: #005fa3;
-        }
-        .cancel-btn {
-          background: #e0e0e0;
-          color: #333;
-        }
-        .cancel-btn:hover {
-          background: #d0d0d0;
-        }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <h3>Collection Name</h3>
-        <input type="text" id="collectionName" value="${defaultName}" placeholder="Enter collection name...">
-        <div class="buttons">
-          <button class="cancel-btn" onclick="cancel()">Cancel</button>
-          <button class="ok-btn" onclick="confirm()">OK</button>
-        </div>
-      </div>
-      <script>
-        const { ipcRenderer } = require('electron');
-        
-        document.getElementById('collectionName').focus();
-        document.getElementById('collectionName').select();
-        
-        document.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') {
-            confirm();
-          } else if (e.key === 'Escape') {
-            cancel();
-          }
-        });
-        
-        function confirm() {
-          const name = document.getElementById('collectionName').value.trim();
-          if (name) {
-            ipcRenderer.send('collection-name-result', { confirmed: true, name });
-          } else {
-            document.getElementById('collectionName').focus();
-          }
-        }
-        
-        function cancel() {
-          ipcRenderer.send('collection-name-result', { confirmed: false, name: null });
-        }
-      </script>
-    </body>
-    </html>
-  `;
-
-  return new Promise((resolve) => {
-    // Listen for the result
-    const { ipcMain } = require('electron');
-    const resultHandler = (event, result) => {
-      inputWindow.close();
-      ipcMain.removeListener('collection-name-result', resultHandler);
-      resolve(result);
-    };
-    
-    ipcMain.on('collection-name-result', resultHandler);
-    
-    // Handle window close
-    inputWindow.on('closed', () => {
-      ipcMain.removeListener('collection-name-result', resultHandler);
-      resolve({ confirmed: false, name: null });
-    });
-
-    // Load the HTML content and show the window
-    inputWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
-    inputWindow.once('ready-to-show', () => {
-      inputWindow.show();
-    });
-  });
-});
-
-ipcMain.handle('show-format-choice-dialog', async (event) => {
-  const { dialog } = require('electron');
-  const result = await dialog.showMessageBox({
-    type: 'question',
-    buttons: ['Simple', 'MTGO', 'Detailed', 'Deckbox', 'Cancel'],
-    defaultId: 0,
-    title: 'TXT Format',
-    message: 'Choose the format of your TXT file:',
-    detail: 'Simple: Just card names (one per line)\nMTGO: "4x Lightning Bolt" format\nDetailed: "4 Lightning Bolt (M10) 123 [foil]" format\nDeckbox: "1x Lightning Bolt [M10]" format'
-  });
-  
-  const formats = ['simple', 'mtgo', 'detailed', 'deckbox'];
-  if (result.response < 4) {
-    return { confirmed: true, format: formats[result.response] };
-  } else {
-    return { confirmed: false, format: null };
-  }
-});
-
 // Helper to ensure Python-built database is present before initializing bulk data service
 const ensurePythonDatabase = () => {
   const localBroadcast = (p) => {
@@ -594,10 +453,10 @@ const ensurePythonDatabase = () => {
 
       const resolvePythonExecutable = () => {
         if (app.isPackaged) {
-          // Fix: Use the actual directory name that exists in the project
           const portableDir = path.join(process.resourcesPath, 'python-3.8.9-embed-amd64');
           if (process.platform === 'win32') {
             const exePath = path.join(portableDir, 'python.exe');
+            console.log(`Checking for Python at: ${exePath}`);
             if (fsSync.existsSync(exePath)) return exePath;
           } else {
             const exePath = path.join(portableDir, 'bin', 'python3');
@@ -655,18 +514,22 @@ const ensurePythonDatabase = () => {
 };
 
 const createWindow = () => {
+  console.log('Creating main window...');
   const mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
+      nodeIntegration: false,
+      contextIsolation: true
     },
   });
-
-  // Add error handling for window loading
-  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
-    log.error('Failed to load page:', errorCode, errorDescription, validatedURL);
-    console.error('Failed to load page:', errorCode, errorDescription, validatedURL);
+  
+  mainWindow.once('ready-to-show', () => {
+    console.log('Window ready to show');
+    log.info('Window ready to show');
+    mainWindow.show();
   });
 
   // In development, load the Vite dev server URL.
@@ -676,32 +539,20 @@ const createWindow = () => {
     // Open the DevTools.
     mainWindow.webContents.openDevTools();
   } else {
-    // Fix: Use proper path resolution for packaged app
     const indexPath = app.isPackaged 
       ? path.join(process.resourcesPath, 'dist', 'index.html')
       : path.join(__dirname, '..', 'dist', 'index.html');
     
-    log.info('Loading index.html from:', indexPath);
     console.log('Loading index.html from:', indexPath);
+    log.info('Loading index.html from:', indexPath);
     
-    // Check if the file exists before trying to load it
-    if (fsSync.existsSync(indexPath)) {
-      mainWindow.loadFile(indexPath);
-    } else {
-      log.error('index.html not found at:', indexPath);
-      console.error('index.html not found at:', indexPath);
-      // Try fallback path
-      const fallbackPath = path.join(__dirname, '..', 'dist', 'index.html');
-      if (fsSync.existsSync(fallbackPath)) {
-        log.info('Using fallback path:', fallbackPath);
-        mainWindow.loadFile(fallbackPath);
-      } else {
-        log.error('Fallback path also not found:', fallbackPath);
-      }
-    }
+    mainWindow.loadFile(indexPath).catch(err => {
+      console.error('Error loading file:', err);
+      log.error('Error loading file:', err);
+    });
   }
 
-  // No need to set up IPC handlers here - they're already set up above
+  return mainWindow;
 };
 
 // -----------------------------------------------------------
@@ -740,11 +591,10 @@ const broadcast = (payload) => {
 
 app.on('ready', async () => {
   console.log('App is ready. Starting initialization...');
-  log.info('App is ready. Starting initialization...');
+
+  const mainWindow = createWindow();
 
   try {
-    const mainWindow = createWindow();
-
     // ---------------------------------------------------------------
     // STEP 1: Make sure the SQLite database is built via Python first
     // ---------------------------------------------------------------
@@ -753,48 +603,31 @@ app.on('ready', async () => {
       await ensurePythonDatabase();
       broadcast({ task: 'python-db', state: 'done' });
     } catch (err) {
-      log.error('Python database initialization failed:', err);
       broadcast({ task: 'python-db', state: 'fail' });
+      // Re-throw to be caught by the outer block
+      throw err;
     }
 
     // Initialize bulk data service
     if (process.env.SKIP_BULK_DATA !== 'true') {
-      try {
-        console.log('Initializing bulk data service...');
-        await bulkDataService.initialize();
-        console.log('Bulk data service initialized successfully.');
-      } catch (error) {
-        console.error('Bulk data initialization failed:', error);
-        log.error('Bulk data initialization failed:', error);
-        // Decide if the app should continue without it. For now, we'll log and continue.
-      }
+      console.log('Initializing bulk data service...');
+      await bulkDataService.initialize();
+      console.log('Bulk data service initialized successfully.');
     } else {
       console.log('Skipping bulk data initialization (SKIP_BULK_DATA=true)');
     }
 
     // Initialize collection importer
-    try {
-      console.log('Initializing collection importer...');
-      await collectionImporter.initialize();
-      console.log('Collection importer initialized successfully.');
-    } catch (error) {
-      console.error('Collection importer initialization failed:', error);
-      log.error('Collection importer initialization failed:', error);
-      // This is more critical, maybe we should not proceed. For now, log and continue.
-    }
+    console.log('Initializing collection importer...');
+    await collectionImporter.initialize();
+    console.log('Collection importer initialized successfully.');
 
     // Auto-import text file collections
-    try {
-      console.log('Starting auto-import of .txt collections...');
-      await autoImportTxtCollections();
-      console.log('Auto-import finished.');
-    } catch (error) {
-      console.error('Auto-import of collections failed:', error);
-      log.error('Auto-import of collections failed:', error);
-    }
+    console.log('Starting auto-import of .txt collections...');
+    await autoImportTxtCollections();
+    console.log('Auto-import finished.');
 
-    console.log('All initializations complete. Creating main window...');
-    log.info('All initializations complete.');
+    console.log('All initializations complete.');
 
     // -------------------------------------------
     // Trigger auto-update after startup activities
@@ -803,18 +636,30 @@ app.on('ready', async () => {
       // Delay check a bit so first-run tasks (DB build) don't block
       setTimeout(() => {
         try {
-          autoUpdater.checkForUpdatesAndNotify();
+          // Only check for updates if running from a published distribution
+          const fs = require('fs');
+          const updateConfigPath = path.join(process.resourcesPath, 'app-update.yml');
+          
+          if (fs.existsSync(updateConfigPath)) {
+            log.info('🔄 Starting update check...');
+            autoUpdater.checkForUpdatesAndNotify();
+          } else {
+            log.info('ℹ️  Update config not found, skipping update check (development/local build)');
+          }
         } catch (e) {
           log.error('Failed to start update check:', e);
         }
       }, 30000); // 30 seconds after launch
     }
   } catch (error) {
-    console.error('Critical error during app initialization:', error);
-    log.error('Critical error during app initialization:', error);
-    // Show error dialog
+    console.error('💥 A critical error occurred during application startup:', error);
+    log.error('💥 A critical error occurred during application startup:', error);
     const { dialog } = require('electron');
-    dialog.showErrorBox('Startup Error', `Failed to initialize application: ${error.message}`);
+    dialog.showErrorBox(
+      'Application Startup Error',
+      'A critical error occurred while starting the application. Please check the logs for more details.'
+    );
+    app.quit();
   }
 });
 

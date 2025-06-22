@@ -84,6 +84,16 @@ class SemanticSearchService {
         ? path.join(process.resourcesPath, 'vectordb')
         : path.resolve(__dirname, '..', 'vectordb');
 
+      // Check if vectordb exists before initializing
+      const fs = require('fs');
+      if (!fs.existsSync(dbDirPath)) {
+        console.log('Vector database not found at:', dbDirPath);
+        console.log('Semantic search will be disabled');
+        this.isInitialized = false;
+        resolve();
+        return;
+      }
+
       // Send the absolute path to the worker so it can connect to the database.
       this.postMessage('initialize', { dbDirPath }).then(resolve).catch(reject);
     });

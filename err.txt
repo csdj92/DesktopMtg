@@ -1,0 +1,2 @@
+The given version [14] is not supported, only version 1 to 10 is supported in this build.
+[23684:0621/184745.907:ERROR:crashpad_client_win.cc(868)] not connected

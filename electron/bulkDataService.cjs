@@ -60,8 +60,7 @@ class BulkDataService {
       await this.transferCollectedCardsToDatabase();
       console.log(`Transferred collected cards to database${this.getCollectedCardCount()}`);
       
-      // Initialize semantic search service
-      await semanticSearchService.initialize();
+      // The semantic search service will now be initialized on-demand.
       
       // Check if we need to download or update
       const needsUpdate = await this.shouldUpdate();
@@ -918,6 +917,22 @@ class BulkDataService {
     } catch (error) {
       console.error(`Error fetching cards for set ${setCode}:`, error);
       return [];
+    }
+  }
+
+  ensureSemanticSearchInitialized() {
+    // This is designed to be called multiple times, but the underlying
+    // service will only initialize once.
+    return semanticSearchService.initialize();
+  }
+
+  async importCSV(filePath, collectionName) {
+    try {
+      console.log(`📥 Importing CSV collection: ${collectionName} from ${filePath}`);
+      
+      // ... existing code ...
+    } catch (error) {
+      console.error(`Error importing CSV collection: ${collectionName}:`, error);
     }
   }
 }
