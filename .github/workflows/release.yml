@@ -1,59 +1,72 @@
+# .github/workflows/build-and-release.yml
 name: Build and Release
 
 on:
   push:
     tags:
-      - 'v*.*.*'
-  workflow_dispatch:
+      - 'v*.*.*'          # e.g. v0.0.3
+  workflow_dispatch:       # allow manual reruns
 
 permissions:
   contents: write
-  packages: write
+  packages: write           # required if you ever publish to GH Packages
 
 jobs:
   build:
     runs-on: windows-latest
-        
+
+    # Make the token available to every step (electron-forge reads env.GITHUB_TOKEN)
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'
-        
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.8'
-        
-    - name: Install Python dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r scripts/requirements.txt
-        
-    - name: Install dependencies
-      run: npm ci
-      
-    - name: Build React app
-      run: npm run build
-        
-    - name: Make Electron distributables
-      run: npm run make
-        
-    - name: List build outputs
-      run: |
-        echo "Current working directory:"
-        Get-Location
-        echo "Contents of current directory:"
-        Get-ChildItem
-        echo "Contents of out directory:"
-        if (Test-Path "out") { Get-ChildItem -Recurse -Path "out" } else { echo "out directory not found" }
-        echo "Contents of dist directory:"
-        if (Test-Path "dist") { Get-ChildItem -Recurse -Path "dist" } else { echo "dist directory not found" }
-    - name: Publish Electron app to GitHub
-      run: npm run publish
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # 1- Check out the code
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2- Verify tag = package.json version
+      - name: Verify version tag
+        shell: bash
+        run: |
+          TAG_VERSION=${GITHUB_REF_NAME#v}
+          PKG_VERSION=$(jq -r .version package.json)
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) doesn't match package.json ($PKG_VERSION)"
+            exit 1
+          fi
+
+      # 3- Install Node (with npm cache)
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      # 4- Install Python (with pip cache) – needed for your DB-build script
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+          cache: 'pip'
+
+      # 5- Restore Python deps
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r scripts/requirements.txt
+
+      # 6- Restore Node deps
+      - name: Install Node dependencies
+        run: npm ci
+
+      # 7- Build renderer bundle
+      - name: Build React app
+        run: npm run build
+
+      # 8- Package the Electron app (creates installers/zips in `out/`)
+      - name: Make Electron distributables
+        run: npm run make:complete
+
+      # 9- Publish → creates/updates GitHub Release & uploads artifacts
+      - name: Publish Electron app to GitHub Release
+        run: npm run publish

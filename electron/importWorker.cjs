@@ -13,9 +13,16 @@ async function importCardsInWorker() {
   const { databaseFile, cardsFile } = workerData;
   
   // Initialize Semantic Search Service
-  await semanticSearchService.initialize();
-  // Clear any existing vector index
-  await semanticSearchService.deleteIndex();
+  let semanticSearchEnabled = false;
+  try {
+    await semanticSearchService.initialize();
+    // Clear any existing vector index
+    await semanticSearchService.deleteIndex();
+    semanticSearchEnabled = true;
+  } catch (error) {
+    console.error('[Worker] Semantic search initialization failed:', error);
+    // Continue without semantic search
+  }
 
   let db;
   try {
@@ -93,8 +100,15 @@ async function importCardsInWorker() {
         await stmt.finalize();
         await db.exec('COMMIT');
         
-        // Index the batch for semantic search
-        await semanticSearchService.indexCards(cards);
+        // Index the batch for semantic search if enabled
+        if (semanticSearchEnabled) {
+          try {
+            await semanticSearchService.indexCards(cards);
+          } catch (error) {
+            console.error('[Worker] Failed to index cards:', error);
+            // Continue without indexing
+          }
+        }
 
         // Clear references for GC
         cards.length = 0;

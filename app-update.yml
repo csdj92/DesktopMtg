@@ -1,0 +1,4 @@
+provider: github
+owner: csdj92
+repo: DesktopMtg
+updaterCacheDirName: desktopmtg-updater 
