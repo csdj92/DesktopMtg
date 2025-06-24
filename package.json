@@ -6,6 +6,7 @@
   "version": "0.0.6",
   "type": "module",
   "main": "electron/main.cjs",
+
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -23,6 +24,49 @@
     "make:complete": "npm run build && npm run package:with-resources && npm run make",
     "publish": "electron-forge publish"
   },
+
+  "build": {
+    "appId": "com.csdj92.desktopmtg",
+    "productName": "DesktopMTG",
+    "asar": true,
+    "files": [
+      "dist/**",
+      "electron/**",
+      "scripts/**",
+      "python-3.8.9-embed-amd64/**",
+      "vectordb/**",
+      "!**/node_modules/*/{CHANGELOG*,README*}",
+      "!**/tests/**"
+    ],
+    "asarUnpack": [
+      "scripts/**",
+      "python-3.8.9-embed-amd64/**"
+    ],
+    "directories": {
+      "buildResources": "build",
+      "output": "out"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "csdj92",
+        "repo": "DesktopMtg",
+        "releaseType": "draft"
+      }
+    ],
+    "extraMetadata": {
+      "main": "electron/main.cjs"
+    }
+  },
+
   "dependencies": {
     "@lancedb/lancedb": "^0.21.0",
     "@radix-ui/react-dialog": "^1.1.14",
@@ -54,6 +98,7 @@
     "stream-json": "^1.9.1",
     "tailwind-merge": "^3.3.1"
   },
+
   "devDependencies": {
     "@electron-forge/cli": "^7.8.1",
     "@electron-forge/maker-deb": "^7.8.1",
@@ -74,6 +119,7 @@
     "concurrently": "^8.2.2",
     "cross-env": "^7.0.3",
     "electron": "^31.0.1",
+    "electron-builder": "^24.14.1",
     "eslint": "^9.25.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.19",
@@ -86,6 +132,7 @@
     "vite-plugin-electron-renderer": "^0.14.6",
     "wait-on": "^7.2.0"
   },
+
   "config": {
     "forge": {
       "packagerConfig": {
@@ -102,9 +149,7 @@
       "makers": [
         {
           "name": "@electron-forge/maker-squirrel",
-          "platforms": [
-            "win32"
-          ],
+          "platforms": ["win32"],
           "config": {
             "name": "desktopmtg",
             "setupExe": "DesktopMTG_Setup.exe",
@@ -114,16 +159,12 @@
         },
         {
           "name": "@electron-forge/maker-deb",
-          "platforms": [
-            "linux"
-          ],
+          "platforms": ["linux"],
           "config": {}
         },
         {
           "name": "@electron-forge/maker-rpm",
-          "platforms": [
-            "linux"
-          ],
+          "platforms": ["linux"],
           "config": {}
         }
       ],
