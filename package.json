@@ -1,4 +1,4 @@
-{More actions
+{
   "name": "desktopmtg",
   "description": "Desktop Magic: The Gathering collection manager and deck builder",
   "author": "C.J Davis",
@@ -109,41 +109,6 @@
             "setupExe": "DesktopMTG_Setup.exe",
             "authors": "C.J Davis",
             "description": "Desktop Magic: The Gathering collection manager and deck builder"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
           }
         },
         {
