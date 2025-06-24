@@ -20,11 +20,24 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-      # 1- Check out the code
-      - name: Checkout
+      # 1- Check out the code with LFS
+      - name: Checkout with LFS
         uses: actions/checkout@v4
+        with:
+          lfs: true
 
-      # 2- Clean up workspace
+      # 2- Verify LFS files are downloaded
+      - name: Verify LFS files
+        shell: powershell
+        run: |
+          Write-Host "Checking LFS files..."
+          git lfs ls-files
+          Write-Host "Pulling LFS files to ensure they're downloaded..."
+          git lfs pull
+          Write-Host "LFS files after pull:"
+          git lfs ls-files
+
+      # 3- Clean up workspace
       - name: Clean workspace
         shell: powershell
         run: |
@@ -37,7 +50,7 @@ jobs:
             Remove-Item "out" -Recurse -Force -ErrorAction SilentlyContinue
           }
 
-      # 3- Fix file permissions
+      # 4- Fix file permissions
       - name: Fix file permissions
         shell: powershell
         run: |
@@ -56,7 +69,7 @@ jobs:
             Write-Host "package.json attributes: $($file.Attributes)"
           }
 
-      # 4- Verify tag = package.json version
+      # 5- Verify tag = package.json version
       - name: Verify version tag
         shell: bash
         run: |
@@ -69,14 +82,14 @@ jobs:
             exit 1
           fi
 
-      # 5- Install Node (with npm cache)
+      # 6- Install Node (with npm cache)
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
           cache: 'npm'
 
-      # 6- Verify database exists
+      # 7- Verify database exists
       - name: Verify database exists
         shell: powershell
         run: |
@@ -88,17 +101,17 @@ jobs:
             exit 1
           }
 
-      # 7- Restore Node deps
+      # 8- Restore Node deps
       - name: Install Node dependencies
         run: npm ci
 
-      # 8- Build complete application with resources (matches local build process)
+      # 9- Build complete application with resources (matches local build process)
       - name: Build complete application with resources
         env:
           DEBUG: electron-forge:*
         run: npm run build:complete
 
-      # 9- Verify packaged output
+      # 10- Verify packaged output
       - name: Verify packaged output
         shell: powershell
         run: |
@@ -131,12 +144,12 @@ jobs:
             exit 1
           }
 
-      # 10- Create distributables (installers)
+      # 11- Create distributables (installers)
       - name: Create distributables
         env:
           DEBUG: electron-forge:*
         run: npm run make
 
-      # 11- Publish → creates/updates GitHub Release & uploads artifacts
+      # 12- Publish → creates/updates GitHub Release & uploads artifacts
       - name: Publish Electron app to GitHub Release
         run: npm run publish
