@@ -24,24 +24,6 @@ module.exports = async (forgeConfig, buildPath) => {
     console.warn('⚠️  dist folder not found! Run npm run build first.');
   }
   
-  // Copy scripts folder
-  const scriptsSrc = path.join(__dirname, '..', 'scripts');
-  const scriptsDest = path.join(resourcesDir, 'scripts');
-  if (fs.existsSync(scriptsSrc)) {
-    console.log('📁 Copying scripts folder...');
-    copyFolderRecursiveSync(scriptsSrc, scriptsDest);
-    console.log('✅ scripts folder copied');
-  }
-  
-  // Copy Python folder
-  const pythonSrc = path.join(__dirname, '..', 'python-3.8.9-embed-amd64');
-  const pythonDest = path.join(resourcesDir, 'python-3.8.9-embed-amd64');
-  if (fs.existsSync(pythonSrc)) {
-    console.log('📁 Copying Python folder...');
-    copyFolderRecursiveSync(pythonSrc, pythonDest);
-    console.log('✅ Python folder copied');
-  }
-  
   console.log('✅ All resources copied successfully!');
 };
 

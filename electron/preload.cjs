@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   debugCardLookup: (name, setCode) => ipcRenderer.invoke('debug-card-lookup', name, setCode),
   bulkDataStats: () => ipcRenderer.invoke('bulk-data-stats'),
   bulkDataInitialized: () => ipcRenderer.invoke('bulk-data-initialized'),
+  bulkDataForceImportRelatedLinks: () => ipcRenderer.invoke('bulk-data-force-import-related-links'),
   
   // Collection management
   collectionImportCSV: (filePath, collectionName) => ipcRenderer.invoke('collection-import-csv', filePath, collectionName),
@@ -27,12 +28,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   collectionImportAllTxt: (format = 'simple') => ipcRenderer.invoke('collection-import-all-txt', format),
   collectionGetAll: () => ipcRenderer.invoke('collection-get-all'),
   collectionGet: (collectionName, options) => ipcRenderer.invoke('collection-get', collectionName, options),
+  collectionGetSimple: (options) => ipcRenderer.invoke('collection-get-simple', options),
   collectionGetStats: (collectionName) => ipcRenderer.invoke('collection-get-stats', collectionName),
   collectionDelete: (collectionName) => ipcRenderer.invoke('collection-delete', collectionName),
   collectionAddCard: (collectionName, cardData) => ipcRenderer.invoke('collection-add-card', collectionName, cardData),
   collectionUpdateCardQuantity: (collectionName, cardKey, newQty) => ipcRenderer.invoke('collection-update-card-quantity', collectionName, cardKey, newQty),
   collectionDeleteCard: (collectionName, cardKey) => ipcRenderer.invoke('collection-delete-card', collectionName, cardKey),
   collectionGetCardQuantity: (cardName, options) => ipcRenderer.invoke('collection-get-card-quantity', cardName, options),
+  collectionMarkCard: (cardId, collected) => ipcRenderer.invoke('collection-mark-card', cardId, collected),
   
   // Deck Management
   deckSave: (filename, deckData) => ipcRenderer.invoke('deck-save', filename, deckData),

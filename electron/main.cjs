@@ -7,7 +7,12 @@ const fsSync = require('fs');
 const { spawnSync } = require('child_process');
 const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
-const { PythonShell } = require('python-shell');
+// const { PythonShell } = require('python-shell'); // COMMENTED OUT: No longer using Python builder
+
+// Configure app paths before ready event to avoid cache permission issues
+const userDataPath = path.join(require('os').homedir(), 'AppData', 'Local', 'DesktopMTG');
+app.setPath('userData', userDataPath);
+app.setPath('crashDumps', path.join(userDataPath, 'crashDumps'));
 
 // Disable hardware acceleration before the app is ready.
 app.disableHardwareAcceleration();
@@ -72,6 +77,13 @@ ipcMain.handle('bulk-data-find-card', (event, cardName) => {
 });
 
 ipcMain.handle('bulk-data-find-card-by-details', (event, name, setCode, collectorNumber) => {
+  // Debug logging to trace calls with undefined names
+  if (!name || name === 'undefined') {
+    console.log('🐛 DEBUG: bulk-data-find-card-by-details called with undefined name');
+    console.log('   setCode:', setCode);
+    console.log('   collectorNumber:', collectorNumber);
+    console.trace('Call stack trace');
+  }
   return bulkDataService.findCardByDetails(name, setCode, collectorNumber);
 });
 
@@ -85,6 +97,10 @@ ipcMain.handle('bulk-data-stats', () => {
 
 ipcMain.handle('bulk-data-initialized', () => {
   return bulkDataService.initialized;
+});
+
+ipcMain.handle('bulk-data-force-import-related-links', async () => {
+  return bulkDataService.forceImportRelatedLinks();
 });
 
 // Collection Management
@@ -126,16 +142,37 @@ ipcMain.handle('collection-import-all-txt', async (event, format = 'simple') => 
   }
 });
 
+// Collection APIs - using main database collected field
 ipcMain.handle('collection-get-all', () => {
-  return collectionImporter.getCollections();
+  // Return a single "My Collection" collection for the new system
+  return [{ collection_name: 'My Collection', card_count: 0, created_at: new Date().toISOString() }];
 });
 
-ipcMain.handle('collection-get', (event, collectionName, options) => {
-  return collectionImporter.getCollection(collectionName, options);
+ipcMain.handle('collection-get', async (event, collectionName, options) => {
+  // Get collected cards from main database
+  return await bulkDataService.getCollectedCards(options);
 });
 
-ipcMain.handle('collection-get-stats', (event, collectionName) => {
-  return collectionImporter.getCollectionStats(collectionName);
+// NEW: Simple direct method to get collected cards without any complex logic
+ipcMain.handle('collection-get-simple', async (event, options = {}) => {
+  try {
+    console.log('🎯 Using getCollectedCards helper');
+    const cards = await bulkDataService.getCollectedCards(options);
+    console.log(`📚 Found ${cards.length} collected cards from helper`);
+    return cards;
+  } catch (error) {
+    console.error('Error in simple collection get:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('collection-get-stats', async (event, collectionName) => {
+  // Get collection stats from main database
+  return await bulkDataService.getCollectionStats();
+});
+
+ipcMain.handle('collection-get-ruling', async (event, cardId) => {
+  return await bulkDataService.getCardRuling(cardId);
 });
 
 ipcMain.handle('collection-delete', (event, collectionName) => {
@@ -154,8 +191,18 @@ ipcMain.handle('collection-delete-card', async (event, collectionName, cardKey) 
   return collectionImporter.deleteCard(collectionName, cardKey);
 });
 
+ipcMain.handle('collection-sync', async () => {
+  return await collectionImporter.syncCollectionToMainDatabase();
+});
+
 ipcMain.handle('collection-get-card-quantity', async (event, cardName, options) => {
-  return collectionImporter.getCardTotalQuantity(cardName, options);
+  // Return the total quantity of this card across all user collections (plus per-collection breakdown)
+  return await collectionImporter.getCardTotalQuantity(cardName, options);
+});
+
+// New API to mark cards as collected/uncollected
+ipcMain.handle('collection-mark-card', async (event, cardId, collected = true) => {
+  return await bulkDataService.markCardCollected(cardId, collected);
 });
 
 // Deck Management
@@ -389,8 +436,6 @@ async function autoImportTxtCollections(format = 'simple') {
 
 // Semantic Search and Card Lookup
 ipcMain.handle('search-cards-semantic', async (event, query, options) => {
-  // Lazily initialize the semantic search service on the first call
-  await bulkDataService.ensureSemanticSearchInitialized();
   return await bulkDataService.searchCardsSemantic(query, options);
 });
 
@@ -425,6 +470,8 @@ ipcMain.handle('show-open-dialog', async (event, options) => {
 });
 
 // Helper to ensure Python-built database is present before initializing bulk data service
+// COMMENTED OUT: We already have the database file in Database/database.sqlite
+/*
 const ensurePythonDatabase = () => {
   const localBroadcast = (p) => {
     try {
@@ -512,6 +559,7 @@ const ensurePythonDatabase = () => {
     }
   });
 };
+*/
 
 const createWindow = () => {
   console.log('Creating main window...');
@@ -598,15 +646,16 @@ app.on('ready', async () => {
     // ---------------------------------------------------------------
     // STEP 1: Make sure the SQLite database is built via Python first
     // ---------------------------------------------------------------
-    broadcast({ task: 'python-db', state: 'start' });
-    try {
-      await ensurePythonDatabase();
-      broadcast({ task: 'python-db', state: 'done' });
-    } catch (err) {
-      broadcast({ task: 'python-db', state: 'fail' });
-      // Re-throw to be caught by the outer block
-      throw err;
-    }
+    // COMMENTED OUT: We already have the database file in Database/database.sqlite
+    // broadcast({ task: 'python-db', state: 'start' });
+    // try {
+    //   await ensurePythonDatabase();
+    //   broadcast({ task: 'python-db', state: 'done' });
+    // } catch (err) {
+    //   broadcast({ task: 'python-db', state: 'fail' });
+    //   // Re-throw to be caught by the outer block
+    //   throw err;
+    // }
 
     // Initialize bulk data service
     if (process.env.SKIP_BULK_DATA !== 'true') {
@@ -617,15 +666,29 @@ app.on('ready', async () => {
       console.log('Skipping bulk data initialization (SKIP_BULK_DATA=true)');
     }
 
+    // Initialize semantic search service during startup
+    console.log('Initializing semantic search service...');
+    try {
+      await bulkDataService.ensureSemanticSearchInitialized();
+      console.log('Semantic search service initialized successfully.');
+    } catch (error) {
+      console.error('Semantic search initialization failed:', error);
+      // Continue without semantic search - don't fail the entire app
+    }
+
     // Initialize collection importer
     console.log('Initializing collection importer...');
     await collectionImporter.initialize();
+    
+    // Connect bulk data service to collection importer for card lookups
+    collectionImporter.bulkDataService = bulkDataService;
+    
     console.log('Collection importer initialized successfully.');
 
-    // Auto-import text file collections
-    console.log('Starting auto-import of .txt collections...');
-    await autoImportTxtCollections();
-    console.log('Auto-import finished.');
+    // Auto-import text file collections (DISABLED to prevent undefined name errors)
+    // console.log('Starting auto-import of .txt collections...');
+    // await autoImportTxtCollections();
+    // console.log('Auto-import finished.');
 
     console.log('All initializations complete.');
 

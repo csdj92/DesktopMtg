@@ -54,12 +54,12 @@ const DeckStatistics = ({ deck, format }) => {
       if (!card) return;
 
       // Mana value / cmc
-      const cmc = card.cmc ?? card.mana_value ?? 0;
+      const cmc = card.manaValue ?? card.cmc ?? card.mana_value ?? 0;
       const idx = cmc >= 7 ? 7 : Math.max(0, Math.min(7, Math.round(cmc)));
       manaCurveCounts[idx] += 1;
 
       // Type
-      const tLine = card.type_line || '';
+      const tLine = card.type || card.type_line || '';
       let matchedType = null;
       for (const t of typeCategories) {
         if (tLine.includes(t)) {

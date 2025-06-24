@@ -8,9 +8,13 @@ const SearchControls = ({ onSearch, bulkDataStats }) => {
     type: '',
     colors: [],
     manaCost: '',
+    manaValue: '',
     power: '',
     toughness: '',
     rarity: '',
+    subTypes: '',
+    superTypes: '',
+    types: '',
   });
   const [collapsed, setCollapsed] = useState(false);
 
@@ -89,6 +93,33 @@ const SearchControls = ({ onSearch, bulkDataStats }) => {
           />
         </div>
         <div className="search-field">
+          <input
+            type="text"
+            name="types"
+            value={searchParams.types}
+            onChange={handleChange}
+            placeholder="Types (e.g., Creature, Instant)..."
+          />
+        </div>
+        <div className="search-field">
+          <input
+            type="text"
+            name="subTypes"
+            value={searchParams.subTypes}
+            onChange={handleChange}
+            placeholder="Subtypes (e.g., Human, Wizard)..."
+          />
+        </div>
+        <div className="search-field">
+          <input
+            type="text"
+            name="superTypes"
+            value={searchParams.superTypes}
+            onChange={handleChange}
+            placeholder="Supertypes (e.g., Legendary, Basic)..."
+          />
+        </div>
+        <div className="search-field">
             <div className="color-selector">
                 {['W', 'U', 'B', 'R', 'G'].map((color) => (
                     <button
@@ -108,6 +139,16 @@ const SearchControls = ({ onSearch, bulkDataStats }) => {
             value={searchParams.manaCost}
             onChange={handleChange}
             placeholder="Mana cost (e.g., {2}{W}{U})..."
+          />
+        </div>
+        <div className="search-field">
+          <input
+            type="number"
+            name="manaValue"
+            value={searchParams.manaValue}
+            onChange={handleChange}
+            placeholder="Mana value (CMC)..."
+            min="0"
           />
         </div>
         <div className="search-field-group">

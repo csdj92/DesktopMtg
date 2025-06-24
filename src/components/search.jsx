@@ -21,7 +21,7 @@ class SearchFunctions {
       return;
     }
 
-    const { name, text, type, colors, manaCost, power, toughness, rarity } = searchParams;
+    const { name, text, type, colors, manaCost, manaValue, power, toughness, rarity, types, subTypes, superTypes } = searchParams;
 
     const filtered = cards.filter(cardEntry => {
       // Support two shapes: direct card or { card, quantity }
@@ -42,7 +42,8 @@ class SearchFunctions {
       if (text) {
         const searchTextLower = text.toLowerCase();
         let hasTextMatch = false;
-        if (scryfallData.oracle_text && scryfallData.oracle_text.toLowerCase().includes(searchTextLower)) {
+        const oracleText = scryfallData.text || scryfallData.oracle_text || '';
+        if (oracleText && oracleText.toLowerCase().includes(searchTextLower)) {
           hasTextMatch = true;
         }
         if (!hasTextMatch && scryfallData.card_faces) {
@@ -59,7 +60,8 @@ class SearchFunctions {
       if (type) {
         const typeLower = type.toLowerCase();
         let hasTypeMatch = false;
-        if (scryfallData.type_line && scryfallData.type_line.toLowerCase().includes(typeLower)) {
+        const typeLine = scryfallData.type || scryfallData.type_line || '';
+        if (typeLine && typeLine.toLowerCase().includes(typeLower)) {
           hasTypeMatch = true;
         }
         if (!hasTypeMatch && scryfallData.card_faces) {
@@ -82,7 +84,7 @@ class SearchFunctions {
       // Mana cost (exact match, but flexible about brackets)
       if (manaCost) {
         const formattedManaCost = manaCost.replace(/\{/g, '').replace(/\}/g, '');
-        const cardManaCost = (scryfallData.mana_cost || '').replace(/\{/g, '').replace(/\}/g, '');
+        const cardManaCost = (scryfallData.manaCost || scryfallData.mana_cost || '').replace(/\{/g, '').replace(/\}/g, '');
         if (cardManaCost !== formattedManaCost) {
           return false;
         }
@@ -98,6 +100,38 @@ class SearchFunctions {
         return false;
       }
       
+      // Mana value (converted mana cost)
+      if (manaValue) {
+        const cardManaValue = scryfallData.cmc || scryfallData.convertedManaCost || scryfallData.mana_value;
+        if (!cardManaValue || parseInt(cardManaValue) !== parseInt(manaValue)) {
+          return false;
+        }
+      }
+
+      // Types search (case-insensitive)
+      if (types) {
+        const cardTypes = scryfallData.types || scryfallData.type_line || '';
+        if (!cardTypes.toLowerCase().includes(types.toLowerCase())) {
+          return false;
+        }
+      }
+
+      // Subtypes search (case-insensitive)
+      if (subTypes) {
+        const cardSubtypes = scryfallData.subtypes || scryfallData.type_line || '';
+        if (!cardSubtypes.toLowerCase().includes(subTypes.toLowerCase())) {
+          return false;
+        }
+      }
+
+      // Supertypes search (case-insensitive)
+      if (superTypes) {
+        const cardSupertypes = scryfallData.supertypes || scryfallData.type_line || '';
+        if (!cardSupertypes.toLowerCase().includes(superTypes.toLowerCase())) {
+          return false;
+        }
+      }
+
       // Rarity (exact match, case-insensitive)
       if (rarity && scryfallData.rarity.toLowerCase() !== rarity.toLowerCase()) {
         return false;

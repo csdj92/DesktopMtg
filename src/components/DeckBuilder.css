@@ -184,6 +184,34 @@
     cursor: pointer;
 }
 
+/* Add to Deck button styles */
+.card-grid-item button,
+.card-grid-item-deck button {
+    background-color: var(--accent-primary);
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: background-color 0.2s;
+}
+.card-grid-item button:hover,
+.card-grid-item-deck button:hover {
+    background-color: #0056b3;
+}
+.card-grid-item button:disabled,
+.card-grid-item-deck button:disabled {
+    background-color: #444;
+    color: #888;
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+.card-grid-item button:disabled:hover,
+.card-grid-item-deck button:disabled:hover {
+    background-color: #444;
+}
+
 .collection-view h3 {
     padding: 16px;
     margin: 0;
@@ -326,6 +354,15 @@
 }
 .deck-card-actions button:hover {
     background-color: #444;
+}
+.deck-card-actions button:disabled {
+    background-color: #333;
+    color: #666;
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+.deck-card-actions button:disabled:hover {
+    background-color: #333;
 }
 .deck-card-actions .remove-button {
     background-color: #5c1c1c;

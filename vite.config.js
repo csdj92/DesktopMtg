@@ -41,6 +41,12 @@ export default defineConfig({
   esbuild: {
     jsx: 'automatic'
   },
+  server: {
+    watch: {
+      // Ignore transient SQLite files that change during imports (prevents dev-page reload)
+      ignored: ['**/Database/**']
+    }
+  },
   // Add specific settings for production build
   define: {
     'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'production')

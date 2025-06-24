@@ -140,6 +140,48 @@ const DeckBuilder = () => {
   // Hold results returned by advanced search controls
   const [collectionSearchResults, setCollectionSearchResults] = useState(null); // null means no search yet
 
+  // --- Auto-save draft deck to localStorage ---
+  // 1) Restore any previous draft on first mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('deckBuilderAutosave');
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      if (data && data.deck) {
+        // Only restore if the current builder is empty to avoid clobbering an already loaded deck
+        if (deck.mainboard.length === 0 && deck.commanders.length === 0) {
+          setDeck(data.deck);
+          if (data.format) setFormat(data.format);
+          if (data.currentDeckName) setCurrentDeckName(data.currentDeckName);
+          console.log('💾 Restored autosaved deck draft.');
+        }
+      }
+    } catch (err) {
+      console.error('Failed to restore autosaved deck', err);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 2) Persist changes (debounced) whenever the deck, format, or name changes
+  useEffect(() => {
+    // Debounce to avoid excessive writes while user is actively editing
+    const handle = setTimeout(() => {
+      try {
+        const payload = {
+          deck,
+          format,
+          currentDeckName,
+          timestamp: Date.now(),
+        };
+        localStorage.setItem('deckBuilderAutosave', JSON.stringify(payload));
+      } catch (err) {
+        console.error('Failed to autosave deck', err);
+      }
+    }, 750); // ¾ second debounce
+
+    return () => clearTimeout(handle);
+  }, [deck, format, currentDeckName]);
+
   // Helper for filtering collection via SearchControls
   const searchHelperRef = useRef(null);
 
@@ -150,8 +192,8 @@ const DeckBuilder = () => {
 
   const isCardCommander = (card) => {
     if (!card) return false;
-    const typeLine = (card.type_line || '').toLowerCase();
-    const oracleText = (card.oracle_text || '').toLowerCase();
+    const typeLine = (card.type || card.type_line || '').toLowerCase();
+    const oracleText = (card.text || card.oracle_text || '').toLowerCase();
 
     // Standard rule: legendary creatures
     if (typeLine.includes('legendary') && typeLine.includes('creature')) {
@@ -190,6 +232,12 @@ const DeckBuilder = () => {
     return card.color_identity.every(color => commanderId.has(color));
   };
 
+  const isBasicLand = (card) => {
+    if (!card) return false;
+    const typeLine = (card.type || card.type_line || '').toLowerCase();
+    return typeLine.includes('basic') && typeLine.includes('land');
+  };
+
   const setCommander = (card) => {
     if (format === 'commander' && isCardCommander(card)) {
       setDeck(prev => {
@@ -221,7 +269,7 @@ const DeckBuilder = () => {
       for (const coll of collections) {
         const records = await window.electronAPI.collectionGet(coll.collection_name, { limit: 10000, offset: 0 });
         records.forEach(rec => {
-          const nameKey = (rec.card_name || '').toLowerCase();
+          const nameKey = (rec.name || '').toLowerCase();
           if (!nameKey) return;
           const existing = countMap.get(nameKey) || 0;
           countMap.set(nameKey, existing + (rec.quantity || 1));
@@ -258,16 +306,19 @@ const DeckBuilder = () => {
         const collections = await window.electronAPI.collectionGetAll();
         const tempMap = new Map();
         for (const coll of collections) {
-          const records = await window.electronAPI.collectionGet(coll.collection_name, { limit: 10000, offset: 0 });
-          for (const rec of records) {
-            let cardData = await window.electronAPI.bulkDataFindCardByDetails(rec.card_name, rec.set_code, rec.collector_number);
-            if (!cardData) continue;
-            const key = cardData.id;
+          const collectedCards = await window.electronAPI.collectionGet(coll.collection_name, { limit: 10000, offset: 0 });
+          for (const card of collectedCards) {
+            if (!card.name) {
+              console.warn('⚠️ DeckBuilder.loadOwned: card with undefined name', card);
+              continue;
+            }
+            // The card IS the Scryfall data already - no need to look it up again
+            const key = card.id || card.uuid;
             if (tempMap.has(key)) {
               const entry = tempMap.get(key);
-              entry.quantity += rec.quantity || 1;
+              entry.quantity += 1; // Each collected card counts as 1
             } else {
-              tempMap.set(key, { card: cardData, quantity: rec.quantity || 1 });
+              tempMap.set(key, { card: card, quantity: 1 });
             }
           }
         }
@@ -308,6 +359,11 @@ const DeckBuilder = () => {
     setDeck(prev => {
       const existingEntry = prev.mainboard.find(entry => entry.card.id === card.id);
       if (existingEntry) {
+        // Commander singleton rule: only basic lands can have multiple copies
+        if (format === 'commander' && !isBasicLand(card)) {
+          alert("In Commander format, you can only have one copy of each non-basic card.");
+          return prev; // Don't modify the deck
+        }
         // Increment quantity
         const newMainboard = prev.mainboard.map(entry =>
           entry.card.id === card.id
@@ -323,14 +379,25 @@ const DeckBuilder = () => {
   };
 
   const incrementQty = (cardId) => {
-    setDeck(prev => ({
-      ...prev,
-      mainboard: prev.mainboard.map(entry =>
-        entry.card.id === cardId
-          ? { ...entry, quantity: entry.quantity + 1 }
-          : entry
-      ),
-    }));
+    setDeck(prev => {
+      const cardEntry = prev.mainboard.find(entry => entry.card.id === cardId);
+      if (!cardEntry) return prev;
+
+      // Commander singleton rule: only basic lands can have multiple copies
+      if (format === 'commander' && !isBasicLand(cardEntry.card)) {
+        alert("In Commander format, you can only have one copy of each non-basic card.");
+        return prev;
+      }
+
+      return {
+        ...prev,
+        mainboard: prev.mainboard.map(entry =>
+          entry.card.id === cardId
+            ? { ...entry, quantity: entry.quantity + 1 }
+            : entry
+        ),
+      };
+    });
   };
 
   const decrementQty = (cardId) => {
@@ -378,8 +445,8 @@ const DeckBuilder = () => {
       const terms = collectionSearch.toLowerCase().split(/\s+/).filter(Boolean);
       list = list.filter(entry => {
         const name = (entry.card.name || '').toLowerCase();
-        const typeLine = (entry.card.type_line || '').toLowerCase();
-        const oracle = (entry.card.oracle_text || '').toLowerCase();
+        const typeLine = (entry.card.type || entry.card.type_line || '').toLowerCase();
+        const oracle = (entry.card.text || entry.card.oracle_text || '').toLowerCase();
         return terms.every(t => name.includes(t) || typeLine.includes(t) || oracle.includes(t));
       });
     }
@@ -395,8 +462,8 @@ const DeckBuilder = () => {
         break;
       case 'cmc':
         sorted.sort((a, b) => {
-          const aVal = a.card.cmc ?? a.card.mana_value ?? 0;
-          const bVal = b.card.cmc ?? b.card.mana_value ?? 0;
+          const aVal = a.card.manaValue ?? a.card.cmc ?? a.card.mana_value ?? 0;
+          const bVal = b.card.manaValue ?? b.card.cmc ?? b.card.mana_value ?? 0;
           if (aVal === bVal) return a.card.name.localeCompare(b.card.name);
           return aVal - bVal;
         });
@@ -436,6 +503,8 @@ const DeckBuilder = () => {
     if (result.success) {
       alert(`Deck "${result.filename}" saved.`);
       setCurrentDeckName(result.filename);
+      // Clear the draft since the deck is now persisted under a real filename
+      localStorage.removeItem('deckBuilderAutosave');
     } else {
       alert(`Error saving deck: ${result.error}`);
     }
@@ -476,6 +545,8 @@ const DeckBuilder = () => {
     setRecommendations([]);
     setDeckArchetype(null);
     setCurrentDeckName('');
+    // Clear any autosaved draft when starting fresh
+    localStorage.removeItem('deckBuilderAutosave');
     console.log("Cleared deck.");
   };
 
@@ -563,11 +634,23 @@ const DeckBuilder = () => {
     }
   }, [deck.mainboard, deck.commanders, format, recoLoading]);
 
-  // Ensure recommendations respect commander color identity before display
+  // Filter recommendations to only show cards from user's collection that match commander color identity
   const displayRecommendations = useMemo(() => {
-    if (format !== 'commander' || deck.commanders.length === 0) return recommendations;
-    return recommendations.filter(card => isCardInColorIdentity(card, commanderColorIdentity));
-  }, [recommendations, format, deck.commanders, commanderColorIdentity]);
+    if (!recommendations.length) return [];
+
+    // Create a map of owned card IDs for quick lookup
+    const ownedCardIds = new Set(ownedCards.map(entry => entry.card.id));
+
+    // Filter recommendations to only include cards we own
+    let filteredRecs = recommendations.filter(card => ownedCardIds.has(card.id));
+
+    // If we're in commander format and have a commander, also filter by color identity
+    if (format === 'commander' && deck.commanders.length > 0) {
+      filteredRecs = filteredRecs.filter(card => isCardInColorIdentity(card, commanderColorIdentity));
+    }
+
+    return filteredRecs;
+  }, [recommendations, ownedCards, format, deck.commanders, commanderColorIdentity]);
 
   return (
     <div className="deck-builder-container">
@@ -586,12 +669,23 @@ const DeckBuilder = () => {
             />
             <div className="search-results-grid">
               {searchLoading && <p>Searching...</p>}
-              {!searchLoading && filteredSearchResults.map(card => (
-                <div key={card.id} className="card-grid-item">
-                  <Card card={card} onCardClick={handleCardClick} />
-                  <button onClick={(e) => { e.stopPropagation(); addCardToDeck(card); }}>Add to Deck</button>
-                </div>
-              ))}
+              {!searchLoading && filteredSearchResults.map(card => {
+                const isInDeck = deck.mainboard.some(entry => entry.card.id === card.id);
+                const canAddMore = format !== 'commander' || isBasicLand(card) || !isInDeck;
+
+                return (
+                  <div key={card.id} className="card-grid-item">
+                    <Card card={card} onCardClick={handleCardClick} />
+                    <button
+                      onClick={(e) => { e.stopPropagation(); addCardToDeck(card); }}
+                      disabled={!canAddMore}
+                      title={!canAddMore ? 'Commander format allows only one copy of non-basic cards' : ''}
+                    >
+                      {isInDeck && format === 'commander' && !isBasicLand(card) ? 'In Deck' : 'Add to Deck'}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -608,12 +702,23 @@ const DeckBuilder = () => {
             </div>
             <div className="owned-cards-grid">
               {ownedLoading && <p>Loading collection...</p>}
-              {!ownedLoading && displayCollectionCards.map(entry => (
-                <div key={entry.card.id} className="card-grid-item">
-                  <Card card={entry.card} quantity={entry.quantity} onCardClick={handleCardClick} />
-                  <button onClick={(e) => { e.stopPropagation(); addCardToDeck(entry.card); }}>Add to Deck</button>
-                </div>
-              ))}
+              {!ownedLoading && displayCollectionCards.map(entry => {
+                const isInDeck = deck.mainboard.some(deckEntry => deckEntry.card.id === entry.card.id);
+                const canAddMore = format !== 'commander' || isBasicLand(entry.card) || !isInDeck;
+
+                return (
+                  <div key={entry.card.id} className="card-grid-item">
+                    <Card card={entry.card} quantity={entry.quantity} onCardClick={handleCardClick} />
+                    <button
+                      onClick={(e) => { e.stopPropagation(); addCardToDeck(entry.card); }}
+                      disabled={!canAddMore}
+                      title={!canAddMore ? 'Commander format allows only one copy of non-basic cards' : ''}
+                    >
+                      {isInDeck && format === 'commander' && !isBasicLand(entry.card) ? 'In Deck' : 'Add to Deck'}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -663,14 +768,14 @@ const DeckBuilder = () => {
                     return (
                       <>
                         <h4 className="details-name">{cmd.name}</h4>
-                        {cmd.mana_cost && (
-                          <p className="details-line"><strong>Mana Cost:</strong> {cmd.mana_cost}</p>
+                        {(cmd.manaCost || cmd.mana_cost) && (
+                          <p className="details-line"><strong>Mana Cost:</strong> {cmd.manaCost || cmd.mana_cost}</p>
                         )}
-                        {cmd.type_line && (
-                          <p className="details-line"><strong>Type:</strong> {cmd.type_line}</p>
+                        {(cmd.type || cmd.type_line) && (
+                          <p className="details-line"><strong>Type:</strong> {cmd.type.replace(/\?\?\?/g, '—') || cmd.type_line.replace(/\?\?\?/g, '—')}</p>
                         )}
-                        {cmd.oracle_text && (
-                          <p className="details-line whitespace-pre-line"><strong>Oracle Text:</strong> {cmd.oracle_text}</p>
+                        {(cmd.text || cmd.oracle_text) && (
+                          <p className="details-line whitespace-pre-line"><strong>Oracle Text:</strong> {cmd.text || cmd.oracle_text}</p>
                         )}
                         {cmd.power && cmd.toughness && (
                           <p className="details-line"><strong>P/T:</strong> {cmd.power}/{cmd.toughness}</p>
@@ -694,7 +799,13 @@ const DeckBuilder = () => {
               <div key={entry.card.id} className="card-grid-item-deck">
                 <Card card={entry.card} quantity={entry.quantity} onCardClick={handleCardClick} />
                 <div className="deck-card-actions">
-                  <button onClick={() => incrementQty(entry.card.id)}>+</button>
+                  <button
+                    onClick={() => incrementQty(entry.card.id)}
+                    disabled={format === 'commander' && !isBasicLand(entry.card)}
+                    title={format === 'commander' && !isBasicLand(entry.card) ? 'Commander format allows only one copy of non-basic cards' : ''}
+                  >
+                    +
+                  </button>
                   <button onClick={() => decrementQty(entry.card.id)}>-</button>
                   <button className="remove-button" onClick={() => removeCardFromDeck(entry.card.id)}>Remove</button>
                   {format === 'commander' && isCardCommander(entry.card) && (
@@ -736,12 +847,23 @@ const DeckBuilder = () => {
             {deckArchetype && <h4>Suggestions for: {deckArchetype}</h4>}
             <div className="search-results-grid">
               {recoLoading && <p>Analyzing deck...</p>}
-              {!recoLoading && displayRecommendations.map(card => (
-                <div key={card.id} className="card-grid-item">
-                  <Card card={card} onCardClick={handleCardClick} />
-                  <button onClick={(e) => { e.stopPropagation(); addCardToDeck(card); }}>Add to Deck</button>
-                </div>
-              ))}
+              {!recoLoading && displayRecommendations.map(card => {
+                const isInDeck = deck.mainboard.some(entry => entry.card.id === card.id);
+                const canAddMore = format !== 'commander' || isBasicLand(card) || !isInDeck;
+
+                return (
+                  <div key={card.id} className="card-grid-item">
+                    <Card card={card} onCardClick={handleCardClick} />
+                    <button
+                      onClick={(e) => { e.stopPropagation(); addCardToDeck(card); }}
+                      disabled={!canAddMore}
+                      title={!canAddMore ? 'Commander format allows only one copy of non-basic cards' : ''}
+                    >
+                      {isInDeck && format === 'commander' && !isBasicLand(card) ? 'In Deck' : 'Add to Deck'}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}

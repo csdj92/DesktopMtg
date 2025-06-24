@@ -5,17 +5,19 @@ const https = require('https');
 const { app } = require('electron');
 const sqlite3 = require('sqlite3').verbose();
 const { open } = require('sqlite');
-const parser = require('stream-json');
-const streamValues = require('stream-json/streamers/StreamValues');
+const { parser } = require('stream-json');
+const { streamValues } = require('stream-json/streamers/StreamValues');
 const { chain } = require('stream-chain');
 const { Worker } = require('worker_threads');
+const { batch } = require('stream-json/utils/Batch');
+const { resolveDatabasePath } = require('./dbPathResolver.cjs');
 
 const semanticSearchService = require('./semanticSearch.cjs');
 
 const SCRYFALL_BULK_API = 'https://api.scryfall.com/bulk-data';
 const BULK_DATA_DIR = path.join(app.getPath('userData'), 'scryfall-data');
 const CARDS_FILE = path.join(BULK_DATA_DIR, 'cards.json');
-const DATABASE_FILE = path.join(BULK_DATA_DIR, 'cards.db');
+const DATABASE_FILE = resolveDatabasePath();
 const METADATA_FILE = path.join(BULK_DATA_DIR, 'metadata.json');
 
 // Check every 7 days for updates
@@ -27,6 +29,7 @@ class BulkDataService {
     this.metadata = null;
     this.initialized = false;
     this.cardCount = 0;
+    this._invalidNameDebugCount = 0;
   }
 
   _broadcast(channel, payload) {
@@ -42,44 +45,25 @@ class BulkDataService {
 
   async initialize() {
     try {
-      console.log('Initializing bulk data service with database...');
+      console.log('Initializing bulk data service with static database...');
       
       // Ensure data directory exists
       await fs.mkdir(BULK_DATA_DIR, { recursive: true });
       
-      // Initialize database
+      // Initialize database connection
       await this.initializeDatabase();
       
-      // Ensure collected column exists
+      // Ensure the 'collected' column exists for tracking user cards
       await this.addCollumnCollected();
-
-      // Load metadata
-      await this.loadMetadata();
-
-      console.log('Added collected column to database');
-      await this.transferCollectedCardsToDatabase();
-      console.log(`Transferred collected cards to database${this.getCollectedCardCount()}`);
       
-      // The semantic search service will now be initialized on-demand.
-      
-      // Check if we need to download or update
-      const needsUpdate = await this.shouldUpdate();
-      if (needsUpdate) {
-        console.log('Downloading bulk data...');
-        await this.downloadBulkData();
-        await this.importCardsToDatabase();
-        await this.loadMetadata();
-      }
-      
-      // Get card count from database
+      // Get card count from the existing database
       this.cardCount = await this.getCardCount();
       
       this.initialized = true;
-      console.log(`Bulk data initialized with ${this.cardCount} cards in database`);
+      console.log(`Bulk data initialized with ${this.cardCount} cards from existing database.`);
       
     } catch (error) {
-      console.error('Failed to initialize bulk data:', error);
-      // Continue without bulk data - app can still work with file reading
+      console.error('Failed to initialize bulk data service:', error);
     }
   }
 
@@ -89,37 +73,96 @@ class BulkDataService {
       driver: sqlite3.Database
     });
 
-    // Create cards table if it doesn't exist
+    // Set PRAGMAs for performance and to prevent locking issues.
+    // WAL mode allows for one writer and multiple readers, which is perfect for Electron.
     await this.db.exec(`
-      CREATE TABLE IF NOT EXISTS cards (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        mana_cost TEXT,
-        cmc REAL,
-        type_line TEXT,
-        oracle_text TEXT,
-        power TEXT,
-        toughness TEXT,
-        colors TEXT,
-        rarity TEXT,
-        set_code TEXT,
-        set_name TEXT,
-        collector_number TEXT,
-        released_at TEXT,
-        image_uris TEXT,
-        card_faces TEXT,
-        data TEXT
-      );
-      
-      CREATE INDEX IF NOT EXISTS idx_name ON cards(name);
-      CREATE INDEX IF NOT EXISTS idx_name_lower ON cards(lower(name));
-      CREATE INDEX IF NOT EXISTS idx_set ON cards(set_code);
-      CREATE INDEX IF NOT EXISTS idx_type ON cards(type_line);
-      CREATE INDEX IF NOT EXISTS idx_rarity ON cards(rarity);
-      CREATE INDEX IF NOT EXISTS idx_colors ON cards(colors);
+      PRAGMA journal_mode = WAL;
+      PRAGMA busy_timeout = 5000;
+      PRAGMA synchronous = NORMAL;
     `);
 
-    console.log('Database initialized successfully');
+    // Check if the cards table exists (it should already exist with the new database)
+    const tables = await this.db.all("SELECT name FROM sqlite_master WHERE type='table' AND name='cards'");
+    if (tables.length > 0) {
+      console.log('Database initialized successfully - using existing cards table');
+      
+      // Ensure optimized indexes exist for fast card lookups
+      await this.ensureOptimizedIndexes();
+    } else {
+      // Fallback: Create cards table if it doesn't exist (for backward compatibility)
+      await this.db.exec(`
+        CREATE TABLE IF NOT EXISTS cards (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          mana_cost TEXT,
+          cmc REAL,
+          type_line TEXT,
+          oracle_text TEXT,
+          power TEXT,
+          toughness TEXT,
+          colors TEXT,
+          rarity TEXT,
+          set_code TEXT,
+          set_name TEXT,
+          collector_number TEXT,
+          released_at TEXT,
+          image_uris TEXT,
+          card_faces TEXT,
+          data TEXT
+        );
+        
+        CREATE INDEX IF NOT EXISTS idx_name ON cards(name);
+        CREATE INDEX IF NOT EXISTS idx_name_lower ON cards(lower(name));
+        CREATE INDEX IF NOT EXISTS idx_set ON cards(set_code);
+        CREATE INDEX IF NOT EXISTS idx_type ON cards(type_line);
+        CREATE INDEX IF NOT EXISTS idx_rarity ON cards(rarity);
+        CREATE INDEX IF NOT EXISTS idx_colors ON cards(colors);
+      `);
+      console.log('Database initialized successfully - created new cards table');
+    }
+
+    // Ensure cardRelatedLinks table exists (population is handled by _ensureRelatedLinksData)
+    await this.db.exec(`
+      CREATE TABLE IF NOT EXISTS cardRelatedLinks (
+        uuid TEXT PRIMARY KEY,
+        gatherer TEXT,
+        edhrec TEXT
+      )
+    `);
+
+    // Ensure cardRulings table exists
+    await this.db.exec(`
+      CREATE TABLE IF NOT EXISTS cardRulings (
+        uuid TEXT NOT NULL,
+        date TEXT,
+        text TEXT,
+        PRIMARY KEY (uuid, text)
+      )
+    `);
+    await this.db.exec('CREATE INDEX IF NOT EXISTS idx_cardRulings_uuid ON cardRulings(uuid)');
+  }
+
+  async ensureOptimizedIndexes() {
+    // Create optimized indexes for fast card lookups
+    const indexes = [
+      'CREATE INDEX IF NOT EXISTS idx_cards_name ON cards(name)',
+      'CREATE INDEX IF NOT EXISTS idx_cards_name_lower ON cards(lower(name))',
+      'CREATE INDEX IF NOT EXISTS idx_cards_setcode ON cards(setCode)',
+      'CREATE INDEX IF NOT EXISTS idx_cards_setcode_lower ON cards(lower(setCode))',
+      'CREATE INDEX IF NOT EXISTS idx_cards_number ON cards(number)',
+      'CREATE INDEX IF NOT EXISTS idx_cards_language ON cards(language)',
+      'CREATE INDEX IF NOT EXISTS idx_cards_name_set_num ON cards(name, setCode, number)',
+      'CREATE INDEX IF NOT EXISTS idx_cards_name_set_lower ON cards(lower(name), lower(setCode))',
+    ];
+
+    for (const indexSql of indexes) {
+      try {
+        await this.db.exec(indexSql);
+      } catch (error) {
+        console.warn(`Warning: Could not create index: ${error.message}`);
+      }
+    }
+    console.log('Optimized indexes ensured for fast card lookups');
   }
 
   async markCollected(cardId) {
@@ -145,18 +188,111 @@ class BulkDataService {
     }
   }
 
-  async getCollectedCards() {
-    const result = await this.db.all(`
-      SELECT * FROM cards WHERE collected >= 1
-    `);
-    return result;
+  async getCollectedCards(options = {}) {
+    const { search = '', limit = 1000, offset = 0 } = options;
+    
+    let query = `
+      SELECT c.*, 
+             ci.scryfallId,
+             cl.alchemy, cl.brawl, cl.commander, cl.duel, cl.explorer, cl.future, cl.gladiator,
+             cl.historic, cl.legacy, cl.modern, cl.oathbreaker, cl.oldschool, cl.pauper,
+             cl.paupercommander, cl.penny, cl.pioneer, cl.predh, cl.premodern, cl.standard,
+             cl.standardbrawl, cl.timeless, cl.vintage,
+             s.name as setName,
+             cpu.cardKingdom, cpu.cardmarket, cpu.tcgplayer,
+             crl.gatherer, crl.edhrec
+      FROM cards c
+      LEFT JOIN cardIdentifiers ci ON c.uuid = ci.uuid
+      LEFT JOIN cardLegalities cl ON c.uuid = cl.uuid
+      LEFT JOIN sets s ON c.setCode = s.code
+      LEFT JOIN cardPurchaseUrls cpu ON c.uuid = cpu.uuid
+      LEFT JOIN cardRelatedLinks crl ON c.uuid = crl.uuid
+      WHERE c.collected >= 1
+    `;
+    const params = [];
+    
+    if (search) {
+      query += ' AND (lower(c.name) LIKE lower(?) OR lower(c.setCode) LIKE lower(?))';
+      params.push(`%${search}%`, `%${search}%`);
+    }
+    
+    query += ' ORDER BY c.name ASC LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+    
+    const result = await this.db.all(query, params);
+    return Promise.all(result.map(row => this.convertDbRowToCard(row)));
+  }
+
+  async markCardCollected(cardId, collected = true) {
+    if (!this.db || !this.initialized) {
+      return false;
+    }
+    
+    try {
+      const result = await this.db.run(
+        'UPDATE cards SET collected = ? WHERE uuid = ?',
+        [collected ? 1 : 0, cardId]
+      );
+      console.log(`Updated ${result.changes} card(s) with UUID ${cardId} to collected=${collected}`);
+      return result.changes > 0;
+    } catch (error) {
+      console.error('Error marking card as collected:', error);
+      return false;
+    }
+  }
+
+  async getCardRuling(cardId) {
+    if (!this.db) return [];
+    const results = await this.db.all('SELECT date, text FROM cardRulings WHERE uuid = ? ORDER BY date', [cardId]);
+    return results || [];
+  }
+
+  async getCollectionStats() {
+    if (!this.db || !this.initialized) {
+      return null;
+    }
+    
+    try {
+      const totalCards = await this.db.get('SELECT COUNT(*) as count FROM cards');
+      const collectedCards = await this.db.get('SELECT COUNT(*) as count FROM cards WHERE collected >= 1');
+      
+      // Get collected by rarity
+      const rarityStats = await this.db.all(`
+        SELECT rarity, COUNT(*) as count 
+        FROM cards 
+        WHERE collected >= 1 
+        GROUP BY rarity
+      `);
+      
+      // Get collected by set (top 10)
+      const setStats = await this.db.all(`
+        SELECT setCode, COUNT(*) as count 
+        FROM cards 
+        WHERE collected >= 1 
+        GROUP BY setCode 
+        ORDER BY count DESC 
+        LIMIT 10
+      `);
+      
+      return {
+        total_cards: totalCards.count,
+        collected_cards: collectedCards.count,
+        collection_percentage: ((collectedCards.count / totalCards.count) * 100).toFixed(2),
+        by_rarity: rarityStats,
+        by_set: setStats
+      };
+    } catch (error) {
+      console.error('Error getting collection stats:', error);
+      return null;
+    }
   }
 
   async transferCollectedCardsToDatabase() {
     const collectedCards = await this.getCollectedCards();
     for (const card of collectedCards) {
-      await this.db.exec(`
+      await this.db.run(`
         INSERT INTO cards (id, name, mana_cost, cmc, type_line, oracle_text, power, toughness, colors, rarity, set_code, set_name, collector_number, released_at, image_uris, card_faces, data)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [card.id, card.name, card.mana_cost, card.cmc, card.type_line, card.oracle_text, card.power, card.toughness, card.colors, card.rarity, card.set_code, card.set_name, card.collector_number, card.released_at, card.image_uris, card.card_faces, card.data]);
     }
   }
@@ -375,7 +511,7 @@ class BulkDataService {
     });
   }
 
-    async importCardsToDatabase() {
+  async importCardsToDatabase() {
     this._broadcast('task-progress', { task: 'import', state: 'start' });
     console.log('Importing cards to database...');
     
@@ -386,8 +522,6 @@ class BulkDataService {
       return this.importCardsWithWorker();
     }
     
-    // Clear existing data first
-    await this.db.exec('DELETE FROM cards');
     
     return new Promise((resolve, reject) => {
       const { Writable } = require('stream');
@@ -519,7 +653,7 @@ class BulkDataService {
       pipeline(
         fsSync.createReadStream(CARDS_FILE),
         parser(),
-        new streamValues(),
+        new StreamValues(),
         processingStream,
         async (error) => {
           if (error) {
@@ -637,89 +771,331 @@ class BulkDataService {
       searchParams = { name: searchParams };
     }
 
-    const { name, text, type, colors, manaCost, power, toughness, rarity } = searchParams;
+    const { name, text, type, colors, manaCost, manaValue, power, toughness, rarity, types, subTypes, superTypes } = searchParams;
     const { limit = 50 } = options;
 
-    let query = 'SELECT data FROM cards WHERE 1=1';
+    // Build query to return card data directly from columns, joining with related tables
+    let query = `
+      SELECT c.*, 
+             ci.scryfallId,
+             cl.alchemy, cl.brawl, cl.commander, cl.duel, cl.explorer, cl.future, cl.gladiator,
+             cl.historic, cl.legacy, cl.modern, cl.oathbreaker, cl.oldschool, cl.pauper,
+             cl.paupercommander, cl.penny, cl.pioneer, cl.predh, cl.premodern, cl.standard,
+             cl.standardbrawl, cl.timeless, cl.vintage,
+             s.name as setName,
+             cpu.cardKingdom, cpu.cardmarket, cpu.tcgplayer,
+             crl.gatherer, crl.edhrec
+      FROM cards c
+      LEFT JOIN cardIdentifiers ci ON c.uuid = ci.uuid
+      LEFT JOIN cardLegalities cl ON c.uuid = cl.uuid
+      LEFT JOIN sets s ON c.setCode = s.code
+      LEFT JOIN cardPurchaseUrls cpu ON c.uuid = cpu.uuid
+      LEFT JOIN cardRelatedLinks crl ON c.uuid = crl.uuid
+      WHERE 1=1
+    `;
     const params = [];
 
     // Name search (case-insensitive)
     if (name) {
-      query += ' AND lower(name) LIKE lower(?)';
+      query += ' AND lower(c.name) LIKE lower(?)';
       params.push(`%${name}%`);
     }
 
-    // Oracle text search (case-insensitive)
+    // Oracle text search (case-insensitive) - check if column exists
     if (text) {
-      query += ' AND lower(oracle_text) LIKE lower(?)';
-      params.push(`%${text}%`);
+      // Try different possible column names for oracle text
+      query += ' AND (lower(c.text) LIKE lower(?) OR lower(c.originalText) LIKE lower(?))';
+      params.push(`%${text}%`, `%${text}%`);
     }
 
-    // Type line search (case-insensitive)
+    // Type line search (case-insensitive) - check if column exists
     if (type) {
-      query += ' AND lower(type_line) LIKE lower(?)';
-      params.push(`%${type}%`);
+      query += ' AND (lower(c.type) LIKE lower(?) OR lower(c.types) LIKE lower(?))';
+      params.push(`%${type}%`, `%${type}%`);
     }
 
-    // Colors (check if colors JSON contains the required colors)
+    // Colors (check if colors contains the required colors)
     if (colors && colors.length > 0) {
       for (const color of colors) {
-        query += ' AND colors LIKE ?';
-        params.push(`%"${color}"%`);
+        query += ' AND c.colors LIKE ?';
+        params.push(`%${color}%`);
       }
     }
 
     // Mana cost (exact match, but flexible about brackets)
     if (manaCost) {
       const formattedManaCost = manaCost.replace(/\{/g, '').replace(/\}/g, '');
-      query += ' AND replace(replace(mana_cost, "{", ""), "}", "") = ?';
+      query += ' AND replace(replace(c.manaCost, "{", ""), "}", "") = ?';
       params.push(formattedManaCost);
     }
 
     // Power
     if (power) {
-      query += ' AND power = ?';
+      query += ' AND c.power = ?';
       params.push(power);
     }
 
     // Toughness
     if (toughness) {
-      query += ' AND toughness = ?';
+      query += ' AND c.toughness = ?';
       params.push(toughness);
+    }
+
+    // Mana value (converted mana cost)
+    if (manaValue) {
+      query += ' AND c.convertedManaCost = ?';
+      params.push(parseInt(manaValue));
+    }
+
+    // Types search (case-insensitive) - search in types column
+    if (types) {
+      query += ' AND lower(c.types) LIKE lower(?)';
+      params.push(`%${types}%`);
+    }
+
+    // Subtypes search (case-insensitive) - search in subtypes column
+    if (subTypes) {
+      query += ' AND lower(c.subtypes) LIKE lower(?)';
+      params.push(`%${subTypes}%`);
+    }
+
+    // Supertypes search (case-insensitive) - search in supertypes column
+    if (superTypes) {
+      query += ' AND lower(c.supertypes) LIKE lower(?)';
+      params.push(`%${superTypes}%`);
     }
 
     // Rarity (exact match, case-insensitive)
     if (rarity) {
-      query += ' AND lower(rarity) = lower(?)';
+      query += ' AND lower(c.rarity) = lower(?)';
       params.push(rarity);
     }
 
     // Add ordering and limit - prioritize English cards
     if (name) {
       // Sort by relevance (exact name matches first), then prioritize English language
-      query += ' ORDER BY CASE WHEN lower(name) = lower(?) THEN 0 ELSE 1 END, CASE WHEN JSON_EXTRACT(data, "$.lang") = "en" OR JSON_EXTRACT(data, "$.lang") IS NULL THEN 0 ELSE 1 END, name';
+      query += ' ORDER BY CASE WHEN lower(c.name) = lower(?) THEN 0 ELSE 1 END, CASE WHEN c.language = "English" OR c.language IS NULL THEN 0 ELSE 1 END, c.name';
       params.push(name);
     } else {
       // Prioritize English cards, then sort by name
-      query += ' ORDER BY CASE WHEN JSON_EXTRACT(data, "$.lang") = "en" OR JSON_EXTRACT(data, "$.lang") IS NULL THEN 0 ELSE 1 END, name';
+      query += ' ORDER BY CASE WHEN c.language = "English" OR c.language IS NULL THEN 0 ELSE 1 END, c.name';
     }
     
     query += ` LIMIT ${limit}`;
 
     try {
       const rows = await this.db.all(query, params);
-      return rows.map(row => {
-        const cardData = JSON.parse(row.data);
-        // Ensure we're returning English cards when possible
-        if (cardData.lang && cardData.lang !== 'en') {
-          console.log(`Non-English card found: ${cardData.name} (${cardData.lang})`);
-        }
-        return cardData;
-      });
+      // Convert database rows to card format expected by the UI
+      return Promise.all(rows.map(row => this.convertDbRowToCard(row)));
     } catch (error) {
       console.error('Error searching cards:', error);
       return [];
     }
+  }
+
+  // Helper method to safely parse JSON fields that might be in different formats
+  parseJsonSafely(value) {
+    if (!value) return null;
+    if (Array.isArray(value) || typeof value === 'object') return value;
+    if (typeof value === 'string') {
+      // If it starts with [ or {, try to parse as JSON
+      if (value.startsWith('[') || value.startsWith('{')) {
+        try {
+          return JSON.parse(value);
+        } catch (e) {
+          console.warn('Failed to parse JSON:', value);
+          return null;
+        }
+      }
+      // If it's a short string (likely single color like "B", "R"), convert to array
+      if (value.length <= 5 && /^[WUBRG]+$/.test(value)) {
+        return value.split('');
+      }
+      // For longer strings, assume it's comma-separated
+      return value.split(',').map(s => s.trim()).filter(s => s);
+    }
+    return null;
+  }
+
+  // Helper method to get both faces of a double-faced card
+  async getCardFaces(cardRow) {
+    if (!cardRow.layout || (cardRow.layout !== 'transform' && cardRow.layout !== 'modal_dfc')) {
+      return null;
+    }
+    
+    // The scryfallId from the main row is the canonical ID for both faces' images.
+    const canonicalScryfallId = cardRow.scryfallId;
+    if (!canonicalScryfallId) {
+      console.warn(`Cannot build image URLs for "${cardRow.name}" without a scryfallId on the main card row.`);
+      return null;
+    }
+
+    try {
+      const faces = await this.db.all(`
+        SELECT c.faceName, c.manaCost, c.type, c.text, c.power, c.toughness, c.loyalty, c.colors
+        FROM cards c
+        WHERE c.name = ? 
+        AND (c.language = "English" OR c.language IS NULL)
+        AND c.faceName IS NOT NULL
+        ORDER BY c.faceName ASC
+      `, [cardRow.name]);
+
+      if (faces.length < 2) {
+        // Fallback for when we can't find the other face.
+        const frontFace = {
+            name: cardRow.faceName || cardRow.name.split(' // ')[0],
+            mana_cost: cardRow.manaCost || '',
+            type_line: cardRow.type || '',
+            oracle_text: cardRow.text || '',
+            power: cardRow.power,
+            toughness: cardRow.toughness,
+            loyalty: cardRow.loyalty,
+            colors: this.parseJsonSafely(cardRow.colors) || [],
+            image_uris: {
+                small: `https://cards.scryfall.io/small/front/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
+                normal: `https://cards.scryfall.io/normal/front/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
+                large: `https://cards.scryfall.io/large/front/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
+                png: `https://cards.scryfall.io/png/front/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
+                art_crop: `https://cards.scryfall.io/art_crop/front/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
+                border_crop: `https://cards.scryfall.io/border_crop/front/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`
+            }
+        };
+        return [frontFace];
+      }
+      
+      // Deduplicate faces to prevent issues with multiple printings
+      const uniqueFaces = [];
+      const seenFaceNames = new Set();
+      for (const face of faces) {
+        if (!seenFaceNames.has(face.faceName)) {
+          uniqueFaces.push(face);
+          seenFaceNames.add(face.faceName);
+        }
+      }
+
+      return uniqueFaces.map((face, index) => {
+        const facePath = index === 1 ? 'back/' : 'front/';
+        const idPath = `${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`;
+        
+        return {
+          name: face.faceName,
+          mana_cost: face.manaCost || '',
+          type_line: face.type || '',
+          oracle_text: face.text || '',
+          power: face.power,
+          toughness: face.toughness,
+          loyalty: face.loyalty,
+          colors: this.parseJsonSafely(face.colors) || [],
+          image_uris: {
+            small: `https://cards.scryfall.io/small/${facePath}${idPath}`,
+            normal: `https://cards.scryfall.io/normal/${facePath}${idPath}`,
+            large: `https://cards.scryfall.io/large/${facePath}${idPath}`,
+            png: `https://cards.scryfall.io/png/${facePath}${idPath}`,
+            art_crop: `https://cards.scryfall.io/art_crop/${facePath}${idPath}`,
+            border_crop: `https://cards.scryfall.io/border_crop/${facePath}${idPath}`
+          }
+        };
+      });
+    } catch (error) {
+      console.error('Error fetching card faces:', error);
+      return null;
+    }
+  }
+
+  // Helper method to convert database row to expected card format
+  async convertDbRowToCard(row) {
+    // Construct image URLs from Scryfall ID if available
+    let image_uris = null;
+    if (row.scryfallId) {
+      const id = row.scryfallId;
+      image_uris = {
+        small: `https://cards.scryfall.io/small/front/${id.charAt(0)}/${id.charAt(1)}/${id}.jpg`,
+        normal: `https://cards.scryfall.io/normal/front/${id.charAt(0)}/${id.charAt(1)}/${id}.jpg`,
+        large: `https://cards.scryfall.io/large/front/${id.charAt(0)}/${id.charAt(1)}/${id}.jpg`,
+        png: `https://cards.scryfall.io/png/front/${id.charAt(0)}/${id.charAt(1)}/${id}.jpg`,
+        art_crop: `https://cards.scryfall.io/art_crop/front/${id.charAt(0)}/${id.charAt(1)}/${id}.jpg`,
+        border_crop: `https://cards.scryfall.io/border_crop/front/${id.charAt(0)}/${id.charAt(1)}/${id}.jpg`
+      };
+    }
+
+    // Process purchase URLs
+    const purchase_uris = {};
+    if (row.tcgplayer) purchase_uris.tcgplayer = row.tcgplayer;
+    if (row.cardmarket) purchase_uris.cardmarket = row.cardmarket;
+    if (row.cardKingdom) purchase_uris.cardkingdom = row.cardKingdom;
+
+    // Process related URLs
+    const related_uris = {};
+    if (row.gatherer) related_uris.gatherer = row.gatherer;
+    if (row.edhrec) related_uris.edhrec = row.edhrec;
+
+    // Build legalities object solely from individual columns provided by the `cardLegalities` table join
+    let legalities = {};
+    const legalityFields = [
+      'alchemy', 'brawl', 'commander', 'duel', 'explorer', 'future', 'gladiator',
+      'historic', 'legacy', 'modern', 'oathbreaker', 'oldschool', 'pauper',
+      'paupercommander', 'penny', 'pioneer', 'predh', 'premodern', 'standard',
+      'standardbrawl', 'timeless', 'vintage'
+    ];
+    
+    legalityFields.forEach(field => {
+      // If the DB field is explicitly 'legal', mark it as such. Otherwise, default to 'not_legal'.
+      const dbValue = row[field];
+      if (dbValue && typeof dbValue === 'string') {
+        legalities[field] = dbValue.toLowerCase();
+      } else {
+        legalities[field] = 'not_legal';
+      }
+    });
+
+    const rulings = row.uuid ? await this.db.all('SELECT date, text FROM cardRulings WHERE uuid = ? ORDER BY date', [row.uuid]) : [];
+
+    // Handle double-faced cards: construct card_faces array if this is a transform/modal_dfc card
+    const card_faces = await this.getCardFaces(row);
+
+    return {
+      id: row.uuid || row.id || `${row.setCode}-${row.number}`,
+      uuid: row.uuid,
+      name: row.name,
+      
+      // New schema properties (camelCase)
+      manaCost: row.manaCost,
+      manaValue: row.manaValue,
+      type: row.type,
+      text: row.text,
+      setCode: row.setCode,
+      number: row.number,
+      
+      // Legacy properties (snake_case) for backwards compatibility
+      mana_cost: row.manaCost,
+      cmc: row.manaValue || row.cmc,
+      type_line: row.type || row.types,
+      oracle_text: row.text || row.originalText,
+      set: row.setCode,
+      set_code: row.setCode,
+      set_name: row.setName,
+      collector_number: row.number,
+      
+      // Other properties
+      power: row.power,
+      toughness: row.toughness,
+      colors: this.parseJsonSafely(row.colors) || [],
+      color_identity: this.parseJsonSafely(row.colorIdentity) || [],
+      rarity: row.rarity,
+      released_at: row.releaseDate,
+      image_uris: image_uris,
+      purchase_uris: purchase_uris,
+      related_uris: related_uris,
+      legalities: legalities,
+      rulings: rulings,
+      card_faces: card_faces,
+      lang: row.language === 'English' ? 'en' : row.language,
+      artist: row.artist,
+      layout: row.layout,
+      
+      // Include original row data for compatibility
+      ...row
+    };
   }
 
   async findCardByName(name) {
@@ -727,62 +1103,202 @@ class BulkDataService {
       return null;
     }
 
+    // Validate that name is provided and not undefined
+    if (!name || name === 'undefined' || typeof name !== 'string' || name.trim() === '') {
+      console.warn(`⚠️ findCardByName called with invalid name: "${name}"`);
+      return null;
+    }
+
     try {
-      // First try exact match with English preference
-      const exactMatch = await this.db.get(
-        'SELECT data FROM cards WHERE lower(name) = lower(?) ORDER BY CASE WHEN JSON_EXTRACT(data, "$.lang") = "en" OR JSON_EXTRACT(data, "$.lang") IS NULL THEN 0 ELSE 1 END LIMIT 1',
-        [name]
-      );
+      // First try exact case match (fastest with index)
+      let exactMatch = await this.db.get(`
+        SELECT c.*, 
+               ci.scryfallId,
+               cl.alchemy, cl.brawl, cl.commander, cl.duel, cl.explorer, cl.future, cl.gladiator,
+               cl.historic, cl.legacy, cl.modern, cl.oathbreaker, cl.oldschool, cl.pauper,
+               cl.paupercommander, cl.penny, cl.pioneer, cl.predh, cl.premodern, cl.standard,
+               cl.standardbrawl, cl.timeless, cl.vintage,
+               s.name as setName,
+               cpu.cardKingdom, cpu.cardmarket, cpu.tcgplayer,
+               crl.gatherer, crl.edhrec
+        FROM cards c
+        LEFT JOIN cardIdentifiers ci ON c.uuid = ci.uuid
+        LEFT JOIN cardLegalities cl ON c.uuid = cl.uuid
+        LEFT JOIN sets s ON c.setCode = s.code
+        LEFT JOIN cardPurchaseUrls cpu ON c.uuid = cpu.uuid
+        LEFT JOIN cardRelatedLinks crl ON c.uuid = crl.uuid
+        WHERE c.name = ? AND (c.language = "English" OR c.language IS NULL) 
+        LIMIT 1
+      `, [name]);
       
       if (exactMatch) {
-        return JSON.parse(exactMatch.data);
+        return await this.convertDbRowToCard(exactMatch);
       }
 
-      // Fuzzy match with English preference
-      const fuzzyMatch = await this.db.get(
-        'SELECT data FROM cards WHERE lower(name) LIKE lower(?) ORDER BY CASE WHEN JSON_EXTRACT(data, "$.lang") = "en" OR JSON_EXTRACT(data, "$.lang") IS NULL THEN 0 ELSE 1 END LIMIT 1',
-        [`%${name}%`]
-      );
+      // Fallback to case-insensitive exact match
+      exactMatch = await this.db.get(`
+        SELECT c.*, 
+               ci.scryfallId,
+               cl.alchemy, cl.brawl, cl.commander, cl.duel, cl.explorer, cl.future, cl.gladiator,
+               cl.historic, cl.legacy, cl.modern, cl.oathbreaker, cl.oldschool, cl.pauper,
+               cl.paupercommander, cl.penny, cl.pioneer, cl.predh, cl.premodern, cl.standard,
+               cl.standardbrawl, cl.timeless, cl.vintage,
+               s.name as setName,
+               cpu.cardKingdom, cpu.cardmarket, cpu.tcgplayer,
+               crl.gatherer, crl.edhrec
+        FROM cards c
+        LEFT JOIN cardIdentifiers ci ON c.uuid = ci.uuid
+        LEFT JOIN cardLegalities cl ON c.uuid = cl.uuid
+        LEFT JOIN sets s ON c.setCode = s.code
+        LEFT JOIN cardPurchaseUrls cpu ON c.uuid = cpu.uuid
+        LEFT JOIN cardRelatedLinks crl ON c.uuid = crl.uuid
+        WHERE lower(c.name) = lower(?) AND (c.language = "English" OR c.language IS NULL) 
+        LIMIT 1
+      `, [name]);
+      
+      if (exactMatch) {
+        return await this.convertDbRowToCard(exactMatch);
+      }
 
-      return fuzzyMatch ? JSON.parse(fuzzyMatch.data) : null;
+      // Fuzzy match as last resort
+      const fuzzyMatch = await this.db.get(`
+        SELECT c.*, 
+               ci.scryfallId,
+               cl.alchemy, cl.brawl, cl.commander, cl.duel, cl.explorer, cl.future, cl.gladiator,
+               cl.historic, cl.legacy, cl.modern, cl.oathbreaker, cl.oldschool, cl.pauper,
+               cl.paupercommander, cl.penny, cl.pioneer, cl.predh, cl.premodern, cl.standard,
+               cl.standardbrawl, cl.timeless, cl.vintage,
+               s.name as setName,
+               cpu.cardKingdom, cpu.cardmarket, cpu.tcgplayer,
+               crl.gatherer, crl.edhrec
+        FROM cards c
+        LEFT JOIN cardIdentifiers ci ON c.uuid = ci.uuid
+        LEFT JOIN cardLegalities cl ON c.uuid = cl.uuid
+        LEFT JOIN sets s ON c.setCode = s.code
+        LEFT JOIN cardPurchaseUrls cpu ON c.uuid = cpu.uuid
+        LEFT JOIN cardRelatedLinks crl ON c.uuid = crl.uuid
+        WHERE lower(c.name) LIKE lower(?) AND (c.language = "English" OR c.language IS NULL) 
+        LIMIT 1
+      `, [`%${name}%`]);
+
+      return fuzzyMatch ? await this.convertDbRowToCard(fuzzyMatch) : null;
     } catch (error) {
       console.error('Error finding card by name:', error);
       return null;
     }
   }
 
-  // New function to find cards by name, set, and collector number for precise artwork matching
+  // Optimized function to find cards by name, set, and collector number for precise artwork matching
   async findCardByDetails(name, setCode, collectorNumber) {
     if (!this.db || !this.initialized) {
       return null;
     }
 
+    // Validate that name is provided and not undefined
+    if (!name || name === 'undefined' || typeof name !== 'string' || name.trim() === '') {
+      // Enhanced debugging: log additional context and stack trace once per session
+      if (!this._invalidNameDebugCount) this._invalidNameDebugCount = 0;
+      this._invalidNameDebugCount++;
+
+      console.warn(`⚠️ findCardByDetails called with invalid name: "${name}" | setCode: "${setCode}", collectorNumber: "${collectorNumber}" (occurrence #${this._invalidNameDebugCount})`);
+      if (this._invalidNameDebugCount <= 10) {
+        // Print stack trace for the first few occurrences to locate the caller
+        console.trace('findCardByDetails invalid name stack trace');
+      }
+      return null;
+    }
+
     try {
-      // First try exact match with all details, preferring English
-      const exactMatch = await this.db.get(
-        'SELECT data FROM cards WHERE lower(name) = lower(?) AND lower(set_code) = lower(?) AND collector_number = ? ORDER BY CASE WHEN JSON_EXTRACT(data, "$.lang") = "en" OR JSON_EXTRACT(data, "$.lang") IS NULL THEN 0 ELSE 1 END LIMIT 1',
-        [name, setCode, collectorNumber]
-      );
+      // First try exact case match (fastest with composite index)
+      let exactMatch = await this.db.get(`
+        SELECT c.*, 
+               ci.scryfallId,
+               cl.alchemy, cl.brawl, cl.commander, cl.duel, cl.explorer, cl.future, cl.gladiator,
+               cl.historic, cl.legacy, cl.modern, cl.oathbreaker, cl.oldschool, cl.pauper,
+               cl.paupercommander, cl.penny, cl.pioneer, cl.predh, cl.premodern, cl.standard,
+               cl.standardbrawl, cl.timeless, cl.vintage,
+               s.name as setName,
+               cpu.cardKingdom, cpu.cardmarket, cpu.tcgplayer,
+               crl.gatherer, crl.edhrec
+        FROM cards c
+        LEFT JOIN cardIdentifiers ci ON c.uuid = ci.uuid
+        LEFT JOIN cardLegalities cl ON c.uuid = cl.uuid
+        LEFT JOIN sets s ON c.setCode = s.code
+        LEFT JOIN cardPurchaseUrls cpu ON c.uuid = cpu.uuid
+        LEFT JOIN cardRelatedLinks crl ON c.uuid = crl.uuid
+        WHERE c.name = ? 
+          AND c.setCode = ? 
+          AND c.number = ? 
+          AND (c.language = "English" OR c.language IS NULL)
+        LIMIT 1
+      `, [name, setCode, collectorNumber]);
       
       if (exactMatch) {
-        const cardData = JSON.parse(exactMatch.data);
-        console.log(`Found exact match for ${name} (${setCode}) #${collectorNumber} - Language: ${cardData.lang || 'en'}`);
+        const cardData = await this.convertDbRowToCard(exactMatch);
+        // console.log(`Found exact match for ${name} (${setCode}) #${collectorNumber} - Language: ${cardData.lang || 'en'}`);
         return cardData;
       }
 
-      // Try match without collector number (in case it's formatted differently), preferring English
-      const setMatch = await this.db.get(
-        'SELECT data FROM cards WHERE lower(name) = lower(?) AND lower(set_code) = lower(?) ORDER BY CASE WHEN JSON_EXTRACT(data, "$.lang") = "en" OR JSON_EXTRACT(data, "$.lang") IS NULL THEN 0 ELSE 1 END LIMIT 1',
-        [name, setCode]
-      );
+      // Try case-insensitive match with English preference
+      exactMatch = await this.db.get(`
+        SELECT c.*, 
+               ci.scryfallId,
+               cl.alchemy, cl.brawl, cl.commander, cl.duel, cl.explorer, cl.future, cl.gladiator,
+               cl.historic, cl.legacy, cl.modern, cl.oathbreaker, cl.oldschool, cl.pauper,
+               cl.paupercommander, cl.penny, cl.pioneer, cl.predh, cl.premodern, cl.standard,
+               cl.standardbrawl, cl.timeless, cl.vintage,
+               s.name as setName,
+               cpu.cardKingdom, cpu.cardmarket, cpu.tcgplayer,
+               crl.gatherer, crl.edhrec
+        FROM cards c
+        LEFT JOIN cardIdentifiers ci ON c.uuid = ci.uuid
+        LEFT JOIN cardLegalities cl ON c.uuid = cl.uuid
+        LEFT JOIN sets s ON c.setCode = s.code
+        LEFT JOIN cardPurchaseUrls cpu ON c.uuid = cpu.uuid
+        LEFT JOIN cardRelatedLinks crl ON c.uuid = crl.uuid
+        WHERE lower(c.name) = lower(?) 
+          AND lower(c.setCode) = lower(?) 
+          AND c.number = ? 
+          AND (c.language = "English" OR c.language IS NULL)
+        LIMIT 1
+      `, [name, setCode, collectorNumber]);
+      
+      if (exactMatch) {
+        const cardData = await this.convertDbRowToCard(exactMatch);
+        // console.log(`Found exact match for ${name} (${setCode}) #${collectorNumber} - Language: ${cardData.lang || 'en'}`);
+        return cardData;
+      }
+
+      // Try match without collector number (in case it's formatted differently)
+      const setMatch = await this.db.get(`
+        SELECT c.*, 
+               ci.scryfallId,
+               cl.alchemy, cl.brawl, cl.commander, cl.duel, cl.explorer, cl.future, cl.gladiator,
+               cl.historic, cl.legacy, cl.modern, cl.oathbreaker, cl.oldschool, cl.pauper,
+               cl.paupercommander, cl.penny, cl.pioneer, cl.predh, cl.premodern, cl.standard,
+               cl.standardbrawl, cl.timeless, cl.vintage,
+               s.name as setName,
+               cpu.cardKingdom, cpu.cardmarket, cpu.tcgplayer,
+               crl.gatherer, crl.edhrec
+        FROM cards c
+        LEFT JOIN cardIdentifiers ci ON c.uuid = ci.uuid
+        LEFT JOIN cardLegalities cl ON c.uuid = cl.uuid
+        LEFT JOIN sets s ON c.setCode = s.code
+        LEFT JOIN cardPurchaseUrls cpu ON c.uuid = cpu.uuid
+        LEFT JOIN cardRelatedLinks crl ON c.uuid = crl.uuid
+        WHERE lower(c.name) = lower(?) 
+          AND lower(c.setCode) = lower(?) 
+          AND (c.language = "English" OR c.language IS NULL) 
+        LIMIT 1
+      `, [name, setCode]);
       
       if (setMatch) {
-        const card = JSON.parse(setMatch.data);
+        const card = await this.convertDbRowToCard(setMatch);
         console.log(`Found set match for ${name} (${setCode}), but collector number ${collectorNumber} didn't match ${card.collector_number} - Language: ${card.lang || 'en'}`);
         return card;
       }
 
-      // Fallback to name-only search (already prioritizes English)
+      // Fallback to name-only search
       console.log(`No precise match found for ${name} (${setCode}) #${collectorNumber}, falling back to name search`);
       return await this.findCardByName(name);
     } catch (error) {
@@ -849,6 +1365,7 @@ class BulkDataService {
   async close() {
     if (this.db) {
       await this.db.close();
+      console.log('Bulk data database connection closed.');
     }
   }
 
@@ -867,12 +1384,12 @@ class BulkDataService {
 
     const placeholders = ids.map(() => '?').join(',');
     const sql = `
-      SELECT data FROM cards WHERE id IN (${placeholders})
+      SELECT * FROM cards WHERE uuid IN (${placeholders}) OR id IN (${placeholders})
     `;
 
     try {
-      const rows = await this.db.all(sql, ids);
-      return rows.map(row => JSON.parse(row.data));
+      const rows = await this.db.all(sql, [...ids, ...ids]);
+      return Promise.all(rows.map(row => this.convertDbRowToCard(row)));
     } catch (error) {
       console.error('Error fetching cards by IDs:', error);
       return [];
@@ -886,14 +1403,39 @@ class BulkDataService {
     }
 
     try {
-      // Aggregate basic information about each set. We group by set_code/name and take the earliest release date.
-      const rows = await this.db.all(
-        `SELECT set_code AS code, set_name AS name, MIN(released_at) AS released_at, COUNT(*) AS card_count
-         FROM cards
-         GROUP BY set_code, set_name
-         ORDER BY released_at DESC`
-      );
-      return rows;
+      // Check if we have a dedicated sets table, otherwise aggregate from cards
+      const setsTable = await this.db.all("SELECT name FROM sqlite_master WHERE type='table' AND name='sets'");
+      
+      if (setsTable.length > 0) {
+        // Use dedicated sets table if available - optimized with LEFT JOIN
+        const rows = await this.db.all(
+          `SELECT s.code, s.name, s.releaseDate as released_at, 
+           s.totalSetSize as total_set_size,
+           COALESCE(c.card_count, 0) as card_count,
+           s.type, s.block
+           FROM sets s
+           LEFT JOIN (
+             SELECT setCode, COUNT(*) as card_count 
+             FROM cards 
+             GROUP BY setCode
+           ) c ON s.code = c.setCode
+           ORDER BY s.releaseDate DESC`
+        );
+        return rows;
+      } else {
+        // Fallback: aggregate from cards table
+        const rows = await this.db.all(
+          `SELECT setCode AS code, 
+           MIN(setName) AS name, 
+           MIN(releaseDate) AS released_at, 
+           COUNT(*) AS card_count
+           FROM cards
+           WHERE setCode IS NOT NULL
+           GROUP BY setCode
+           ORDER BY MIN(releaseDate) DESC`
+        );
+        return rows;
+      }
     } catch (error) {
       console.error('Error listing sets:', error);
       return [];
@@ -910,10 +1452,10 @@ class BulkDataService {
 
     try {
       const rows = await this.db.all(
-        `SELECT data FROM cards WHERE lower(set_code) = lower(?) ORDER BY CAST(collector_number AS INTEGER) ASC LIMIT ?`,
+        `SELECT * FROM cards WHERE lower(setCode) = lower(?) ORDER BY CAST(number AS INTEGER) ASC LIMIT ?`,
         [setCode, limit]
       );
-      return rows.map(row => JSON.parse(row.data));
+      return rows.map(row => this.convertDbRowToCard(row));
     } catch (error) {
       console.error(`Error fetching cards for set ${setCode}:`, error);
       return [];
@@ -934,6 +1476,142 @@ class BulkDataService {
     } catch (error) {
       console.error(`Error importing CSV collection: ${collectionName}:`, error);
     }
+  }
+
+  async _ensureRelatedLinksData() {
+    console.log('Ensuring related links data is populated...');
+    // 1. Create table if it doesn't exist
+    await this.db.exec(`
+      CREATE TABLE IF NOT EXISTS cardRelatedLinks (
+        uuid TEXT PRIMARY KEY,
+        gatherer TEXT,
+        edhrec TEXT
+      )
+    `);
+
+    // 2. Check if table is already populated
+    const check = await this.db.get('SELECT COUNT(*) as count FROM cardRelatedLinks');
+    if (check && check.count > 0) {
+      console.log(`Related links table is already populated with ${check.count} entries.`);
+      return;
+    }
+    
+    console.log('Related links table is empty, proceeding with import...');
+
+    // 3. Check if the bulk JSON file exists
+    const cardsFileExists = fsSync.existsSync(CARDS_FILE);
+    if (!cardsFileExists) {
+      console.warn(`Could not find cards.json at ${CARDS_FILE}. Cannot populate related links.`);
+      return;
+    }
+
+    console.log(`Populating related links from ${CARDS_FILE}. This is a one-time operation and may take a moment...`);
+    this._broadcast('task-progress', { task: 'import', state: 'start', percent: 0 });
+
+    let stmt;
+    let transactionStarted = false;
+    try {
+      // The database is already in WAL mode from initializeDatabase()
+
+      // 1. Use a prepared statement for efficient inserts
+      stmt = await this.db.prepare(
+        'INSERT OR IGNORE INTO cardRelatedLinks (uuid, gatherer, edhrec) VALUES (?, ?, ?)'
+      );
+      
+      // 2. Manually handle the transaction
+      await this.db.exec('BEGIN IMMEDIATE');
+      transactionStarted = true;
+
+      // 3. Create a back-pressure aware stream pipeline
+      const readStream = fsSync.createReadStream(CARDS_FILE, { highWaterMark: 1 << 16 });
+      const pipeline = chain([
+        readStream,
+        parser(),
+        streamValues(),
+        (data) => data.value, // unwrap the card object
+        batch({ batchSize: 1000 }), // batch 1000 cards at a time
+      ]);
+      
+      // Get total file size to estimate progress
+      const stats = fsSync.statSync(CARDS_FILE);
+      const totalSize = stats.size;
+      let processed = 0;
+      
+      for await (const cards of pipeline) {
+        // Run insertions for the batch
+        for (const c of cards) {
+          // Scryfall bulk data objects use the property `id` as the unique UUID. Previous versions of
+          // this importer expected a `uuid` property, which resulted in zero rows being inserted.
+          // Gracefully handle both to maintain backward compatibility.
+          const uuid = c.uuid || c.id;
+          if (uuid && c.related_uris) {
+            await stmt.run(uuid, c.related_uris.gatherer ?? null, c.related_uris.edhrec ?? null);
+          }
+        }
+        
+        processed += cards.length;
+        const processedBytes = readStream.bytesRead;
+        const percent = Math.round((processedBytes / totalSize) * 100);
+
+        if (processed % 25000 < 1000) {
+          console.log(`[Link Importer] ${processed} cards done (${percent}%)`);
+          this._broadcast('task-progress', { task: 'import', state: 'progress', percent });
+        }
+      }
+      
+      // 4. Finalize the transaction
+      await this.db.exec('COMMIT');
+      transactionStarted = false;
+
+      // 5. Force a checkpoint with proper error handling
+      try {
+        console.log('Checkpointing WAL to main database...');
+        const result = await this.db.get('PRAGMA wal_checkpoint(TRUNCATE)');
+        console.log('WAL checkpoint result:', result);
+        
+        // Verify data was written
+        const count = await this.db.get('SELECT COUNT(*) as count FROM cardRelatedLinks');
+        console.log(`Verification: ${count.count} related links in database`);
+      } catch (checkpointErr) {
+        console.warn('WAL checkpoint failed, but transaction was committed:', checkpointErr);
+        // Data should still be available, just not immediately visible in other connections
+      }
+
+      console.log(`Finished populating related links. Total cards processed: ${processed}`);
+      this._broadcast('task-progress', { task: 'import', state: 'done' });
+    } catch (err) {
+      console.error('Fatal error during related links import:', err);
+      // Attempt to rollback transaction on error
+      if (transactionStarted) {
+        try {
+          await this.db.exec('ROLLBACK');
+        } catch (rollbackErr) {
+          console.error('Failed to rollback transaction:', rollbackErr);
+        }
+      }
+      this._broadcast('task-progress', { task: 'import', state: 'fail', error: 'Failed to populate related links.' });
+      throw err;
+    } finally {
+      // 6. Finalize the statement to release its resources
+      if (stmt) {
+        try {
+          await stmt.finalize();
+        } catch (finalizeErr) {
+          console.error('Failed to finalize statement:', finalizeErr);
+        }
+      }
+    }
+  }
+
+  async forceImportRelatedLinks() {
+    console.log('Force importing related links data...');
+    
+    // Clear existing data
+    await this.db.exec('DELETE FROM cardRelatedLinks');
+    console.log('Cleared existing related links data');
+    
+    // Re-run the import
+    await this._ensureRelatedLinksData();
   }
 }
 

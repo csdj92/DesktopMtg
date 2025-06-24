@@ -13,7 +13,7 @@ function SemanticSearchV2({
   const [results, setResults] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchStats, setSearchStats] = useState(null);
-  const [resultLimit, setResultLimit] = useState('');
+  const [resultLimit, setResultLimit] = useState(100);
   const [selectedCard, setSelectedCard] = useState(null);
   const [cardDetailLoading, setCardDetailLoading] = useState(false);
   const [fullCardCache, setFullCardCache] = useState(new Map());
@@ -154,6 +154,7 @@ function SemanticSearchV2({
             min={1}
             max={1000}
             className="limit-input"
+            placeholder="Max results"
             title="Max results"
           />
           <input
@@ -221,9 +222,9 @@ function SemanticSearchV2({
                   card={{
                     id: `semantic-${card.name}-${index}`,
                     name: card.name,
-                    mana_cost: card.mana_cost,
-                    type_line: card.type_line,
-                    oracle_text: card.oracle_text,
+                            mana_cost: card.manaCost || card.mana_cost,
+        type_line: card.type || card.type_line,
+        oracle_text: card.text || card.oracle_text,
                     image_uris: card.image_uri ? { normal: card.image_uri } : null,
                   }}
                   disableModal={true}

@@ -9,6 +9,7 @@ const CardDetailModal = ({ card, onClose }) => {
   const [actionMode, setActionMode] = useState(null); // 'add' | 'update'
   const [collectionInput, setCollectionInput] = useState('My Collection');
   const [quantityInput, setQuantityInput] = useState(1);
+  const [showRulings, setShowRulings] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -60,9 +61,9 @@ const CardDetailModal = ({ card, onClose }) => {
       const quantity = parseInt(quantityInput, 10) || 1;
       const result = await window.electronAPI.collectionAddCard(collectionInput.trim(), {
         card_name: card.name,
-        set_code: card.set || card.set_code,
-        set_name: card.set_name,
-        collector_number: card.collector_number,
+        set_code: card.setCode,
+        set_name: card.setName,
+        collector_number: card.number,
         foil: 'normal',
         rarity: card.rarity,
         quantity
@@ -93,8 +94,8 @@ const CardDetailModal = ({ card, onClose }) => {
 
       const cardKey = {
         card_name: card.name,
-        set_code: card.set || card.set_code,
-        collector_number: card.collector_number,
+        set_code: card.setCode,
+        collector_number: card.number,
         foil: 'normal'
       };
 
@@ -136,9 +137,9 @@ const CardDetailModal = ({ card, onClose }) => {
               <h3>Legalities</h3>
               <ul>
                 {Object.entries(legalities).map(([format, legality]) => (
-                  <li key={format} className={legality}>
+                  <li key={format}>
                     <span className="format-name">{format.replace(/_/g, ' ')}:</span>
-                    <span className="legality-status">{legality.replace(/_/g, ' ')}</span>
+                    <span className={`legality-status ${legality}`}>{legality.replace(/_/g, ' ')}</span>
                   </li>
                 ))}
               </ul>
@@ -146,22 +147,42 @@ const CardDetailModal = ({ card, onClose }) => {
           </div>
           <div className="modal-card-details">
             <h2>{card.name}</h2>
-            <p>{card.type_line}</p>
-            <p><strong>Set:</strong> {card.set_name}</p>
+            <p>{(card.type || card.type_line || '').replace(/\?\?\?/g, '—')}</p>
+            <p><strong>Set:</strong> {card.setName}</p>
             <p><strong>Rarity:</strong> {card.rarity}</p>
             {ownedQty !== null && (
-              <p><strong>Owned:</strong> {ownedQty} {ownedQty === 1 ? '' : 's'}</p>
+              <p><strong>Owned:</strong> {ownedQty} {ownedQty === 1 ? 'copy' : 'copies'}</p>
             )}
-            <p><strong>Collector Number:</strong> {card.collector_number}</p>
+            <p><strong>Collector Number:</strong> {card.number}</p>
             
             {card.prices?.usd && <p><strong>Price:</strong> ${card.prices.usd}</p>}
             {card.prices?.usd_foil && <p><strong>Foil Price:</strong> ${card.prices.usd_foil}</p>}
             
             <p><strong>Artist:</strong> {card.artist}</p>
             
+            {card.rulings && card.rulings.length > 0 && (
+              <div className="rulings-section">
+                <button onClick={() => setShowRulings(!showRulings)} className="rulings-toggle-btn">
+                  {showRulings ? 'Hide' : 'Show'} Rulings ({card.rulings.length})
+                </button>
+                {showRulings && (
+                  <ul className="rulings-list">
+                    {card.rulings.map((ruling, index) => (
+                      <li key={index}>
+                        <span className="ruling-date">{new Date(ruling.date).toLocaleDateString()}</span>
+                        <p className="ruling-text">{ruling.text}</p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+            
             <div className="external-links">
               {card.related_uris?.gatherer && <a href={card.related_uris.gatherer} target="_blank" rel="noopener noreferrer">Gatherer</a>}
               {card.purchase_uris?.tcgplayer && <a href={card.purchase_uris.tcgplayer} target="_blank" rel="noopener noreferrer">Buy on TCGPlayer</a>}
+              {card.purchase_uris?.cardmarket && <a href={card.purchase_uris.cardmarket} target="_blank" rel="noopener noreferrer">Buy on Cardmarket</a>}
+              {card.purchase_uris?.cardkingdom && <a href={card.purchase_uris.cardkingdom} target="_blank" rel="noopener noreferrer">Buy on Card Kingdom</a>}
               {card.related_uris?.edhrec && <a href={card.related_uris.edhrec} target="_blank" rel="noopener noreferrer">EDHREC</a>}
             </div>
 

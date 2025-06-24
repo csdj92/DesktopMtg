@@ -72,7 +72,7 @@ const Card = ({ card, quantity = 1, disableModal = false }) => {
             <div className="card-footer">
                 <div className="name-and-type">
                 <p className="footer-card-name">{cardFace.name || card.name}</p>
-                <p className="footer-type-line">{cardFace.type_line || card.type_line}</p>
+                <p className="footer-type-line">{(cardFace.type || cardFace.type_line || card.type || card.type_line || '').replace(/\?\?\?/g, '—')}</p>
                 </div>
                 {price && <div className="footer-price">{price}</div>}
             </div>

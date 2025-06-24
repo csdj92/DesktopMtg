@@ -33,6 +33,7 @@
   color: #e0e0e0;
   font-size: 24px;
   cursor: pointer;
+  z-index: 10;
 }
 
 .modal-body {
@@ -46,7 +47,9 @@
 }
 
 .modal-card-details {
-  flex-grow: 1;
+  flex: 2;
+  overflow: hidden;
+  min-width: 0;
 }
 
 .modal-card-details h2 {
@@ -78,20 +81,20 @@
   text-transform: capitalize;
 }
 
-.legalities li.legal {
+.legalities .legality-status.legal {
   color: #4CAF50; /* Green */
+  font-weight: bold;
 }
 
-.legalities li.not_legal {
+.legalities .legality-status.not_legal,
+.legalities .legality-status.banned {
   color: #F44336; /* Red */
+  font-weight: bold;
 }
 
-.legalities li.restricted {
-    color: #FFC107; /* Amber */
-}
-
-.legalities li.banned {
-    color: #F44336; /* Red */
+.legalities .legality-status.restricted {
+  color: #FFC107; /* Amber */
+  font-weight: bold;
 }
 
 .external-links {
@@ -166,4 +169,67 @@
 .form-buttons button:last-child {
   background-color: #ef4444; /* red-500 */
   color: #fff;
+}
+
+.rulings-section {
+  margin-top: 15px;
+  border-top: 1px solid #444;
+  padding-top: 15px;
+  contain: inline-size;
+  overflow: hidden;
+}
+
+.rulings-toggle-btn {
+  background-color: #007bff;
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9em;
+  margin-bottom: 10px;
+  transition: background-color 0.2s;
+}
+
+.rulings-toggle-btn:hover {
+  background-color: #0056b3;
+}
+
+.rulings-list {
+  list-style-type: none;
+  padding-left: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 10px;
+  background-color: #2a2a2a;
+}
+
+.rulings-list li {
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #444;
+}
+
+.rulings-list li:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.ruling-date {
+  font-size: 0.85em;
+  color: #aaa;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.ruling-text {
+  font-size: 0.95em;
+  line-height: 1.4;
+  margin: 0;
+  color: #e0e0e0;
+  white-space: pre-wrap;
+  word-break: break-word;
 } 

@@ -33,7 +33,6 @@ async function importCardsInWorker() {
     });
 
     // Clear existing data first
-    await db.exec('DELETE FROM cards');
     
     let cardCount = 0;
     let batch = [];

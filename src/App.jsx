@@ -98,95 +98,68 @@ function App() {
   const loadMyCollection = async () => {
     setIsViewingCollection(true)
     setSelectedFile(null) // Clear individual file selection
+    setCollectionLoading(true)
     
-    // NEW: Attempt to load from database first
     try {
-      const dbCollections = await window.electronAPI.collectionGetAll();
-      if (dbCollections && dbCollections.length > 0) {
-        console.log('Loading My Collection from database');
-
-        const allCardsMap = new Map(); // Key: composite, Value: aggregated card data
-        const sourceCollectionsMap = new Map(); // Track which collections each card appears in
-        let totalValue = 0;
-
-        for (const coll of dbCollections) {
-          try {
-            // Fetch up to 10k cards per collection (adjust if needed)
-            const records = await window.electronAPI.collectionGet(coll.collection_name, { limit: 10000, offset: 0 });
-
-            for (const record of records) {
-              const parsedCard = {
-                name: record.card_name,
-                setCode: record.set_code || '',
-                collectorNumber: record.collector_number || '',
-                isFoil: record.foil === 'foil',
-                quantity: record.quantity || 1
-              };
-
-              try {
-                const scryfallCard = await window.electronAPI.bulkDataFindCardByDetails(
-                  parsedCard.name,
-                  parsedCard.setCode,
-                  parsedCard.collectorNumber
-                );
-
-                if (scryfallCard) {
-                  const cardKey = `${parsedCard.name}|${parsedCard.setCode}|${parsedCard.collectorNumber}|${parsedCard.isFoil}`;
-
-                  if (allCardsMap.has(cardKey)) {
-                    const existingCard = allCardsMap.get(cardKey);
-                    existingCard.quantity += parsedCard.quantity;
-
-                    const sources = sourceCollectionsMap.get(cardKey);
-                    if (!sources.includes(coll.collection_name)) {
-                      sources.push(coll.collection_name);
-                    }
-                  } else {
-                    const aggregatedCard = {
-                      ...parsedCard,
-                      scryfallData: scryfallCard,
-                      cardKey
-                    };
-                    allCardsMap.set(cardKey, aggregatedCard);
-                    sourceCollectionsMap.set(cardKey, [coll.collection_name]);
-                  }
-
-                  if (scryfallCard.prices) {
-                    const price = parsedCard.isFoil && scryfallCard.prices.usd_foil
-                      ? parseFloat(scryfallCard.prices.usd_foil)
-                      : parseFloat(scryfallCard.prices.usd);
-                    if (price) {
-                      totalValue += price * parsedCard.quantity;
-                    }
-                  }
-                }
-              } catch (innerErr) {
-                console.error(`Error processing card ${parsedCard.name}:`, innerErr);
-              }
-            }
-          } catch (collErr) {
-            console.error(`Error loading collection ${coll.collection_name}:`, collErr);
+      console.log('🎯 Loading My Collection with simple direct method');
+      
+      // Use the new simple method that directly queries collected cards
+      const collectedCards = await window.electronAPI.collectionGetSimple({ limit: 10000, offset: 0 });
+      
+      console.log(`📚 Found ${collectedCards.length} collected cards`);
+      
+      if (collectedCards.length === 0) {
+        console.log('No collected cards found, showing empty collection');
+        setCollectionCards([]);
+        setCollectionStats({ totalCards: 0, totalValue: 0, byRarity: {} });
+        filterCollectionCards([], {});
+        return;
+      }
+      
+      // Process cards into the expected format
+      const processedCards = collectedCards.map(card => ({
+        name: card.name,
+        setCode: card.setCode || card.set_code || card.set || '',
+        collectorNumber: card.number || card.collector_number || '',
+        isFoil: false,
+        quantity: 1,
+        scryfallData: card,
+        cardKey: `${card.name}|${card.setCode || card.set_code || ''}|${card.number || card.collector_number || ''}|false`,
+        sourceFiles: ['Database Collection']
+      }));
+      
+      // Calculate stats
+      let totalValue = 0;
+      processedCards.forEach(card => {
+        if (card.scryfallData.prices) {
+          const price = parseFloat(card.scryfallData.prices.usd);
+          if (price) {
+            totalValue += price * card.quantity;
           }
         }
-
-        const aggregatedCards = Array.from(allCardsMap.values()).map(card => ({
-          ...card,
-          sourceFiles: sourceCollectionsMap.get(card.cardKey) // Re-use existing UI field
-        }));
-
-        const stats = generateCollectionStats(aggregatedCards, totalValue);
-
-        setCollectionCards(aggregatedCards);
-        setCollectionStats(stats);
-        filterCollectionCards(aggregatedCards, {});
-        return; // ✅ Finished loading from DB; skip legacy TXT logic
-      }
-    } catch (dbError) {
-      console.warn('Database load failed or no collections present, falling back to TXT files:', dbError);
+      });
+      
+      const stats = generateCollectionStats(processedCards, totalValue);
+      
+      setCollectionCards(processedCards);
+      setCollectionStats(stats);
+      filterCollectionCards(processedCards, {});
+      console.log('✅ Simple collection loading complete');
+      
+      // Done – skip legacy TXT processing entirely
+      return;
+      
+    } catch (error) {
+      console.error('Error loading collection with simple method:', error);
+      setCollectionCards([]);
+      setCollectionStats({ totalCards: 0, totalValue: 0, byRarity: {} });
+      filterCollectionCards([], {});
+    } finally {
+      setCollectionLoading(false);
     }
     
     // ===============================
-    // Legacy TXT-based implementation (unchanged)
+    // Legacy TXT-based implementation (DISABLED)
     // ===============================
     
     // Check if we can use cached data
@@ -220,6 +193,10 @@ function App() {
           // Process each card in this file
           for (const parsedCard of parsedCards) {
             try {
+              if (!parsedCard.name) {
+                console.warn('⚠️ App.loadMyCollection: record with undefined name', parsedCard);
+                continue;
+              }
               const scryfallCard = await window.electronAPI.bulkDataFindCardByDetails(
                 parsedCard.name, 
                 parsedCard.setCode, 
@@ -355,9 +332,10 @@ function App() {
         stats.setBreakdown[scryfallData.set_name] = (stats.setBreakdown[scryfallData.set_name] || 0) + quantity
       }
       
-      // Color breakdown
-      if (scryfallData.colors && scryfallData.colors.length > 0) {
-        scryfallData.colors.forEach(color => {
+      // Color breakdown (defensive: always treat as array)
+      let colorsArr = Array.isArray(scryfallData.colors) ? scryfallData.colors : (typeof scryfallData.colors === 'string' && scryfallData.colors.length > 0 ? [scryfallData.colors] : []);
+      if (colorsArr.length > 0) {
+        colorsArr.forEach(color => {
           stats.colorBreakdown[color] = (stats.colorBreakdown[color] || 0) + quantity
         })
       } else {
@@ -542,8 +520,8 @@ function App() {
           // Search in multiple fields
           const searchFields = [
             scryfallData.name || '',
-            scryfallData.oracle_text || '',
-            scryfallData.type_line || '',
+            scryfallData.text || scryfallData.oracle_text || '',
+            scryfallData.type || scryfallData.type_line || '',
             // Also search card faces for double-faced cards
             ...(scryfallData.card_faces || []).map(face => face.oracle_text || ''),
             ...(scryfallData.card_faces || []).map(face => face.name || ''),
@@ -628,7 +606,7 @@ function App() {
       return
     }
 
-    const { name, text, type, colors, manaCost, power, toughness, rarity } = searchParams;
+    const { name, text, type, colors, manaCost, manaValue, power, toughness, rarity, types, subTypes, superTypes } = searchParams;
 
     const filtered = cards.filter(card => {
       const scryfallData = card.scryfallData
@@ -641,7 +619,8 @@ function App() {
       // Oracle text search (case-insensitive) - include card faces
       if (text) {
         let hasTextMatch = false;
-        if (scryfallData.oracle_text && scryfallData.oracle_text.toLowerCase().includes(text.toLowerCase())) {
+        const oracleText = scryfallData.text || scryfallData.oracle_text || '';
+        if (oracleText && oracleText.toLowerCase().includes(text.toLowerCase())) {
           hasTextMatch = true;
         }
         // Check card faces for double-faced cards
@@ -658,7 +637,8 @@ function App() {
       // Type line search (case-insensitive) - include card faces
       if (type) {
         let hasTypeMatch = false;
-        if (scryfallData.type_line && scryfallData.type_line.toLowerCase().includes(type.toLowerCase())) {
+        const typeLine = scryfallData.type || scryfallData.type_line || '';
+        if (typeLine && typeLine.toLowerCase().includes(type.toLowerCase())) {
           hasTypeMatch = true;
         }
         // Check card faces for double-faced cards
@@ -674,7 +654,8 @@ function App() {
       
       // Colors (must include all selected colors)
       if (colors && colors.length > 0) {
-        if (!scryfallData.colors || !colors.every(c => scryfallData.colors.includes(c))) {
+        let cardColors = Array.isArray(scryfallData.colors) ? scryfallData.colors : (typeof scryfallData.colors === 'string' && scryfallData.colors.length > 0 ? [scryfallData.colors] : []);
+        if (!cardColors.length || !colors.every(c => cardColors.includes(c))) {
           return false;
         }
       }
@@ -682,7 +663,7 @@ function App() {
       // Mana cost (exact match, but flexible about brackets)
       if (manaCost) {
         const formattedManaCost = manaCost.replace(/\{/g, '').replace(/\}/g, '');
-        const cardManaCost = (scryfallData.mana_cost || '').replace(/\{/g, '').replace(/\}/g, '');
+        const cardManaCost = (scryfallData.manaCost || scryfallData.mana_cost || '').replace(/\{/g, '').replace(/\}/g, '');
         if (cardManaCost !== formattedManaCost) {
           return false;
         }
@@ -698,6 +679,38 @@ function App() {
         return false;
       }
       
+      // Mana value (converted mana cost)
+      if (manaValue) {
+        const cardManaValue = scryfallData.cmc || scryfallData.convertedManaCost || scryfallData.mana_value;
+        if (!cardManaValue || parseInt(cardManaValue) !== parseInt(manaValue)) {
+          return false;
+        }
+      }
+
+      // Types search (case-insensitive)
+      if (types) {
+        const cardTypes = scryfallData.types || scryfallData.type_line || '';
+        if (!cardTypes.toLowerCase().includes(types.toLowerCase())) {
+          return false;
+        }
+      }
+
+      // Subtypes search (case-insensitive)
+      if (subTypes) {
+        const cardSubtypes = scryfallData.subtypes || scryfallData.type_line || '';
+        if (!cardSubtypes.toLowerCase().includes(subTypes.toLowerCase())) {
+          return false;
+        }
+      }
+
+      // Supertypes search (case-insensitive)
+      if (superTypes) {
+        const cardSupertypes = scryfallData.supertypes || scryfallData.type_line || '';
+        if (!cardSupertypes.toLowerCase().includes(superTypes.toLowerCase())) {
+          return false;
+        }
+      }
+
       // Rarity (exact match, case-insensitive)
       if (rarity && scryfallData.rarity.toLowerCase() !== rarity.toLowerCase()) {
         return false;

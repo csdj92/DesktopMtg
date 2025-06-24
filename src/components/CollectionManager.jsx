@@ -408,7 +408,7 @@ const CollectionManager = () => {
                   <div className="card-info">
                     <h4>{card.card_name}</h4>
                     <div className="card-details">
-                      {card.set_code && <span className="set-info">{card.set_code} #{card.collector_number}</span>}
+                      {(card.setCode || card.set_code) && <span className="set-info">{card.setCode || card.set_code} #{card.number || card.collector_number}</span>}
                       {card.rarity && <span className={`rarity ${card.rarity}`}>{card.rarity}</span>}
                       {card.foil === 'foil' && <span className="foil">✨ Foil</span>}
                     </div>
