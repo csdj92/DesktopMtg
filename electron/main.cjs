@@ -1,9 +1,9 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs').promises;
+const fsSync = require('fs');
 const bulkDataService = require('./bulkDataService.cjs');
 const collectionImporter = require('./collectionImporter.cjs');
-const fsSync = require('fs');
 const { spawnSync } = require('child_process');
 const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
@@ -587,6 +587,7 @@ const createWindow = () => {
     // Open the DevTools.
     mainWindow.webContents.openDevTools();
   } else {
+    // Fix: The dist folder should be in the extraResource, not inside app directory
     const indexPath = app.isPackaged 
       ? path.join(process.resourcesPath, 'dist', 'index.html')
       : path.join(__dirname, '..', 'dist', 'index.html');
@@ -594,10 +595,39 @@ const createWindow = () => {
     console.log('Loading index.html from:', indexPath);
     log.info('Loading index.html from:', indexPath);
     
-    mainWindow.loadFile(indexPath).catch(err => {
-      console.error('Error loading file:', err);
-      log.error('Error loading file:', err);
-    });
+    // Check if file exists before trying to load it
+    if (fsSync.existsSync(indexPath)) {
+      mainWindow.loadFile(indexPath).catch(err => {
+        console.error('Error loading file:', err);
+        log.error('Error loading file:', err);
+      });
+    } else {
+      console.error('Index file does not exist at:', indexPath);
+      log.error('Index file does not exist at:', indexPath);
+      
+      // Try alternative paths for troubleshooting
+      const alternatives = [
+        path.join(process.resourcesPath, 'app', 'dist', 'index.html'),
+        path.join(__dirname, '..', 'dist', 'index.html'),
+        path.join(app.getAppPath(), 'dist', 'index.html')
+      ];
+      
+      for (const altPath of alternatives) {
+        if (fsSync.existsSync(altPath)) {
+          console.log('Found index.html at alternative path:', altPath);
+          log.info('Found index.html at alternative path:', altPath);
+          mainWindow.loadFile(altPath).catch(err => {
+            console.error('Error loading alternative file:', err);
+            log.error('Error loading alternative file:', err);
+          });
+          return;
+        }
+      }
+      
+      // If no file found, show error
+      const { dialog } = require('electron');
+      dialog.showErrorBox('File Not Found', `Could not find index.html at expected location: ${indexPath}`);
+    }
   }
 
   return mainWindow;

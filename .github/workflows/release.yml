@@ -76,22 +76,67 @@ jobs:
           node-version: '18'
           cache: 'npm'
 
-      # 6- Install Python (with pip cache) – needed for your DB-build script
+      # 6- Verify database exists
+      - name: Verify database exists
+        shell: powershell
+        run: |
+          if (Test-Path "Database/database.sqlite") {
+            $dbSize = (Get-Item "Database/database.sqlite").Length / 1MB
+            Write-Host "✅ Database found: $([math]::Round($dbSize, 2)) MB"
+          } else {
+            Write-Error "❌ Database not found at Database/database.sqlite"
+            exit 1
+          }
 
       # 7- Restore Node deps
       - name: Install Node dependencies
         run: npm ci
 
-      # 8- Build renderer bundle
-      - name: Build React app
-        run: npm run build
-
-      # 9- Package the Electron app (creates installers/zips in `out/`)
-      - name: Make Electron distributables
+      # 8- Build complete application with resources (matches local build process)
+      - name: Build complete application with resources
         env:
           DEBUG: electron-forge:*
-        run: npm run make:complete
+        run: npm run build:complete
 
-      # 10- Publish → creates/updates GitHub Release & uploads artifacts
+      # 9- Verify packaged output
+      - name: Verify packaged output
+        shell: powershell
+        run: |
+          # Check if the packaged app exists
+          if (Test-Path "out/desktopmtg-win32-x64") {
+            Write-Host "✅ Packaged app found"
+            
+            # Check if database was packaged
+            if (Test-Path "out/desktopmtg-win32-x64/resources/Database/database.sqlite") {
+              $dbSize = (Get-Item "out/desktopmtg-win32-x64/resources/Database/database.sqlite").Length / 1MB
+              Write-Host "✅ Database packaged: $([math]::Round($dbSize, 2)) MB"
+            } else {
+              Write-Error "❌ Database not found in packaged app"
+              exit 1
+            }
+            
+            # Check if HTML files were packaged
+            if (Test-Path "out/desktopmtg-win32-x64/resources/dist/index.html") {
+              Write-Host "✅ HTML files packaged"
+            } else {
+              Write-Error "❌ HTML files not found in packaged app"
+              exit 1
+            }
+            
+            # Calculate total size
+            $totalSize = (Get-ChildItem -Path "out/desktopmtg-win32-x64" -Recurse | Measure-Object -Property Length -Sum).Sum / 1GB
+            Write-Host "📦 Total packaged size: $([math]::Round($totalSize, 2)) GB"
+          } else {
+            Write-Error "❌ Packaged app not found"
+            exit 1
+          }
+
+      # 10- Create distributables (installers)
+      - name: Create distributables
+        env:
+          DEBUG: electron-forge:*
+        run: npm run make
+
+      # 11- Publish → creates/updates GitHub Release & uploads artifacts
       - name: Publish Electron app to GitHub Release
         run: npm run publish
