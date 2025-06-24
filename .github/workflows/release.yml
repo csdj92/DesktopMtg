@@ -82,9 +82,9 @@ jobs:
         run: |
           if (Test-Path "Database/database.sqlite") {
             $dbSize = (Get-Item "Database/database.sqlite").Length / 1MB
-            Write-Host "✅ Database found: $([math]::Round($dbSize, 2)) MB"
+            Write-Host "✓ Database found: $([math]::Round($dbSize, 2)) MB"
           } else {
-            Write-Error "❌ Database not found at Database/database.sqlite"
+            Write-Error "✗ Database not found at Database/database.sqlite"
             exit 1
           }
 
@@ -104,22 +104,22 @@ jobs:
         run: |
           # Check if the packaged app exists
           if (Test-Path "out/desktopmtg-win32-x64") {
-            Write-Host "✅ Packaged app found"
+            Write-Host "✓ Packaged app found"
             
             # Check if database was packaged
             if (Test-Path "out/desktopmtg-win32-x64/resources/Database/database.sqlite") {
               $dbSize = (Get-Item "out/desktopmtg-win32-x64/resources/Database/database.sqlite").Length / 1MB
-              Write-Host "✅ Database packaged: $([math]::Round($dbSize, 2)) MB"
+              Write-Host "✓ Database packaged: $([math]::Round($dbSize, 2)) MB"
             } else {
-              Write-Error "❌ Database not found in packaged app"
+              Write-Error "✗ Database not found in packaged app"
               exit 1
             }
             
             # Check if HTML files were packaged
             if (Test-Path "out/desktopmtg-win32-x64/resources/dist/index.html") {
-              Write-Host "✅ HTML files packaged"
+              Write-Host "✓ HTML files packaged"
             } else {
-              Write-Error "❌ HTML files not found in packaged app"
+              Write-Error "✗ HTML files not found in packaged app"
               exit 1
             }
             
@@ -127,7 +127,7 @@ jobs:
             $totalSize = (Get-ChildItem -Path "out/desktopmtg-win32-x64" -Recurse | Measure-Object -Property Length -Sum).Sum / 1GB
             Write-Host "📦 Total packaged size: $([math]::Round($totalSize, 2)) GB"
           } else {
-            Write-Error "❌ Packaged app not found"
+            Write-Error "✗ Packaged app not found"
             exit 1
           }
 
