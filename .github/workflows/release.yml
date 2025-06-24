@@ -24,38 +24,74 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2- Verify tag = package.json version
+      # 2- Clean up workspace
+      - name: Clean workspace
+        shell: powershell
+        run: |
+          # Clean up any existing temp files
+          if (Test-Path "$env:TEMP\electron-packager") {
+            Remove-Item "$env:TEMP\electron-packager" -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          # Clean up any existing out directory
+          if (Test-Path "out") {
+            Remove-Item "out" -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
+      # 3- Fix file permissions
+      - name: Fix file permissions
+        shell: powershell
+        run: |
+          # Remove read-only attributes from all files
+          Get-ChildItem -Recurse | ForEach-Object { 
+            try {
+              $_.Attributes = $_.Attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly)
+            } catch {
+              Write-Warning "Could not modify attributes for: $($_.FullName)"
+            }
+          }
+          # Ensure package.json is writable
+          if (Test-Path "package.json") {
+            $file = Get-Item "package.json"
+            $file.Attributes = $file.Attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly)
+            Write-Host "package.json attributes: $($file.Attributes)"
+          }
+
+      # 4- Verify tag = package.json version
       - name: Verify version tag
         shell: bash
         run: |
           TAG_VERSION=${GITHUB_REF_NAME#v}
           PKG_VERSION=$(node -pe "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")
+          echo "Tag version: $TAG_VERSION"
+          echo "Package version: $PKG_VERSION"
           if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
             echo "::error::Tag version ($TAG_VERSION) doesn't match package.json ($PKG_VERSION)"
             exit 1
           fi
 
-      # 3- Install Node (with npm cache)
+      # 5- Install Node (with npm cache)
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
           cache: 'npm'
 
-      # 4- Install Python (with pip cache) – needed for your DB-build script
+      # 6- Install Python (with pip cache) – needed for your DB-build script
 
-      # 4- Restore Node deps
+      # 7- Restore Node deps
       - name: Install Node dependencies
         run: npm ci
 
-      # 5- Build renderer bundle
+      # 8- Build renderer bundle
       - name: Build React app
         run: npm run build
 
-      # 6- Package the Electron app (creates installers/zips in `out/`)
+      # 9- Package the Electron app (creates installers/zips in `out/`)
       - name: Make Electron distributables
+        env:
+          DEBUG: electron-forge:*
         run: npm run make:complete
 
-      # 7- Publish → creates/updates GitHub Release & uploads artifacts
+      # 10- Publish → creates/updates GitHub Release & uploads artifacts
       - name: Publish Electron app to GitHub Release
         run: npm run publish
