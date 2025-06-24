@@ -43,3 +43,6 @@ check-sets-table.cjs
 analyze-indexes.cjs
 check-tables.cjs
 debug_card_lookup.sql
+
+# Mock/test data - contains large files that exceed GitHub limits
+mock-userdata/
