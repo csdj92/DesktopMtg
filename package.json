@@ -1,3 +1,159 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:b3bcb8cd3a27588fb13cb1f9ccfcd9a559166e4b8e9058fe3a9b47267fef3c99
-size 5413
+{
+  "name": "desktopmtg",
+  "description": "Desktop Magic: The Gathering collection manager and deck builder",
+  "author": "C.J Davis",
+  "private": true,
+  "version": "0.1.1",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:complete": "npm run build && npm run package:with-resources",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "start": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && cross-env NODE_OPTIONS=--max-old-space-size=4096 NODE_ENV=development electron .\"",
+    "start:low-memory": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development NODE_OPTIONS=--max-old-space-size=4096 electron .\"",
+    "start:skip-bulk": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development NODE_OPTIONS=--max-old-space-size=4096 SKIP_BULK_DATA=true electron .\"",
+    "build-db": "python scripts/build_card_database.py",
+    "setup-python": "pip install -r scripts/requirements.txt",
+    "package": "electron-forge package",
+    "package:with-resources": "npm run package && node scripts/copy-resources-post.cjs",
+    "make": "electron-forge make",
+    "make:complete": "npm run build && npm run package:with-resources && npm run make",
+    "publish": "electron-forge publish"
+  },
+  "dependencies": {
+    "@lancedb/lancedb": "^0.21.0",
+    "@radix-ui/react-dialog": "^1.1.14",
+    "@radix-ui/react-progress": "^1.1.7",
+    "@radix-ui/react-scroll-area": "^1.2.9",
+    "@radix-ui/react-select": "^2.2.5",
+    "@radix-ui/react-separator": "^1.1.7",
+    "@radix-ui/react-slot": "^1.2.3",
+    "@radix-ui/react-tabs": "^1.1.12",
+    "@radix-ui/react-tooltip": "^1.2.7",
+    "@xenova/transformers": "^2.17.2",
+    "apache-arrow": "^18.1.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "csv-parse": "^5.5.6",
+    "electron-log": "^5.1.6",
+    "electron-squirrel-startup": "^1.0.1",
+    "electron-updater": "^6.2.3",
+    "framer-motion": "^12.18.1",
+    "lodash.debounce": "^4.0.8",
+    "lucide-react": "^0.517.0",
+    "python-shell": "^5.0.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-window": "^1.8.11",
+    "react-window-infinite-loader": "^1.0.10",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7",
+    "stream-json": "^1.9.1",
+    "tailwind-merge": "^3.3.1"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^7.8.1",
+    "@electron-forge/maker-deb": "^7.8.1",
+    "@electron-forge/maker-rpm": "^7.8.1",
+    "@electron-forge/maker-squirrel": "^7.8.1",
+    "@electron-forge/maker-zip": "^7.8.1",
+    "@electron-forge/plugin-auto-unpack-natives": "^7.8.1",
+    "@electron-forge/plugin-fuses": "^7.8.1",
+    "@electron-forge/publisher-github": "^7.8.1",
+    "@electron/fuses": "^1.8.0",
+    "@eslint/js": "^9.25.0",
+    "@tailwindcss/postcss": "^4.1.10",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "@vitejs/plugin-react": "^4.4.1",
+    "@vitejs/plugin-react-swc": "^3.10.2",
+    "autoprefixer": "^10.4.21",
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
+    "electron": "^31.0.1",
+    "eslint": "^9.25.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.19",
+    "fs-extra": "^11.3.0",
+    "globals": "^16.0.0",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.10",
+    "tw-animate-css": "^1.3.4",
+    "vite": "^6.3.5",
+    "vite-plugin-electron-renderer": "^0.14.6",
+    "wait-on": "^7.2.0"
+  },
+  "config": {
+    "forge": {
+      "packagerConfig": {
+        "asar": false,
+        "extraResource": [
+          "./dist",
+          "./scripts",
+          "./python-3.8.9-embed-amd64",
+          "./vectordb",
+          "./app-update.yml"
+        ]
+      },
+      "rebuildConfig": {},
+      "makers": [
+        {
+          "name": "@electron-forge/maker-squirrel",
+          "platforms": [
+            "win32"
+          ],
+          "config": {
+            "name": "desktopmtg",
+            "setupExe": "DesktopMTG_Setup.exe",
+            "authors": "C.J Davis",
+            "description": "Desktop Magic: The Gathering collection manager and deck builder"
+          }
+        },
+        {
+          "name": "@electron-forge/maker-deb",
+          "platforms": [
+            "linux"
+          ],
+          "config": {}
+        },
+        {
+          "name": "@electron-forge/maker-rpm",
+          "platforms": [
+            "linux"
+          ],
+          "config": {}
+        }
+      ],
+      "plugins": [
+        {
+          "name": "@electron-forge/plugin-fuses",
+          "config": {
+            "version": "1",
+            "RunAsNode": false,
+            "EnableCookieEncryption": true,
+            "EnableNodeOptionsEnvironmentVariable": true,
+            "EnableNodeCliInspectArguments": false,
+            "EnableEmbeddedAsarIntegrityValidation": true,
+            "OnlyLoadAppFromAsar": false
+          }
+        }
+      ],
+      "publishers": [
+        {
+          "name": "@electron-forge/publisher-github",
+          "config": {
+            "repository": {
+              "owner": "csdj92",
+              "name": "DesktopMtg"
+            },
+            "prerelease": false,
+            "draft": false
+          }
+        }
+      ]
+    }
+  }
+}
