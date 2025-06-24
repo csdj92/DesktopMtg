@@ -496,6 +496,19 @@ class CollectionImporter {
     }
   }
 
+  async clearAllCollections() {
+    if (!this.db) return false;
+
+    try {
+      const result = await this.db.run('DELETE FROM user_collections');
+      console.log(`🗑️ Cleared all collections (${result.changes} records removed)`);
+      return result.changes >= 0; // 0 changes is still success (table was already empty)
+    } catch (error) {
+      console.error('Error clearing all collections:', error);
+      return false;
+    }
+  }
+
   async getCollectionStats(collectionName) {
     if (!this.db) return null;
 

@@ -108,7 +108,42 @@
             "name": "desktopmtg",
             "setupExe": "DesktopMTG_Setup.exe",
             "authors": "C.J Davis",
-            "description": "Desktop Magic: The Gathering collection manager and deck builder"
+            "description": "Desktop Magic: The Gathering collection manager and deck builder",
+            "skipUpdateIcon": true,
+            "setupIcon": false,
+            "noMsi": true,
+            "remoteReleases": false,
+            "certificateFile": false,
+            "certificatePassword": false
+          }
+        },
+        {
+          "name": "@electron-forge/maker-zip",
+          "platforms": [
+            "win32"
+          ],
+          "config": {
+            "name": "DesktopMTG_Full_Offline"
+          }
+        },
+        {
+          "name": "@electron-forge/maker-squirrel",
+          "platforms": [
+            "win32"
+          ],
+          "config": {
+            "name": "desktopmtg-offline",
+            "setupExe": "DesktopMTG_Offline_Setup.exe",
+            "authors": "C.J Davis",
+            "description": "Desktop Magic: The Gathering collection manager and deck builder - Full Offline Installer",
+            "skipUpdateIcon": true,
+            "setupIcon": false,
+            "noMsi": true,
+            "remoteReleases": false,
+            "certificateFile": false,
+            "certificatePassword": false,
+            "loadingGif": false,
+            "setupMsi": false
           }
         },
         {

@@ -205,6 +205,25 @@ ipcMain.handle('collection-mark-card', async (event, cardId, collected = true) =
   return await bulkDataService.markCardCollected(cardId, collected);
 });
 
+// Clear all collections - reset collected field and clear user_collections table
+ipcMain.handle('collection-clear-all', async () => {
+  try {
+    console.log('🗑️ Clearing all collections...');
+    
+    // Reset all collected cards to 0 in the main database
+    await bulkDataService.clearAllCollected();
+    
+    // Clear the user_collections table
+    await collectionImporter.clearAllCollections();
+    
+    console.log('✅ All collections cleared successfully');
+    return { success: true };
+  } catch (error) {
+    console.error('❌ Error clearing collections:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 // Deck Management
 // =================================================================
 

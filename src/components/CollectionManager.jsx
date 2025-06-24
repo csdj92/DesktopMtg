@@ -267,6 +267,37 @@ const CollectionManager = () => {
     }
   };
 
+  const handleClearAllCollections = async () => {
+    if (!safeConfirm('Are you sure you want to clear ALL collections? This will:\n\n• Remove all cards from your collections\n• Reset all "collected" markers to 0\n• Clear the user_collections table\n\nThis action cannot be undone!')) {
+      return;
+    }
+
+    try {
+      setIsImporting(true);
+      setImportProgress('Clearing all collections...');
+
+      const result = await window.electronAPI.collectionClearAll();
+      
+      if (result.success) {
+        setImportProgress('✅ All collections cleared successfully');
+        await loadCollections();
+        setSelectedCollection(null);
+        setCollectionCards([]);
+        setCollectionStats(null);
+        setTimeout(() => setImportProgress(''), 3000);
+      } else {
+        setImportProgress(`❌ Failed to clear collections: ${result.error}`);
+        setTimeout(() => setImportProgress(''), 5000);
+      }
+    } catch (error) {
+      console.error('Error clearing collections:', error);
+      setImportProgress(`❌ Error clearing collections: ${error.message}`);
+      setTimeout(() => setImportProgress(''), 5000);
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   const handleSearch = (e) => {
     const term = e.target.value;
     setSearchTerm(term);
@@ -315,6 +346,14 @@ const CollectionManager = () => {
               className="import-btn bulk-txt-btn"
             >
               📂 Import All TXT
+            </button>
+            <button
+              onClick={handleClearAllCollections}
+              disabled={isImporting}
+              className="import-btn clear-all-btn"
+              style={{ backgroundColor: '#dc3545', color: 'white' }}
+            >
+              🗑️ Clear All
             </button>
           </div>
         </div>

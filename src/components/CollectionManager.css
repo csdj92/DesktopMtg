@@ -207,4 +207,24 @@
   .cm-cards-list {
     grid-template-columns: 1fr;
   }
+}
+
+/* Clear All button - dangerous action styling */
+.clear-all-btn {
+  background-color: #dc3545 !important;
+  color: white !important;
+  border-color: #dc3545 !important;
+}
+
+.clear-all-btn:hover:not(:disabled) {
+  background-color: #c82333 !important;
+  border-color: #bd2130 !important;
+  color: white !important;
+}
+
+.clear-all-btn:disabled {
+  background-color: #6c757d !important;
+  border-color: #6c757d !important;
+  color: white !important;
+  opacity: 0.6;
 } 

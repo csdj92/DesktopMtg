@@ -241,6 +241,21 @@ class BulkDataService {
     }
   }
 
+  async clearAllCollected() {
+    if (!this.db || !this.initialized) {
+      return false;
+    }
+    
+    try {
+      const result = await this.db.run('UPDATE cards SET collected = 0 WHERE collected > 0');
+      console.log(`Cleared ${result.changes} collected card(s) from main database`);
+      return result.changes > 0;
+    } catch (error) {
+      console.error('Error clearing all collected cards:', error);
+      return false;
+    }
+  }
+
   async getCardRuling(cardId) {
     if (!this.db) return [];
     const results = await this.db.all('SELECT date, text FROM cardRulings WHERE uuid = ? ORDER BY date', [cardId]);
