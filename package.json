@@ -100,6 +100,12 @@
       "rebuildConfig": {},
       "makers": [
         {
+          "name": "@electron-forge/maker-zip",
+          "platforms": [
+            "win32"
+          ]
+        },
+        {
           "name": "@electron-forge/maker-squirrel",
           "platforms": [
             "win32"
@@ -131,12 +137,9 @@
           "name": "@electron-forge/plugin-fuses",
           "config": {
             "version": "1",
-            "RunAsNode": false,
             "EnableCookieEncryption": true,
             "EnableNodeOptionsEnvironmentVariable": true,
-            "EnableNodeCliInspectArguments": false,
-            "EnableEmbeddedAsarIntegrityValidation": true,
-            "OnlyLoadAppFromAsar": false
+            "EnableEmbeddedAsarIntegrityValidation": true
           }
         }
       ],

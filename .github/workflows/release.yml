@@ -150,6 +150,32 @@ jobs:
           DEBUG: electron-forge:*
         run: npm run make
 
-      # 12- Publish → creates/updates GitHub Release & uploads artifacts
+      # 12- Verify distributables were created
+      - name: Verify distributables
+        shell: powershell
+        run: |
+          Write-Host "Listing all files in out/make directory:"
+          if (Test-Path "out/make") {
+            Get-ChildItem -Path "out/make" -Recurse | Format-Table Name, Length, FullName
+            
+            # Check for setup executable
+            if (Get-ChildItem -Path "out/make" -Recurse -Filter "*.exe" | Where-Object { $_.Name -like "*Setup*" }) {
+              Write-Host "SUCCESS: Setup executable found"
+            } else {
+              Write-Warning "Setup executable not found"
+            }
+            
+            # Check for ZIP file
+            if (Get-ChildItem -Path "out/make" -Recurse -Filter "*.zip") {
+              Write-Host "SUCCESS: ZIP distribution found"
+            } else {
+              Write-Warning "ZIP distribution not found"
+            }
+          } else {
+            Write-Error "ERROR: out/make directory not found"
+            exit 1
+          }
+
+      # 13- Publish → creates/updates GitHub Release & uploads artifacts
       - name: Publish Electron app to GitHub Release
         run: npm run publish
