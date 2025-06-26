@@ -71,6 +71,18 @@ text{
   overflow: hidden; /* Prevent content from overflowing */
 }
 
+/* Special handling for deckbuilder to take full screen */
+.app-content.deckbuilder-mode {
+  flex: 1;
+  overflow: hidden;
+  background-color: var(--bg-primary);
+}
+
+/* Hide header and footer when in deckbuilder mode */
+.app.deckbuilder-active .app-footer {
+  display: none;
+}
+
 /* Collections View */
 .collections-view {
   display: flex;
@@ -201,8 +213,6 @@ text{
   color: var(--color-text-secondary);
   font-size: 0.9rem;
 }
-
-
 
 .results-header {
   display: flex;
@@ -592,8 +602,6 @@ text{
   width: 100%;
   height: 100%;
 }
-
-
 
 .virtual-grid-row {
   display: grid;

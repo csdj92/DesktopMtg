@@ -4,6 +4,10 @@ import CardDetailModal from './CardDetailModal';
 import DeckStatistics from './DeckStatistics';
 import SearchControls from './SearchControls';
 import SearchFunctions from './search';
+import GridLayout from "react-grid-layout"; 
+import 'react-grid-layout/css/styles.css';
+import 'react-resizable/css/styles.css';
+import SpellbookExport from './SpellbookExport';
 
 
 // --- Placeholder: Card Component ---
@@ -139,6 +143,16 @@ const DeckBuilder = () => {
 
   // Hold results returned by advanced search controls
   const [collectionSearchResults, setCollectionSearchResults] = useState(null); // null means no search yet
+
+  // Window width for responsive GridLayout
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+
+  // Handle window resize for responsive GridLayout
+  useEffect(() => {
+    const handleResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // --- Auto-save draft deck to localStorage ---
   // 1) Restore any previous draft on first mount
@@ -652,222 +666,256 @@ const DeckBuilder = () => {
     return filteredRecs;
   }, [recommendations, ownedCards, format, deck.commanders, commanderColorIdentity]);
 
+  // Grid layout positions
+  const layoutConfig = [
+    { i: 'left', x: 0, y: 0, w: 4, h: 14, minW: 2, minH: 8 },
+    { i: 'main', x: 4, y: 0, w: 8, h: 14, minW: 4, minH: 10 },
+    { i: 'right', x: 12, y: 0, w: 4, h: 14, minW: 2, minH: 8 }
+  ];
+
   return (
     <div className="deck-builder-container">
-      {selectedCard && <CardDetailModal card={selectedCard} onClose={handleCloseModal} />}
-      <div className="deck-builder-left-panel">
-        <div className="panel-toggle">
-          <button onClick={() => setLeftPanelView('collection')} className={leftPanelView === 'collection' ? 'active' : ''}>My Collection</button>
-          <button onClick={() => setLeftPanelView('search')} className={leftPanelView === 'search' ? 'active' : ''}>Card Search</button>
-        </div>
-
-        {leftPanelView === 'search' && (
-          <div className="search-view">
-            <SearchControls
-              onSearch={deckBulkSearch}
-              bulkDataStats={bulkDataStats}
-            />
-            <div className="search-results-grid">
-              {searchLoading && <p>Searching...</p>}
-              {!searchLoading && filteredSearchResults.map(card => {
-                const isInDeck = deck.mainboard.some(entry => entry.card.id === card.id);
-                const canAddMore = format !== 'commander' || isBasicLand(card) || !isInDeck;
-
-                return (
-                  <div key={card.id} className="card-grid-item">
-                    <Card card={card} onCardClick={handleCardClick} />
-                    <button
-                      onClick={(e) => { e.stopPropagation(); addCardToDeck(card); }}
-                      disabled={!canAddMore}
-                      title={!canAddMore ? 'Commander format allows only one copy of non-basic cards' : ''}
-                    >
-                      {isInDeck && format === 'commander' && !isBasicLand(card) ? 'In Deck' : 'Add to Deck'}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
+      {selectedCard && <CardDetailModal card={selectedCard} onClose={() => setSelectedCard(null)} />}
+      <GridLayout
+        className="deck-builder-grid"
+        layout={layoutConfig}
+        cols={16}
+        rowHeight={30}
+        width={windowWidth}
+        draggableHandle=".drag-handle"
+        isResizable={true}
+        isDraggable={true}
+        resizeHandles={['se', 'sw', 'ne', 'nw']}
+        margin={[10, 10]}
+        containerPadding={[10, 10]}
+        compactType="vertical"
+        preventCollision={false}
+        autoSize={true}
+        useCSSTransforms={true}
+        onLayoutChange={(layout) => {
+          // Optional: Save layout changes to localStorage or state
+          console.log('Layout changed:', layout);
+        }}
+      >
+        {/* Left Panel */}
+        <div key="left" className="deck-builder-left-panel panel">
+          <div className="drag-handle panel-drag-bar">⋮⋮ Collection & Search</div>
+          <div className="panel-toggle">
+            <button onClick={() => setLeftPanelView('collection')} className={leftPanelView === 'collection' ? 'active' : ''}>My Collection</button>
+            <button onClick={() => setLeftPanelView('search')} className={leftPanelView === 'search' ? 'active' : ''}>Card Search</button>
           </div>
-        )}
 
-        {leftPanelView === 'collection' && (
-          <div className="collection-view">
-            <h3>My Collection ({displayCollectionCards.length} unique)</h3>
-            {/* NEW: inline search & sort controls */}
-            <div className="collection-controls">
+          {leftPanelView === 'search' && (
+            <div className="search-view">
               <SearchControls
-                onSearch={(params) => searchHelperRef.current?.handleCollectionSearch(params)}
+                onSearch={deckBulkSearch}
                 bulkDataStats={bulkDataStats}
               />
-            </div>
-            <div className="owned-cards-grid">
-              {ownedLoading && <p>Loading collection...</p>}
-              {!ownedLoading && displayCollectionCards.map(entry => {
-                const isInDeck = deck.mainboard.some(deckEntry => deckEntry.card.id === entry.card.id);
-                const canAddMore = format !== 'commander' || isBasicLand(entry.card) || !isInDeck;
+              <div className="search-results-grid">
+                {searchLoading && <p>Searching...</p>}
+                {!searchLoading && filteredSearchResults.map(card => {
+                  const isInDeck = deck.mainboard.some(entry => entry.card.id === card.id);
+                  const canAddMore = format !== 'commander' || isBasicLand(card) || !isInDeck;
 
-                return (
-                  <div key={entry.card.id} className="card-grid-item">
-                    <Card card={entry.card} quantity={entry.quantity} onCardClick={handleCardClick} />
-                    <button
-                      onClick={(e) => { e.stopPropagation(); addCardToDeck(entry.card); }}
-                      disabled={!canAddMore}
-                      title={!canAddMore ? 'Commander format allows only one copy of non-basic cards' : ''}
-                    >
-                      {isInDeck && format === 'commander' && !isBasicLand(entry.card) ? 'In Deck' : 'Add to Deck'}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="deck-builder-main-panel">
-        <div className="deck-stats-and-actions">
-          <h2>{currentDeckName ? `Deck: ${currentDeckName}` : 'Untitled Deck'}</h2>
-          <div className="format-selector">
-            <label>Format: </label>
-            <select value={format} onChange={e => setFormat(e.target.value)}>
-              <option value="commander">Commander</option>
-              <option value="standard">Standard</option>
-              <option value="modern">Modern</option>
-              <option value="legacy">Legacy</option>
-              <option value="vintage">Vintage</option>
-              <option value="pauper">Pauper</option>
-            </select>
-          </div>
-        </div>
-
-        {format === 'commander' && (
-          <div className="command-zone-container">
-            <h3>Commander(s)</h3>
-            <div className="command-zone">
-              {/* Left: Commander card(s) */}
-              <div className="commander-cards">
-                {deck.commanders.length > 0 ? (
-                  deck.commanders.map(c => (
-                    <div key={c.id} className="card-grid-item-deck">
-                      <Card card={c} onCardClick={handleCardClick} />
-                      <div className="deck-card-actions">
-                        <button className="remove-button" onClick={() => removeCommander(c.id)}>Remove</button>
-                      </div>
+                  return (
+                    <div key={card.id} className="card-grid-item">
+                      <Card card={card} onCardClick={handleCardClick} />
+                      <button
+                        onClick={(e) => { e.stopPropagation(); addCardToDeck(card); }}
+                        disabled={!canAddMore}
+                        title={!canAddMore ? 'Commander format allows only one copy of non-basic cards' : ''}
+                      >
+                        {isInDeck && format === 'commander' && !isBasicLand(card) ? 'In Deck' : 'Add to Deck'}
+                      </button>
                     </div>
-                  ))
-                ) : (
-                  <div className="empty-slot">Drop a legendary creature here to set as commander.</div>
-                )}
+                  );
+                })}
               </div>
+            </div>
+          )}
 
-              {/* Right: Commander details (showing first commander for now) */}
-              {deck.commanders.length > 0 && (
-                <div className="commander-details">
-                  {(() => {
-                    const cmd = deck.commanders[0];
-                    return (
-                      <>
-                        <h4 className="details-name">{cmd.name}</h4>
-                        {(cmd.manaCost || cmd.mana_cost) && (
-                          <p className="details-line"><strong>Mana Cost:</strong> {cmd.manaCost || cmd.mana_cost}</p>
-                        )}
-                        {(cmd.type || cmd.type_line) && (
-                          <p className="details-line"><strong>Type:</strong> {cmd.type.replace(/\?\?\?/g, '—') || cmd.type_line.replace(/\?\?\?/g, '—')}</p>
-                        )}
-                        {(cmd.text || cmd.oracle_text) && (
-                          <p className="details-line whitespace-pre-line"><strong>Oracle Text:</strong> {cmd.text || cmd.oracle_text}</p>
-                        )}
-                        {cmd.power && cmd.toughness && (
-                          <p className="details-line"><strong>P/T:</strong> {cmd.power}/{cmd.toughness}</p>
-                        )}
-                        {cmd.color_identity && cmd.color_identity.length > 0 && (
-                          <p className="details-line"><strong>Color Identity:</strong> {cmd.color_identity.join(', ')}</p>
-                        )}
-                      </>
-                    );
-                  })()}
-                </div>
-              )}
+          {leftPanelView === 'collection' && (
+            <div className="collection-view">
+              <h3>My Collection ({displayCollectionCards.length} unique)</h3>
+              {/* NEW: inline search & sort controls */}
+              <div className="collection-controls">
+                <SearchControls
+                  onSearch={(params) => searchHelperRef.current?.handleCollectionSearch(params)}
+                  bulkDataStats={bulkDataStats}
+                />
+              </div>
+              <div className="owned-cards-grid">
+                {ownedLoading && <p>Loading collection...</p>}
+                {!ownedLoading && displayCollectionCards.map(entry => {
+                  const isInDeck = deck.mainboard.some(deckEntry => deckEntry.card.id === entry.card.id);
+                  const canAddMore = format !== 'commander' || isBasicLand(entry.card) || !isInDeck;
+
+                  return (
+                    <div key={entry.card.id} className="card-grid-item">
+                      <Card card={entry.card} quantity={entry.quantity} onCardClick={handleCardClick} />
+                      <button
+                        onClick={(e) => { e.stopPropagation(); addCardToDeck(entry.card); }}
+                        disabled={!canAddMore}
+                        title={!canAddMore ? 'Commander format allows only one copy of non-basic cards' : ''}
+                      >
+                        {isInDeck && format === 'commander' && !isBasicLand(entry.card) ? 'In Deck' : 'Add to Deck'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+        {/* Main Panel */}
+        <div key="main" className="deck-builder-main-panel panel">
+          <div className="drag-handle panel-drag-bar">⋮⋮ Deck Builder</div>
+          <div className="deck-stats-and-actions">
+            <h2>{currentDeckName ? `Deck: ${currentDeckName}` : 'Untitled Deck'}</h2>
+            <div className="format-selector">
+              <label>Format: </label>
+              <select value={format} onChange={e => setFormat(e.target.value)}>
+                <option value="commander">Commander</option>
+                <option value="standard">Standard</option>
+                <option value="modern">Modern</option>
+                <option value="legacy">Legacy</option>
+                <option value="vintage">Vintage</option>
+                <option value="pauper">Pauper</option>
+              </select>
             </div>
           </div>
-        )}
 
-        <div className="mainboard-container">
-          <h3>Mainboard ({mainboardCount} cards)</h3>
-          <div className="deck-card-grid">
-            {sortedMainboard.map(entry => (
-              <div key={entry.card.id} className="card-grid-item-deck">
-                <Card card={entry.card} quantity={entry.quantity} onCardClick={handleCardClick} />
-                <div className="deck-card-actions">
-                  <button
-                    onClick={() => incrementQty(entry.card.id)}
-                    disabled={format === 'commander' && !isBasicLand(entry.card)}
-                    title={format === 'commander' && !isBasicLand(entry.card) ? 'Commander format allows only one copy of non-basic cards' : ''}
-                  >
-                    +
-                  </button>
-                  <button onClick={() => decrementQty(entry.card.id)}>-</button>
-                  <button className="remove-button" onClick={() => removeCardFromDeck(entry.card.id)}>Remove</button>
-                  {format === 'commander' && isCardCommander(entry.card) && (
-                    <button className="set-commander-button" onClick={() => setCommander(entry.card)}>Set Commander</button>
+          {format === 'commander' && (
+            <div className="command-zone-container">
+              <h3>Commander(s)</h3>
+              <div className="command-zone">
+                {/* Left: Commander card(s) */}
+                <div className="commander-cards">
+                  {deck.commanders.length > 0 ? (
+                    deck.commanders.map(c => (
+                      <div key={c.id} className="card-grid-item-deck">
+                        <Card card={c} onCardClick={handleCardClick} />
+                        <div className="deck-card-actions">
+                          <button className="remove-button" onClick={() => removeCommander(c.id)}>Remove</button>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="empty-slot">Drop a legendary creature here to set as commander.</div>
                   )}
                 </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
 
-      <div className="deck-builder-right-panel">
-        <div className="panel-toggle">
-          <button onClick={() => setRightPanelView('deck')} className={rightPanelView === 'deck' ? 'active' : ''}>Deck Info</button>
-          <button onClick={() => setRightPanelView('recommendations')} className={rightPanelView === 'recommendations' ? 'active' : ''}>Recommendations</button>
-        </div>
-
-        {rightPanelView === 'deck' && (
-          <div className="deck-info-view">
-            <DeckManager
-              deck={deck}
-              format={format}
-              currentDeckName={currentDeckName}
-              onSave={handleSaveDeck}
-              onLoad={handleLoadDeck}
-              onDelete={handleDeleteDeck}
-              onNew={handleNewDeck}
-            />
-            {memoizedDeckStats}
-          </div>
-        )}
-
-        {rightPanelView === 'recommendations' && (
-          <div className="recommendations-view">
-            <button onClick={handleGetRecommendations} disabled={recoLoading}>
-              {recoLoading ? 'Getting Suggestions...' : 'Suggest Cards'}
-            </button>
-            {deckArchetype && <h4>Suggestions for: {deckArchetype}</h4>}
-            <div className="search-results-grid">
-              {recoLoading && <p>Analyzing deck...</p>}
-              {!recoLoading && displayRecommendations.map(card => {
-                const isInDeck = deck.mainboard.some(entry => entry.card.id === card.id);
-                const canAddMore = format !== 'commander' || isBasicLand(card) || !isInDeck;
-
-                return (
-                  <div key={card.id} className="card-grid-item">
-                    <Card card={card} onCardClick={handleCardClick} />
-                    <button
-                      onClick={(e) => { e.stopPropagation(); addCardToDeck(card); }}
-                      disabled={!canAddMore}
-                      title={!canAddMore ? 'Commander format allows only one copy of non-basic cards' : ''}
-                    >
-                      {isInDeck && format === 'commander' && !isBasicLand(card) ? 'In Deck' : 'Add to Deck'}
-                    </button>
+                {/* Right: Commander details (showing first commander for now) */}
+                {deck.commanders.length > 0 && (
+                  <div className="commander-details">
+                    {(() => {
+                      const cmd = deck.commanders[0];
+                      return (
+                        <>
+                          <h4 className="details-name">{cmd.name}</h4>
+                          {(cmd.manaCost || cmd.mana_cost) && (
+                            <p className="details-line"><strong>Mana Cost:</strong> {cmd.manaCost || cmd.mana_cost}</p>
+                          )}
+                          {(cmd.type || cmd.type_line) && (
+                            <p className="details-line"><strong>Type:</strong> {cmd.type.replace(/\?\?\?/g, '—') || cmd.type_line.replace(/\?\?\?/g, '—')}</p>
+                          )}
+                          {(cmd.text || cmd.oracle_text) && (
+                            <p className="details-line whitespace-pre-line"><strong>Oracle Text:</strong> {cmd.text || cmd.oracle_text}</p>
+                          )}
+                          {cmd.power && cmd.toughness && (
+                            <p className="details-line"><strong>P/T:</strong> {cmd.power}/{cmd.toughness}</p>
+                          )}
+                          {cmd.color_identity && cmd.color_identity.length > 0 && (
+                            <p className="details-line"><strong>Color Identity:</strong> {cmd.color_identity.join(', ')}</p>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
-                );
-              })}
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="mainboard-container">
+            <h3>Mainboard ({mainboardCount} cards)</h3>
+            <div className="deck-card-grid">
+              {sortedMainboard.map(entry => (
+                <div key={entry.card.id} className="card-grid-item-deck">
+                  <Card card={entry.card} quantity={entry.quantity} onCardClick={handleCardClick} />
+                  <div className="deck-card-actions">
+                    <button
+                      onClick={() => incrementQty(entry.card.id)}
+                      disabled={format === 'commander' && !isBasicLand(entry.card)}
+                      title={format === 'commander' && !isBasicLand(entry.card) ? 'Commander format allows only one copy of non-basic cards' : ''}
+                    >
+                      +
+                    </button>
+                    <button onClick={() => decrementQty(entry.card.id)}>-</button>
+                    <button className="remove-button" onClick={() => removeCardFromDeck(entry.card.id)}>Remove</button>
+                    {format === 'commander' && isCardCommander(entry.card) && (
+                      <button className="set-commander-button" onClick={() => setCommander(entry.card)}>Set Commander</button>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
-        )}
-      </div>
+        </div>
+        {/* Right Panel */}
+        <div key="right" className="deck-builder-right-panel panel">
+          <div className="drag-handle panel-drag-bar">⋮⋮ Deck Tools</div>
+          <div className="panel-toggle">
+            <button onClick={() => setRightPanelView('deck')} className={rightPanelView === 'deck' ? 'active' : ''}>Deck Info</button>
+            <button onClick={() => setRightPanelView('recommendations')} className={rightPanelView === 'recommendations' ? 'active' : ''}>Recommendations</button>
+          </div>
+
+          {rightPanelView === 'deck' && (
+            <div className="deck-info-view">
+              <DeckManager
+                deck={deck}
+                format={format}
+                currentDeckName={currentDeckName}
+                onSave={handleSaveDeck}
+                onLoad={handleLoadDeck}
+                onDelete={handleDeleteDeck}
+                onNew={handleNewDeck}
+              />
+              {memoizedDeckStats}
+              <SpellbookExport deck={deck} />
+            </div>
+          )}
+
+          {rightPanelView === 'recommendations' && (
+            <div className="recommendations-view">
+              <button onClick={handleGetRecommendations} disabled={recoLoading}>
+                {recoLoading ? 'Getting Suggestions...' : 'Suggest Cards'}
+              </button>
+              {deckArchetype && <h4>Suggestions for: {deckArchetype}</h4>}
+              <div className="search-results-grid">
+                {recoLoading && <p>Analyzing deck...</p>}
+                {!recoLoading && displayRecommendations.map(card => {
+                  const isInDeck = deck.mainboard.some(entry => entry.card.id === card.id);
+                  const canAddMore = format !== 'commander' || isBasicLand(card) || !isInDeck;
+
+                  return (
+                    <div key={card.id} className="card-grid-item">
+                      <Card card={card} onCardClick={handleCardClick} />
+                      <button
+                        onClick={(e) => { e.stopPropagation(); addCardToDeck(card); }}
+                        disabled={!canAddMore}
+                        title={!canAddMore ? 'Commander format allows only one copy of non-basic cards' : ''}
+                      >
+                        {isInDeck && format === 'commander' && !isBasicLand(card) ? 'In Deck' : 'Add to Deck'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </GridLayout>
     </div>
   );
 };

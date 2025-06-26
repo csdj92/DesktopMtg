@@ -739,7 +739,7 @@ function App() {
   };
 
   return (
-    <div className="app">
+    <div className={`app ${activeTab === 'deckbuilder' ? 'deckbuilder-active' : ''}`}>
       <header className="app-header">
         <h1>🃏 MTG Desktop Collection</h1>
         <div className="tab-controls">
@@ -771,7 +771,7 @@ function App() {
         </div>
       </header>
 
-      <div className="app-content">
+      <div className={`app-content ${activeTab === 'deckbuilder' ? 'deckbuilder-mode' : ''}`}>
         {activeTab === 'collections' ? (
           <div className="collections-view">
             <div className="sidebar">

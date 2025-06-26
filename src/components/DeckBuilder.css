@@ -17,27 +17,178 @@
 
 /* Main Layout & Theme */
 .deck-builder-container {
-  display: grid;
-  grid-template-columns: 4.5fr 3.5fr 2.5fr;
-  height: 100%; /* Fill parent flex area */
-  width: 100%;
-  flex: 1 1 0; /* Allow it to stretch within flex parent */
-  min-width: 0; /* Prevent overflow from fixed min content */
+  width: 100vw;
+  height: 100vh;
   background-color: var(--bg-primary);
   color: var(--text-primary);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  overflow: auto;
+  position: relative;
+}
+
+/* GridLayout specific styles */
+.deck-builder-grid {
+  width: 100% !important;
+  min-height: 100vh !important;
+  height: auto !important;
+}
+
+.panel {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 200px;
+  position: relative;
+  will-change: transform, width, height;
+}
+
+.drag-handle {
+  cursor: move;
+  flex-shrink: 0;
+}
+
+/* React Grid Layout overrides for better responsiveness */
+.react-grid-layout {
+  position: relative;
+  width: 100% !important;
+  min-width: 100vw;
+  transition: height 200ms ease;
+}
+
+.react-grid-item {
+  transition: all 300ms ease;
+  transition-property: left, top, width, height;
+}
+
+.react-grid-item.cssTransforms {
+  transition-property: transform, width, height;
+}
+
+.react-grid-item.react-grid-placeholder {
+  background: rgba(0, 123, 255, 0.2);
+  opacity: 0.6;
+  transition-duration: 100ms;
+  z-index: 2;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  -o-user-select: none;
+  user-select: none;
+}
+
+.react-grid-item > .react-resizable-handle {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  background: url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAiIGhlaWdodD0iMTAiIHZpZXdCb3g9IjAgMCAxMCAxMCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEuNSA4LjVMOC41IDEuNSIgc3Ryb2tlPSIjNDQ0IiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CjxwYXRoIGQ9Ik00IDhMOCA0IiBzdHJva2U9IiM0NDQiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPHA+') no-repeat;
+  background-size: 10px 10px;
+  background-position: center;
+  z-index: 2;
+  background-color: rgba(68, 68, 68, 0.1);
+  border: 1px solid var(--border-color);
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+}
+
+/* Southeast corner (bottom-right) */
+.react-grid-item > .react-resizable-handle.react-resizable-handle-se {
+  bottom: 0;
+  right: 0;
+  cursor: se-resize;
+  border-radius: 4px 0 0 0;
+}
+
+/* Southwest corner (bottom-left) */
+.react-grid-item > .react-resizable-handle.react-resizable-handle-sw {
+  bottom: 0;
+  left: 0;
+  cursor: sw-resize;
+  border-radius: 0 4px 0 0;
+}
+
+/* Northeast corner (top-right) */
+.react-grid-item > .react-resizable-handle.react-resizable-handle-ne {
+  top: 0;
+  right: 0;
+  cursor: ne-resize;
+  border-radius: 0 0 0 4px;
+}
+
+/* Northwest corner (top-left) */
+.react-grid-item > .react-resizable-handle.react-resizable-handle-nw {
+  top: 0;
+  left: 0;
+  cursor: nw-resize;
+  border-radius: 0 0 4px 0;
+}
+
+.react-grid-item > .react-resizable-handle:hover {
+  opacity: 1;
+  background-color: rgba(68, 68, 68, 0.3);
+  transform: scale(1.1);
+}
+
+.react-grid-item.react-draggable-dragging {
+  transition: none;
+  z-index: 3;
+  will-change: transform;
+}
+
+.react-grid-item.resizing {
+  opacity: 0.8;
+  z-index: 3;
+}
+
+.panel-drag-bar {
+  background-color: var(--bg-primary);
+  color: var(--text-secondary);
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  border-bottom: 1px solid var(--border-color);
+  cursor: move;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+  z-index: 1;
+}
+
+.panel-drag-bar:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.panel-drag-bar:before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 20px;
+  height: 4px;
+  background: linear-gradient(90deg, 
+    transparent 0%, 
+    var(--border-color) 20%, 
+    var(--border-color) 40%, 
+    transparent 50%,
+    var(--border-color) 60%, 
+    var(--border-color) 80%, 
+    transparent 100%);
+  opacity: 0.7;
 }
 
 .deck-builder-left-panel,
 .deck-builder-main-panel,
 .deck-builder-right-panel {
-  display: flex;
-  flex-direction: column;
   height: 100%;
   overflow: hidden;
-  background-color: var(--bg-secondary);
-  border-right: 1px solid var(--border-color);
 }
+
 .deck-builder-right-panel {
   border-right: none;
 }
@@ -71,8 +222,8 @@
     display: flex;
     flex-direction: column;
     height: 100%;
+    flex: 1;
 }
-
 
 /* Custom Scrollbar */
 .search-results-grid, .owned-cards-grid, .deck-card-grid, .saved-decks-list ul {
@@ -473,4 +624,9 @@
     color: var(--text-secondary);
     text-align: center;
     padding: 20px;
+}
+
+.deck-info-view {
+  overflow-y: auto;
+  padding: 16px;
 }

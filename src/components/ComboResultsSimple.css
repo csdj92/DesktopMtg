@@ -1,0 +1,333 @@
+/* Empty State */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  text-align: center;
+  color: var(--color-text-secondary);
+  background: var(--color-surface-alt);
+  border-radius: 12px;
+  border: 2px dashed var(--color-border);
+}
+
+.empty-icon {
+  font-size: 3rem;
+  margin-bottom: 0.5rem;
+  opacity: 0.6;
+}
+
+.empty-message {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+/* Section Styling */
+.combo-results-section {
+  margin-top: 1rem;
+}
+
+.combo-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.combo-title {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.combo-count-badge {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  color: var(--color-text-primary) !important;
+  background-color: var(--color-accent) !important;
+  border-radius: 9999px;
+  font-weight: 600;
+  border: none !important;
+}
+
+/* Combo List */
+.combo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: 300px;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.combo-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.combo-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.combo-list::-webkit-scrollbar-thumb {
+  background: var(--border-color, #e5e7eb);
+  border-radius: 2px;
+}
+
+.combo-list::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-primary, #3b82f6);
+}
+
+/* Combo Item */
+.combo-item {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 1rem;
+  transition: all 0.2s ease;
+}
+
+.combo-item[data-hoverable]:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px -5px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
+  border-color: var(--color-accent);
+}
+
+/* Combo Header */
+.combo-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.combo-cards-section {
+  flex: 1;
+  min-width: 200px;
+}
+
+.combo-cards {
+  margin: 0 0 0.25rem 0;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  font-size: 1rem;
+  line-height: 1.4;
+}
+
+.combo-card-count {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+/* Produces Section */
+.combo-produces {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  align-items: flex-start;
+}
+
+.produce-chip {
+  font-size: 0.75rem !important;
+  padding: 0.25rem 0.75rem !important;
+  border-radius: 9999px !important;
+  font-weight: 600 !important;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.produce-chip:hover {
+  transform: scale(1.05);
+}
+
+/* Prerequisites Section */
+.combo-prerequisites {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background-color: var(--color-surface-alt);
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+}
+
+.prerequisites-title {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.card-states-list {
+  margin: 0 0 0.75rem 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.card-state-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--color-text-primary);
+  line-height: 1.4;
+}
+
+.card-state-item::before {
+  content: "•";
+  color: var(--color-accent);
+  font-weight: bold;
+  margin-top: 0.1rem;
+  flex-shrink: 0;
+}
+
+.notable-prerequisites,
+.easy-prerequisites {
+  margin-top: 0.5rem;
+}
+
+.notable-prerequisites strong,
+.easy-prerequisites strong {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.prerequisite-text {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-text-primary);
+  line-height: 1.4;
+  font-style: italic;
+}
+
+/* Steps Section */
+.combo-steps[data-collapsible] {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--border-color, #f3f4f6);
+  padding-top: 0.75rem;
+}
+
+.combo-steps-summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+  transition: color 0.15s ease;
+  user-select: none;
+}
+
+.combo-steps-summary:hover {
+  color: var(--color-accent);
+}
+
+.combo-steps-summary::marker {
+  content: '';
+}
+
+.combo-steps-summary::before {
+  content: '▶';
+  font-size: 0.75rem;
+  transition: transform 0.2s ease;
+  display: inline-block;
+  width: 12px;
+}
+
+.combo-steps[data-collapsible][open] .combo-steps-summary::before {
+  transform: rotate(90deg);
+}
+
+.steps-label {
+  font-weight: 500;
+}
+
+.steps-count {
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+
+.combo-steps-content {
+  margin-top: 0.5rem;
+  padding-left: 0.5rem;
+}
+
+.steps-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  counter-reset: step-counter;
+  text-align: left;
+}
+
+.step-item {
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--color-text-primary);
+  counter-increment: step-counter;
+  position: relative;
+}
+
+.step-item::marker {
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.step-item:hover {
+  color: var(--color-text-primary);
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  .empty-state {
+    background: var(--bg-secondary, #1f2937);
+    border-color: var(--border-color, #374151);
+  }
+  
+  .combo-item {
+    background: var(--bg-secondary, #1f2937);
+    border-color: var(--border-color, #374151);
+  }
+  
+  .combo-steps[data-collapsible] {
+    border-color: var(--border-color, #374151);
+  }
+}
+
+/* Responsive adjustments */
+@media (max-width: 640px) {
+  .combo-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+  
+  .combo-cards-section {
+    min-width: unset;
+  }
+  
+  .combo-produces {
+    width: 100%;
+  }
+  
+  .combo-section-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+} 
