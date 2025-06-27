@@ -238,6 +238,189 @@ const ensureDecksDir = async () => {
   }
 };
 
+// Helper function to parse deck file content
+const parseDeckFile = (content, format = 'auto') => {
+  const lines = content.split('\n').map(line => line.trim()).filter(line => line);
+  const deck = { mainboard: [], sideboard: [], commanders: [] };
+  
+  let currentSection = 'mainboard';
+  
+  for (const line of lines) {
+    // Skip comments
+    if (line.startsWith('#') || line.startsWith('//') || !line) {
+      continue;
+    }
+    
+    // Check for section headers
+    if (line.toLowerCase().includes('sideboard')) {
+      currentSection = 'sideboard';
+      continue;
+    }
+    if (line.toLowerCase().includes('commander') || line.toLowerCase().includes('command zone')) {
+      currentSection = 'commanders';
+      continue;
+    }
+    if (line.toLowerCase().includes('mainboard') || line.toLowerCase().includes('main deck')) {
+      currentSection = 'mainboard';
+      continue;
+    }
+    
+    // Parse card line
+    const cardData = parseDeckLine(line, format);
+    if (cardData && cardData.name) {
+      // For commanders, we don't use quantity structure
+      if (currentSection === 'commanders') {
+        deck.commanders.push({ name: cardData.name, id: cardData.name });
+      } else {
+        deck[currentSection].push({
+          card: { name: cardData.name, id: cardData.name },
+          quantity: cardData.quantity || 1
+        });
+      }
+    }
+  }
+  
+  return deck;
+};
+
+// Helper function to parse individual deck lines
+const parseDeckLine = (line, format) => {
+  // Auto-detect format if not specified
+  if (format === 'auto') {
+    // Try different patterns
+    if (line.match(/^\d+x?\s+/)) format = 'mtgo';
+    else if (line.match(/^\d+\s+.*\([^)]+\)/)) format = 'detailed';
+    else if (line.match(/^\d+x?\s+.*\[.*\]/)) format = 'deckbox';
+    else format = 'simple';
+  }
+  
+  switch (format) {
+    case 'mtgo': // "4x Lightning Bolt"
+      const mtgoMatch = line.match(/^(\d+)x?\s+(.+)$/);
+      if (mtgoMatch) {
+        return {
+          quantity: parseInt(mtgoMatch[1]),
+          name: mtgoMatch[2].trim()
+        };
+      }
+      break;
+      
+    case 'detailed': // "4 Lightning Bolt (M10) 123"
+      const detailedMatch = line.match(/^(\d+)\s+([^(]+?)(?:\s*\([^)]+\))?/);
+      if (detailedMatch) {
+        return {
+          quantity: parseInt(detailedMatch[1]),
+          name: detailedMatch[2].trim()
+        };
+      }
+      break;
+      
+    case 'deckbox': // "1x Lightning Bolt [M10]"
+      const deckboxMatch = line.match(/^(\d+)x?\s+([^[]+?)(?:\s*\[.*\])?$/);
+      if (deckboxMatch) {
+        return {
+          quantity: parseInt(deckboxMatch[1]),
+          name: deckboxMatch[2].trim()
+        };
+      }
+      break;
+      
+    default: // Simple format
+      const simpleMatch = line.match(/^(?:(\d+)x?\s+)?(.+)$/);
+      if (simpleMatch) {
+        return {
+          quantity: parseInt(simpleMatch[1]) || 1,
+          name: simpleMatch[2].trim()
+        };
+      }
+  }
+  
+  return { name: line.trim(), quantity: 1 };
+};
+
+// Deck Import Handler
+ipcMain.handle('deck-import', async (event, filePath, deckName, format = 'auto') => {
+  try {
+    console.log(`📥 Importing deck: ${deckName} from ${filePath}`);
+    
+    // Read and parse the deck file
+    const fileContent = await fs.readFile(filePath, 'utf-8');
+    const deckData = parseDeckFile(fileContent, format);
+    
+    // Add format information
+    deckData.formatName = 'commander'; // Default format, can be changed later
+    
+    // Save the deck
+    await ensureDecksDir();
+    const safeFilename = path.basename(deckName).replace(/[^a-z0-9\s-]/gi, '_');
+    const deckFilePath = path.join(decksDir, `${safeFilename}.json`);
+    
+    await fs.writeFile(deckFilePath, JSON.stringify(deckData, null, 2), 'utf-8');
+    
+    // Also add cards to collection
+    const collectionName = `Deck: ${deckName}`;
+    let totalCards = 0;
+    
+    // Add mainboard cards to collection
+    for (const entry of deckData.mainboard) {
+      await collectionImporter.addCard(collectionName, {
+        card_name: entry.card.name,
+        quantity: entry.quantity,
+        set_code: '',
+        collector_number: '',
+        foil: 'normal'
+      });
+      totalCards += entry.quantity;
+    }
+    
+    // Add sideboard cards to collection
+    for (const entry of deckData.sideboard) {
+      await collectionImporter.addCard(collectionName, {
+        card_name: entry.card.name,
+        quantity: entry.quantity,
+        set_code: '',
+        collector_number: '',
+        foil: 'normal'
+      });
+      totalCards += entry.quantity;
+    }
+    
+    // Add commanders to collection
+    for (const commander of deckData.commanders) {
+      await collectionImporter.addCard(collectionName, {
+        card_name: commander.name,
+        quantity: 1,
+        set_code: '',
+        collector_number: '',
+        foil: 'normal'
+      });
+      totalCards += 1;
+    }
+    
+    // Sync collection to main database
+    await collectionImporter.syncCollectionToMainDatabase();
+    
+    console.log(`✅ Deck import complete: ${deckName} (${totalCards} cards)`);
+    
+    return {
+      success: true,
+      deckName: safeFilename,
+      totalCards,
+      mainboardCount: deckData.mainboard.length,
+      sideboardCount: deckData.sideboard.length,
+      commanderCount: deckData.commanders.length,
+      collectionName
+    };
+    
+  } catch (error) {
+    console.error('Deck import failed:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+});
+
 ipcMain.handle('deck-save', async (event, filename, deckData) => {
   await ensureDecksDir();
   const safeFilename = path.basename(filename).replace(/[^a-z0-9\s-]/gi, '_');

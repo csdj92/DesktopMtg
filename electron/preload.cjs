@@ -43,6 +43,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deckList: () => ipcRenderer.invoke('deck-list'),
   deckLoad: (filename) => ipcRenderer.invoke('deck-load', filename),
   deckDelete: (filename) => ipcRenderer.invoke('deck-delete', filename),
+  deckImport: (filePath, deckName, format) => ipcRenderer.invoke('deck-import', filePath, deckName, format),
   
   // File dialogs
   showOpenDialog: (options) => ipcRenderer.invoke('show-open-dialog', options),

@@ -4,6 +4,7 @@ import SearchControls from './components/SearchControls';
 import CollectionManager from './components/CollectionManager';
 import SemanticSearchV2 from './components/SemanticSearchV2';
 import DeckBuilder from './components/DeckBuilder';
+import HandSimulator from './components/HandSimulator';
 import './App.css'
 import './components/SearchControls.css';
 import SetBrowser from './components/SetBrowser';
@@ -739,7 +740,7 @@ function App() {
   };
 
   return (
-    <div className={`app ${activeTab === 'deckbuilder' ? 'deckbuilder-active' : ''}`}>
+    <div className={`app ${activeTab === 'deckbuilder' ? 'deckbuilder-active' : ''} ${activeTab === 'hand-simulator' ? 'simulator-active' : ''}`}>
       <header className="app-header">
         <h1>🃏 MTG Desktop Collection</h1>
         <div className="tab-controls">
@@ -764,6 +765,11 @@ function App() {
             Deck Builder
           </button>
           <button 
+            className={`tab-button ${activeTab === 'hand-simulator' ? 'active' : ''}`}
+            onClick={() => setActiveTab('hand-simulator')}>
+            Draw Simulator
+          </button>
+          <button 
             className={`tab-button ${activeTab === 'import' ? 'active' : ''}`}
             onClick={() => setActiveTab('import')}>
             Import from File
@@ -771,7 +777,7 @@ function App() {
         </div>
       </header>
 
-      <div className={`app-content ${activeTab === 'deckbuilder' ? 'deckbuilder-mode' : ''}`}>
+      <div className={`app-content ${activeTab === 'deckbuilder' ? 'deckbuilder-mode' : ''} ${activeTab === 'hand-simulator' ? 'simulator-mode' : ''}`}>
         {activeTab === 'collections' ? (
           <div className="collections-view">
             <div className="sidebar">
@@ -1029,6 +1035,8 @@ function App() {
           </div>
         ) : activeTab === 'deckbuilder' ? (
           <DeckBuilder />
+        ) : activeTab === 'hand-simulator' ? (
+          <HandSimulator />
         ) : (
           <div className="import-view">
             <CollectionManager />

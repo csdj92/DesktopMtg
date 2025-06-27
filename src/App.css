@@ -83,6 +83,18 @@ text{
   display: none;
 }
 
+/* Special handling for draw simulator */
+.app-content.simulator-mode {
+  flex: 1;
+  overflow-y: auto;
+  background-color: var(--color-background, #f8f9fa);
+}
+
+/* Hide footer when in simulator mode for cleaner layout */
+.app.simulator-active .app-footer {
+  display: none;
+}
+
 /* Collections View */
 .collections-view {
   display: flex;

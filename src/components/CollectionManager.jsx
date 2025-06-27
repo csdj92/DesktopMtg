@@ -246,6 +246,85 @@ const CollectionManager = () => {
     }
   };
 
+  const handleImportDeck = async () => {
+    try {
+      setIsImporting(true);
+      setImportProgress('Opening file dialog...');
+
+      // Show file dialog
+      const result = await window.electronAPI.showOpenDialog({
+        title: 'Import Deck',
+        filters: [
+          { name: 'Text Files', extensions: ['txt', 'dec'] },
+          { name: 'All Files', extensions: ['*'] }
+        ],
+        properties: ['openFile']
+      });
+
+      if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+        setIsImporting(false);
+        setImportProgress('');
+        return;
+      }
+
+      const filePath = result.filePaths[0];
+      const fileName = filePath.split(/[/\\]/).pop().replace(/\.(txt|dec)$/, '');
+      
+      // Prompt for deck name
+      const deckName = safePrompt('Enter a name for this deck:', fileName) || fileName;
+      
+      if (!deckName.trim()) {
+        setIsImporting(false);
+        setImportProgress('');
+        return;
+      }
+
+      // Prompt for format
+      const formatOptions = [
+        'auto - Auto-detect format',
+        'simple - Just card names (one per line)',
+        'mtgo - "4x Lightning Bolt" format',
+        'detailed - "4 Lightning Bolt (M10) 123" format',
+        'deckbox - "1x Lightning Bolt [M10]" format'
+      ];
+      
+      const formatChoice = safePrompt(
+        'Choose format:\n' + formatOptions.map((opt, i) => `${i + 1}. ${opt}`).join('\n') + '\n\nEnter number (1-5):',
+        '1'
+      );
+      
+      const formats = ['auto', 'simple', 'mtgo', 'detailed', 'deckbox'];
+      const format = formats[parseInt(formatChoice) - 1] || 'auto';
+
+      setImportProgress('Importing deck...');
+
+      // Import the deck
+      const importResult = await window.electronAPI.deckImport(filePath, deckName.trim(), format);
+
+      if (importResult.success) {
+        setImportProgress(`✅ Deck imported! "${importResult.deckName}" saved with ${importResult.totalCards} cards`);
+        await loadCollections();
+        setTimeout(() => {
+          setImportProgress('');
+        }, 4000);
+      } else {
+        setImportProgress(`❌ Deck import failed: ${importResult.error}`);
+        setTimeout(() => {
+          setImportProgress('');
+        }, 5000);
+      }
+
+    } catch (error) {
+      console.error('Deck import error:', error);
+      setImportProgress(`❌ Deck import failed: ${error.message}`);
+      setTimeout(() => {
+        setImportProgress('');
+      }, 5000);
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   const handleDeleteCollection = async (collectionName) => {
     if (!safeConfirm(`Are you sure you want to delete the collection "${collectionName}"? This cannot be undone.`)) {
       return;
@@ -346,6 +425,13 @@ const CollectionManager = () => {
               className="import-btn bulk-txt-btn"
             >
               📂 Import All TXT
+            </button>
+            <button 
+              onClick={handleImportDeck} 
+              disabled={isImporting}
+              className="import-btn deck-btn"
+            >
+              🎴 Import Deck
             </button>
             <button
               onClick={handleClearAllCollections}
@@ -491,6 +577,16 @@ const CollectionManager = () => {
                     <li><strong>Detailed:</strong> <code>4 Lightning Bolt (M10) 123 [foil]</code></li>
                     <li><strong>Deckbox:</strong> <code>1x Lightning Bolt [M10]</code></li>
                   </ul>
+                </div>
+                <div className="format">
+                  <h4>🎴 Deck Files</h4>
+                  <p>Import complete decks with sections:</p>
+                  <ul>
+                    <li><strong>Mainboard:</strong> Standard deck cards</li>
+                    <li><strong>Sideboard:</strong> Sideboard cards</li>
+                    <li><strong>Commander:</strong> Commander/general cards</li>
+                  </ul>
+                  <p>Creates both a deck for the Deck Builder and adds cards to your collection.</p>
                 </div>
               </div>
             </div>
