@@ -143,7 +143,8 @@ const DeckBuilder = () => {
 
   // NEW: controls for inline collection search and sorting
   const [collectionSearch, setCollectionSearch] = useState('');
-  const [collectionSort, setCollectionSort] = useState('name'); // 'name' | 'quantity' | 'cmc'
+  const [collectionSort, setCollectionSort] = useState('name'); // 'name' | 'cmc' | 'power' | 'toughness' | 'rarity' | 'quantity'
+  const [sortDirection, setSortDirection] = useState('asc'); // 'asc' | 'desc'
   const [cardTypeFilter, setCardTypeFilter] = useState('all'); // 'all' | 'creature' | 'land' | 'instant' | etc.
 
   // Hold results returned by advanced search controls
@@ -280,6 +281,89 @@ const DeckBuilder = () => {
     if (filter === 'all') return true;
     const cardTypes = getCardTypes(card);
     return cardTypes.includes(filter);
+  };
+
+  // Helper function for comprehensive card sorting
+  const sortCards = (cardList, sortBy, direction = 'asc') => {
+    const sorted = [...cardList];
+
+    switch (sortBy) {
+      case 'cmc':
+        sorted.sort((a, b) => {
+          const cardA = a.card || a;
+          const cardB = b.card || b;
+          const aVal = cardA.manaValue ?? cardA.cmc ?? cardA.mana_value ?? 0;
+          const bVal = cardB.manaValue ?? cardB.cmc ?? cardB.mana_value ?? 0;
+          if (aVal === bVal) return cardA.name.localeCompare(cardB.name);
+          return direction === 'asc' ? aVal - bVal : bVal - aVal;
+        });
+        break;
+
+      case 'power':
+        sorted.sort((a, b) => {
+          const cardA = a.card || a;
+          const cardB = b.card || b;
+          const aVal = cardA.power ? parseInt(cardA.power, 10) : (direction === 'asc' ? Infinity : -1);
+          const bVal = cardB.power ? parseInt(cardB.power, 10) : (direction === 'asc' ? Infinity : -1);
+          if (isNaN(aVal) && isNaN(bVal)) return cardA.name.localeCompare(cardB.name);
+          if (isNaN(aVal)) return 1;
+          if (isNaN(bVal)) return -1;
+          if (aVal === bVal) return cardA.name.localeCompare(cardB.name);
+          return direction === 'asc' ? aVal - bVal : bVal - aVal;
+        });
+        break;
+
+      case 'toughness':
+        sorted.sort((a, b) => {
+          const cardA = a.card || a;
+          const cardB = b.card || b;
+          const aVal = cardA.toughness ? parseInt(cardA.toughness, 10) : (direction === 'asc' ? Infinity : -1);
+          const bVal = cardB.toughness ? parseInt(cardB.toughness, 10) : (direction === 'asc' ? Infinity : -1);
+          if (isNaN(aVal) && isNaN(bVal)) return cardA.name.localeCompare(cardB.name);
+          if (isNaN(aVal)) return 1;
+          if (isNaN(bVal)) return -1;
+          if (aVal === bVal) return cardA.name.localeCompare(cardB.name);
+          return direction === 'asc' ? aVal - bVal : bVal - aVal;
+        });
+        break;
+
+      case 'rarity':
+        sorted.sort((a, b) => {
+          const cardA = a.card || a;
+          const cardB = b.card || b;
+          const rarityOrder = { 'mythic': 4, 'rare': 3, 'uncommon': 2, 'common': 1, 'special': 0 };
+          const aVal = rarityOrder[cardA.rarity?.toLowerCase()] ?? 0;
+          const bVal = rarityOrder[cardB.rarity?.toLowerCase()] ?? 0;
+          if (aVal === bVal) return cardA.name.localeCompare(cardB.name);
+          return direction === 'asc' ? aVal - bVal : bVal - aVal;
+        });
+        break;
+
+      case 'quantity':
+        sorted.sort((a, b) => {
+          const diff = direction === 'asc'
+            ? (a.quantity || 0) - (b.quantity || 0)
+            : (b.quantity || 0) - (a.quantity || 0);
+          if (diff !== 0) return diff;
+          const cardA = a.card || a;
+          const cardB = b.card || b;
+          return cardA.name.localeCompare(cardB.name);
+        });
+        break;
+
+      case 'name':
+      default:
+        sorted.sort((a, b) => {
+          const cardA = a.card || a;
+          const cardB = b.card || b;
+          return direction === 'asc'
+            ? cardA.name.localeCompare(cardB.name)
+            : cardB.name.localeCompare(cardA.name);
+        });
+        break;
+    }
+
+    return sorted;
   };
 
   const setCommander = (card) => {
@@ -464,7 +548,7 @@ const DeckBuilder = () => {
     return mainboardCount + commanderCount;
   }, [deck.mainboard, deck.commanders]);
 
-  // Filter cards based on commander rules and type filter
+  // Filter and sort cards based on commander rules and type filter
   const filteredSearchResults = useMemo(() => {
     let results = searchResults;
 
@@ -482,8 +566,9 @@ const DeckBuilder = () => {
       }
     }
 
-    return results;
-  }, [searchResults, deck.commanders, format, commanderColorIdentity, cardTypeFilter]);
+    // Apply sorting
+    return sortCards(results, collectionSort, sortDirection);
+  }, [searchResults, deck.commanders, format, commanderColorIdentity, cardTypeFilter, collectionSort, sortDirection]);
 
   const filteredOwnedCards = useMemo(() => {
     let results = ownedCards;
@@ -502,8 +587,9 @@ const DeckBuilder = () => {
       }
     }
 
-    return results;
-  }, [ownedCards, deck.commanders, format, commanderColorIdentity, cardTypeFilter]);
+    // Apply sorting
+    return sortCards(results, collectionSort, sortDirection);
+  }, [ownedCards, deck.commanders, format, commanderColorIdentity, cardTypeFilter, collectionSort, sortDirection]);
 
   // NEW: apply inline search & sort on collection view
   const processedOwnedCards = useMemo(() => {
@@ -520,30 +606,9 @@ const DeckBuilder = () => {
       });
     }
 
-    // Sorting
-    const sorted = [...list];
-    switch (collectionSort) {
-      case 'quantity':
-        sorted.sort((a, b) => {
-          const diff = (b.quantity || 0) - (a.quantity || 0);
-          return diff !== 0 ? diff : a.card.name.localeCompare(b.card.name);
-        });
-        break;
-      case 'cmc':
-        sorted.sort((a, b) => {
-          const aVal = a.card.manaValue ?? a.card.cmc ?? a.card.mana_value ?? 0;
-          const bVal = b.card.manaValue ?? b.card.cmc ?? b.card.mana_value ?? 0;
-          if (aVal === bVal) return a.card.name.localeCompare(b.card.name);
-          return aVal - bVal;
-        });
-        break;
-      case 'name':
-      default:
-        sorted.sort((a, b) => a.card.name.localeCompare(b.card.name));
-        break;
-    }
-    return sorted;
-  }, [filteredOwnedCards, collectionSearch, collectionSort]);
+    // Apply comprehensive sorting
+    return sortCards(list, collectionSort, sortDirection);
+  }, [filteredOwnedCards, collectionSearch, collectionSort, sortDirection]);
 
   // Final list to display in collection panel, taking commander rules into account
   const displayCollectionCards = useMemo(() => {
@@ -705,7 +770,7 @@ const DeckBuilder = () => {
     }
   }, [deck.mainboard, deck.commanders, format, recoLoading]);
 
-  // Filter recommendations to only show cards from user's collection that match commander color identity and type filter
+  // Filter and sort recommendations to only show cards from user's collection that match commander color identity and type filter
   const displayRecommendations = useMemo(() => {
     if (!recommendations.length) return [];
 
@@ -725,8 +790,9 @@ const DeckBuilder = () => {
       filteredRecs = filteredRecs.filter(card => isCardInColorIdentity(card, commanderColorIdentity));
     }
 
-    return filteredRecs;
-  }, [recommendations, ownedCards, format, deck.commanders, commanderColorIdentity, cardTypeFilter]);
+    // Apply sorting
+    return sortCards(filteredRecs, collectionSort, sortDirection);
+  }, [recommendations, ownedCards, format, deck.commanders, commanderColorIdentity, cardTypeFilter, collectionSort, sortDirection]);
 
   // Determine current card list for navigation based on context
   const currentCardList = useMemo(() => {
@@ -821,6 +887,24 @@ const DeckBuilder = () => {
                   <option value="planeswalker">Planeswalkers</option>
                   <option value="battle">Battles</option>
                 </select>
+                <select
+                  value={collectionSort}
+                  onChange={(e) => setCollectionSort(e.target.value)}
+                  title="Sort cards by"
+                >
+                  <option value="name">Name</option>
+                  <option value="cmc">Mana Cost</option>
+                  <option value="power">Power</option>
+                  <option value="toughness">Toughness</option>
+                  <option value="rarity">Rarity</option>
+                </select>
+                <button
+                  className="sort-direction-toggle"
+                  onClick={() => setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')}
+                  title={`Sort ${sortDirection === 'asc' ? 'ascending' : 'descending'} - click to toggle`}
+                >
+                  {sortDirection === 'asc' ? '↑' : '↓'}
+                </button>
               </div>
               <div className="search-results-grid">
                 {searchLoading && <p>Searching...</p>}
@@ -869,6 +953,25 @@ const DeckBuilder = () => {
                   <option value="planeswalker">Planeswalkers</option>
                   <option value="battle">Battles</option>
                 </select>
+                <select
+                  value={collectionSort}
+                  onChange={(e) => setCollectionSort(e.target.value)}
+                  title="Sort cards by"
+                >
+                  <option value="name">Name</option>
+                  <option value="cmc">Mana Cost</option>
+                  <option value="power">Power</option>
+                  <option value="toughness">Toughness</option>
+                  <option value="rarity">Rarity</option>
+                  <option value="quantity">Quantity</option>
+                </select>
+                <button
+                  className="sort-direction-toggle"
+                  onClick={() => setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')}
+                  title={`Sort ${sortDirection === 'asc' ? 'ascending' : 'descending'} - click to toggle`}
+                >
+                  {sortDirection === 'asc' ? '↑' : '↓'}
+                </button>
               </div>
               <div className="owned-cards-grid">
                 {ownedLoading && <p>Loading collection...</p>}
@@ -1034,6 +1137,24 @@ const DeckBuilder = () => {
                   <option value="planeswalker">Planeswalkers</option>
                   <option value="battle">Battles</option>
                 </select>
+                <select
+                  value={collectionSort}
+                  onChange={(e) => setCollectionSort(e.target.value)}
+                  title="Sort cards by"
+                >
+                  <option value="name">Name</option>
+                  <option value="cmc">Mana Cost</option>
+                  <option value="power">Power</option>
+                  <option value="toughness">Toughness</option>
+                  <option value="rarity">Rarity</option>
+                </select>
+                <button
+                  className="sort-direction-toggle"
+                  onClick={() => setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')}
+                  title={`Sort ${sortDirection === 'asc' ? 'ascending' : 'descending'} - click to toggle`}
+                >
+                  {sortDirection === 'asc' ? '↑' : '↓'}
+                </button>
               </div>
               <div className="search-results-grid">
                 {recoLoading && <p>Analyzing deck...</p>}

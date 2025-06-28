@@ -37,7 +37,7 @@
   background-color: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  overflow: hidden;
+  overflow: visible;
   display: flex;
   flex-direction: column;
   min-height: 200px;
@@ -227,8 +227,8 @@
 .recommendations-view {
   display: flex;
   flex-direction: column;
-  height: 100%;
   flex: 1;
+  overflow: auto;
 }
 
 /* Custom Scrollbar */
@@ -432,6 +432,33 @@
 .collection-controls select:focus {
   outline: none;
   border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+.sort-direction-toggle {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: bold;
+  transition: all 0.2s ease;
+  min-width: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sort-direction-toggle:hover {
+  background-color: var(--bg-widget);
+  border-color: var(--accent-primary);
+  transform: translateY(-1px);
+}
+
+.sort-direction-toggle:active {
+  transform: translateY(0);
   box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
 }
 
