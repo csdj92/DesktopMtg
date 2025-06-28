@@ -144,6 +144,7 @@ const DeckBuilder = () => {
   // NEW: controls for inline collection search and sorting
   const [collectionSearch, setCollectionSearch] = useState('');
   const [collectionSort, setCollectionSort] = useState('name'); // 'name' | 'quantity' | 'cmc'
+  const [cardTypeFilter, setCardTypeFilter] = useState('all'); // 'all' | 'creature' | 'land' | 'instant' | etc.
 
   // Hold results returned by advanced search controls
   const [collectionSearchResults, setCollectionSearchResults] = useState(null); // null means no search yet
@@ -254,6 +255,31 @@ const DeckBuilder = () => {
     if (!card) return false;
     const typeLine = (card.type || card.type_line || '').toLowerCase();
     return typeLine.includes('basic') && typeLine.includes('land');
+  };
+
+  // Helper to extract primary card types for filtering
+  const getCardTypes = (card) => {
+    if (!card) return [];
+    const typeLine = (card.type || card.type_line || '').toLowerCase();
+    const types = [];
+
+    // Check for main card types
+    if (typeLine.includes('creature')) types.push('creature');
+    if (typeLine.includes('land')) types.push('land');
+    if (typeLine.includes('instant')) types.push('instant');
+    if (typeLine.includes('sorcery')) types.push('sorcery');
+    if (typeLine.includes('enchantment')) types.push('enchantment');
+    if (typeLine.includes('artifact')) types.push('artifact');
+    if (typeLine.includes('planeswalker')) types.push('planeswalker');
+    if (typeLine.includes('battle')) types.push('battle');
+
+    return types;
+  };
+
+  const matchesTypeFilter = (card, filter) => {
+    if (filter === 'all') return true;
+    const cardTypes = getCardTypes(card);
+    return cardTypes.includes(filter);
   };
 
   const setCommander = (card) => {
@@ -438,22 +464,46 @@ const DeckBuilder = () => {
     return mainboardCount + commanderCount;
   }, [deck.mainboard, deck.commanders]);
 
-  // Filter cards based on commander rules
+  // Filter cards based on commander rules and type filter
   const filteredSearchResults = useMemo(() => {
-    if (format !== 'commander') return searchResults;
-    if (deck.commanders.length === 0) {
-      return searchResults.filter(isCardCommander);
+    let results = searchResults;
+
+    // Apply type filter first
+    if (cardTypeFilter !== 'all') {
+      results = results.filter(card => matchesTypeFilter(card, cardTypeFilter));
     }
-    return searchResults.filter(card => isCardInColorIdentity(card, commanderColorIdentity));
-  }, [searchResults, deck.commanders, format, commanderColorIdentity]);
+
+    // Apply commander format rules
+    if (format === 'commander') {
+      if (deck.commanders.length === 0) {
+        results = results.filter(isCardCommander);
+      } else {
+        results = results.filter(card => isCardInColorIdentity(card, commanderColorIdentity));
+      }
+    }
+
+    return results;
+  }, [searchResults, deck.commanders, format, commanderColorIdentity, cardTypeFilter]);
 
   const filteredOwnedCards = useMemo(() => {
-    if (format !== 'commander') return ownedCards;
-    if (deck.commanders.length === 0) {
-      return ownedCards.filter(entry => isCardCommander(entry.card));
+    let results = ownedCards;
+
+    // Apply type filter first
+    if (cardTypeFilter !== 'all') {
+      results = results.filter(entry => matchesTypeFilter(entry.card, cardTypeFilter));
     }
-    return ownedCards.filter(entry => isCardInColorIdentity(entry.card, commanderColorIdentity));
-  }, [ownedCards, deck.commanders, format, commanderColorIdentity]);
+
+    // Apply commander format rules
+    if (format === 'commander') {
+      if (deck.commanders.length === 0) {
+        results = results.filter(entry => isCardCommander(entry.card));
+      } else {
+        results = results.filter(entry => isCardInColorIdentity(entry.card, commanderColorIdentity));
+      }
+    }
+
+    return results;
+  }, [ownedCards, deck.commanders, format, commanderColorIdentity, cardTypeFilter]);
 
   // NEW: apply inline search & sort on collection view
   const processedOwnedCards = useMemo(() => {
@@ -655,7 +705,7 @@ const DeckBuilder = () => {
     }
   }, [deck.mainboard, deck.commanders, format, recoLoading]);
 
-  // Filter recommendations to only show cards from user's collection that match commander color identity
+  // Filter recommendations to only show cards from user's collection that match commander color identity and type filter
   const displayRecommendations = useMemo(() => {
     if (!recommendations.length) return [];
 
@@ -665,13 +715,18 @@ const DeckBuilder = () => {
     // Filter recommendations to only include cards we own
     let filteredRecs = recommendations.filter(card => ownedCardIds.has(card.id));
 
+    // Apply type filter
+    if (cardTypeFilter !== 'all') {
+      filteredRecs = filteredRecs.filter(card => matchesTypeFilter(card, cardTypeFilter));
+    }
+
     // If we're in commander format and have a commander, also filter by color identity
     if (format === 'commander' && deck.commanders.length > 0) {
       filteredRecs = filteredRecs.filter(card => isCardInColorIdentity(card, commanderColorIdentity));
     }
 
     return filteredRecs;
-  }, [recommendations, ownedCards, format, deck.commanders, commanderColorIdentity]);
+  }, [recommendations, ownedCards, format, deck.commanders, commanderColorIdentity, cardTypeFilter]);
 
   // Determine current card list for navigation based on context
   const currentCardList = useMemo(() => {
@@ -750,6 +805,23 @@ const DeckBuilder = () => {
                 onSearch={deckBulkSearch}
                 bulkDataStats={bulkDataStats}
               />
+              <div className="collection-controls">
+                <select
+                  value={cardTypeFilter}
+                  onChange={(e) => setCardTypeFilter(e.target.value)}
+                  title="Filter by card type"
+                >
+                  <option value="all">All Types</option>
+                  <option value="creature">Creatures</option>
+                  <option value="land">Lands</option>
+                  <option value="instant">Instants</option>
+                  <option value="sorcery">Sorceries</option>
+                  <option value="enchantment">Enchantments</option>
+                  <option value="artifact">Artifacts</option>
+                  <option value="planeswalker">Planeswalkers</option>
+                  <option value="battle">Battles</option>
+                </select>
+              </div>
               <div className="search-results-grid">
                 {searchLoading && <p>Searching...</p>}
                 {!searchLoading && filteredSearchResults.map(card => {
@@ -782,6 +854,21 @@ const DeckBuilder = () => {
                   onSearch={(params) => searchHelperRef.current?.handleCollectionSearch(params)}
                   bulkDataStats={bulkDataStats}
                 />
+                <select
+                  value={cardTypeFilter}
+                  onChange={(e) => setCardTypeFilter(e.target.value)}
+                  title="Filter by card type"
+                >
+                  <option value="all">All Types</option>
+                  <option value="creature">Creatures</option>
+                  <option value="land">Lands</option>
+                  <option value="instant">Instants</option>
+                  <option value="sorcery">Sorceries</option>
+                  <option value="enchantment">Enchantments</option>
+                  <option value="artifact">Artifacts</option>
+                  <option value="planeswalker">Planeswalkers</option>
+                  <option value="battle">Battles</option>
+                </select>
               </div>
               <div className="owned-cards-grid">
                 {ownedLoading && <p>Loading collection...</p>}
@@ -931,6 +1018,23 @@ const DeckBuilder = () => {
                 {recoLoading ? 'Getting Suggestions...' : 'Suggest Cards'}
               </button>
               {deckArchetype && <h4>Suggestions for: {deckArchetype}</h4>}
+              <div className="collection-controls">
+                <select
+                  value={cardTypeFilter}
+                  onChange={(e) => setCardTypeFilter(e.target.value)}
+                  title="Filter by card type"
+                >
+                  <option value="all">All Types</option>
+                  <option value="creature">Creatures</option>
+                  <option value="land">Lands</option>
+                  <option value="instant">Instants</option>
+                  <option value="sorcery">Sorceries</option>
+                  <option value="enchantment">Enchantments</option>
+                  <option value="artifact">Artifacts</option>
+                  <option value="planeswalker">Planeswalkers</option>
+                  <option value="battle">Battles</option>
+                </select>
+              </div>
               <div className="search-results-grid">
                 {recoLoading && <p>Analyzing deck...</p>}
                 {!recoLoading && displayRecommendations.map(card => {
