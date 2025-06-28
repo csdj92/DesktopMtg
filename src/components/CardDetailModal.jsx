@@ -1,7 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import './CardDetailModal.css';
 
-const CardDetailModal = ({ card, onClose }) => {
+const CardDetailModal = ({
+  card,
+  onClose,
+  // Navigation props
+  onNavigatePrevious,
+  onNavigateNext,
+  hasPrevious = false,
+  hasNext = false,
+  currentIndex = -1,
+  totalCards = 0
+}) => {
   if (!card) return null;
 
   const [addStatus, setAddStatus] = useState(null);
@@ -45,10 +55,10 @@ const CardDetailModal = ({ card, onClose }) => {
     }
     return 'https://placehold.co/488x680/1a1a1a/e0e0e0?text=No+Image';
   };
-  
+
   const cardFace = card.card_faces ? card.card_faces[0] : card;
   const imageUrl = getImageUrl(cardFace);
-  
+
   const resetForm = () => {
     setCollectionInput('My Collection');
     setQuantityInput(1);
@@ -129,7 +139,34 @@ const CardDetailModal = ({ card, onClose }) => {
   return (
     <div className="modal-backdrop" onClick={handleBackdropClick}>
       <div className="modal-content">
-        <button className="modal-close-button" onClick={onClose}>&times;</button>
+        <div className="modal-header">
+          <button className="modal-close-button" onClick={onClose}>&times;</button>
+          {totalCards > 1 && (
+            <div className="navigation-info">
+              <span className="card-position">
+                {currentIndex + 1} of {totalCards}
+              </span>
+              <div className="navigation-buttons">
+                <button
+                  className="nav-button nav-previous"
+                  onClick={onNavigatePrevious}
+                  disabled={!hasPrevious}
+                  title="Previous card (←)"
+                >
+                  ←
+                </button>
+                <button
+                  className="nav-button nav-next"
+                  onClick={onNavigateNext}
+                  disabled={!hasNext}
+                  title="Next card (→)"
+                >
+                  →
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
         <div className="modal-body">
           <div className="modal-card-image">
             <img src={imageUrl} alt={card.name} />
@@ -154,12 +191,12 @@ const CardDetailModal = ({ card, onClose }) => {
               <p><strong>Owned:</strong> {ownedQty} {ownedQty === 1 ? 'copy' : 'copies'}</p>
             )}
             <p><strong>Collector Number:</strong> {card.number}</p>
-            
+
             {card.prices?.usd && <p><strong>Price:</strong> ${card.prices.usd}</p>}
             {card.prices?.usd_foil && <p><strong>Foil Price:</strong> ${card.prices.usd_foil}</p>}
-            
+
             <p><strong>Artist:</strong> {card.artist}</p>
-            
+
             {card.rulings && card.rulings.length > 0 && (
               <div className="rulings-section">
                 <button onClick={() => setShowRulings(!showRulings)} className="rulings-toggle-btn">
@@ -177,7 +214,7 @@ const CardDetailModal = ({ card, onClose }) => {
                 )}
               </div>
             )}
-            
+
             <div className="external-links">
               {card.related_uris?.gatherer && <a href={card.related_uris.gatherer} target="_blank" rel="noopener noreferrer">Gatherer</a>}
               {card.purchase_uris?.tcgplayer && <a href={card.purchase_uris.tcgplayer} target="_blank" rel="noopener noreferrer">Buy on TCGPlayer</a>}

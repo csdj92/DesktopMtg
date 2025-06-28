@@ -8,6 +8,7 @@ import GridLayout from "react-grid-layout";
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import SpellbookExport from './SpellbookExport';
+import useCardNavigation from '../hooks/useCardNavigation';
 
 
 // --- Placeholder: Card Component ---
@@ -136,6 +137,9 @@ const DeckBuilder = () => {
   const [format, setFormat] = useState('commander'); // 'commander' | 'standard'
   const [selectedCard, setSelectedCard] = useState(null); // For modal
   const [currentDeckName, setCurrentDeckName] = useState('');
+
+  // Navigation state - tracks which card list context we're navigating
+  const [navigationContext, setNavigationContext] = useState('collection'); // 'collection' | 'search' | 'recommendations'
 
   // NEW: controls for inline collection search and sorting
   const [collectionSearch, setCollectionSearch] = useState('');
@@ -346,9 +350,10 @@ const DeckBuilder = () => {
     loadOwned();
   }, []);
 
-  const handleCardClick = (card) => {
+  const handleCardClick = useCallback((card, context = 'collection') => {
     setSelectedCard(card);
-  };
+    setNavigationContext(context);
+  }, []);
 
   const handleCloseModal = () => {
     setSelectedCard(null);
@@ -504,6 +509,8 @@ const DeckBuilder = () => {
     // Filter by color identity relative to chosen commander
     return list.filter(entry => isCardInColorIdentity((entry.card || entry), commanderColorIdentity));
   }, [collectionSearchResults, processedOwnedCards, format, deck.commanders, commanderColorIdentity]);
+
+
 
   // --- Deck Persistence Handlers ---
   const handleSaveDeck = async (filename) => {
@@ -666,6 +673,27 @@ const DeckBuilder = () => {
     return filteredRecs;
   }, [recommendations, ownedCards, format, deck.commanders, commanderColorIdentity]);
 
+  // Determine current card list for navigation based on context
+  const currentCardList = useMemo(() => {
+    switch (navigationContext) {
+      case 'search':
+        return filteredSearchResults;
+      case 'recommendations':
+        return displayRecommendations;
+      case 'collection':
+      default:
+        return displayCollectionCards;
+    }
+  }, [navigationContext, filteredSearchResults, displayRecommendations, displayCollectionCards]);
+
+  // Keyboard navigation using custom hook
+  const navigation = useCardNavigation(
+    currentCardList,
+    selectedCard,
+    setSelectedCard,
+    !!selectedCard // Modal is open when selectedCard exists
+  );
+
   // Grid layout positions
   const layoutConfig = [
     { i: 'left', x: 0, y: 0, w: 4, h: 14, minW: 2, minH: 8 },
@@ -675,7 +703,18 @@ const DeckBuilder = () => {
 
   return (
     <div className="deck-builder-container">
-      {selectedCard && <CardDetailModal card={selectedCard} onClose={() => setSelectedCard(null)} />}
+      {selectedCard && (
+        <CardDetailModal
+          card={selectedCard}
+          onClose={() => setSelectedCard(null)}
+          onNavigatePrevious={navigation.navigateToPrevious}
+          onNavigateNext={navigation.navigateToNext}
+          hasPrevious={navigation.hasPrevious}
+          hasNext={navigation.hasNext}
+          currentIndex={navigation.currentIndex}
+          totalCards={navigation.totalCards}
+        />
+      )}
       <GridLayout
         className="deck-builder-grid"
         layout={layoutConfig}
@@ -719,7 +758,7 @@ const DeckBuilder = () => {
 
                   return (
                     <div key={card.id} className="card-grid-item">
-                      <Card card={card} onCardClick={handleCardClick} />
+                      <Card card={card} onCardClick={(card) => handleCardClick(card, 'search')} />
                       <button
                         onClick={(e) => { e.stopPropagation(); addCardToDeck(card); }}
                         disabled={!canAddMore}
@@ -752,7 +791,7 @@ const DeckBuilder = () => {
 
                   return (
                     <div key={entry.card.id} className="card-grid-item">
-                      <Card card={entry.card} quantity={entry.quantity} onCardClick={handleCardClick} />
+                      <Card card={entry.card} quantity={entry.quantity} onCardClick={(card) => handleCardClick(card, 'collection')} />
                       <button
                         onClick={(e) => { e.stopPropagation(); addCardToDeck(entry.card); }}
                         disabled={!canAddMore}
@@ -900,7 +939,7 @@ const DeckBuilder = () => {
 
                   return (
                     <div key={card.id} className="card-grid-item">
-                      <Card card={card} onCardClick={handleCardClick} />
+                      <Card card={card} onCardClick={(card) => handleCardClick(card, 'recommendations')} />
                       <button
                         onClick={(e) => { e.stopPropagation(); addCardToDeck(card); }}
                         disabled={!canAddMore}
