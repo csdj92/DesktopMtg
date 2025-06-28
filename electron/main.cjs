@@ -209,13 +209,13 @@ ipcMain.handle('collection-mark-card', async (event, cardId, collected = true) =
 ipcMain.handle('collection-clear-all', async () => {
   try {
     console.log('🗑️ Clearing all collections...');
-    
+
     // Reset all collected cards to 0 in the main database
     await bulkDataService.clearAllCollected();
-    
+
     // Clear the user_collections table
     await collectionImporter.clearAllCollections();
-    
+
     console.log('✅ All collections cleared successfully');
     return { success: true };
   } catch (error) {
@@ -242,35 +242,58 @@ const ensureDecksDir = async () => {
 const parseDeckFile = (content, format = 'auto') => {
   const lines = content.split('\n').map(line => line.trim()).filter(line => line);
   const deck = { mainboard: [], sideboard: [], commanders: [] };
-  
+
   let currentSection = 'mainboard';
-  
+  let foundCommanderSection = false;
+
   for (const line of lines) {
-    // Skip comments
-    if (line.startsWith('#') || line.startsWith('//') || !line) {
+    const lowerLine = line.toLowerCase();
+
+    // Check for section headers - be more specific about what constitutes a section header
+    if (line.startsWith('//') || line.startsWith('#')) {
+      // This is a comment line, check if it's a section header
+      if (lowerLine.includes('sideboard')) {
+        currentSection = 'sideboard';
+        continue;
+      }
+      if (lowerLine.includes('commander') || lowerLine.includes('command zone')) {
+        currentSection = 'commanders';
+        foundCommanderSection = true;
+        continue;
+      }
+      if (lowerLine.includes('mainboard') || lowerLine.includes('main deck')) {
+        currentSection = 'mainboard';
+        continue;
+      }
+      // If it's just a regular comment, skip it
       continue;
     }
-    
-    // Check for section headers
-    if (line.toLowerCase().includes('sideboard')) {
+
+    // Check for standalone section headers (lines that are just section names)
+    if (lowerLine === 'sideboard' || lowerLine === 'side board') {
       currentSection = 'sideboard';
       continue;
     }
-    if (line.toLowerCase().includes('commander') || line.toLowerCase().includes('command zone')) {
+    if (lowerLine === 'commander' || lowerLine === 'commanders' || lowerLine === 'command zone') {
       currentSection = 'commanders';
+      foundCommanderSection = true;
       continue;
     }
-    if (line.toLowerCase().includes('mainboard') || line.toLowerCase().includes('main deck')) {
+    if (lowerLine === 'mainboard' || lowerLine === 'main deck' || lowerLine === 'deck') {
       currentSection = 'mainboard';
       continue;
     }
-    
+
     // Parse card line
     const cardData = parseDeckLine(line, format);
     if (cardData && cardData.name) {
-      // For commanders, we don't use quantity structure
       if (currentSection === 'commanders') {
         deck.commanders.push({ name: cardData.name, id: cardData.name });
+        // After adding a commander, switch back to mainboard for subsequent cards
+        // unless we explicitly encounter another section header
+        if (foundCommanderSection) {
+          currentSection = 'mainboard';
+        }
       } else {
         deck[currentSection].push({
           card: { name: cardData.name, id: cardData.name },
@@ -279,24 +302,29 @@ const parseDeckFile = (content, format = 'auto') => {
       }
     }
   }
-  
+
   return deck;
 };
 
 // Helper function to parse individual deck lines
 const parseDeckLine = (line, format) => {
+  // Strip comments from the end of the line
+  const cleanedLine = line.split('//')[0].trim();
+  if (!cleanedLine) {
+    return null;
+  }
+
   // Auto-detect format if not specified
   if (format === 'auto') {
-    // Try different patterns
-    if (line.match(/^\d+x?\s+/)) format = 'mtgo';
-    else if (line.match(/^\d+\s+.*\([^)]+\)/)) format = 'detailed';
-    else if (line.match(/^\d+x?\s+.*\[.*\]/)) format = 'deckbox';
+    if (cleanedLine.match(/^\d+x?\s+/)) format = 'mtgo';
+    else if (cleanedLine.match(/^\d+\s+.*\([^)]+\)/)) format = 'detailed';
+    else if (cleanedLine.match(/^\d+x?\s+.*\[.*\]/)) format = 'deckbox';
     else format = 'simple';
   }
-  
+
   switch (format) {
     case 'mtgo': // "4x Lightning Bolt"
-      const mtgoMatch = line.match(/^(\d+)x?\s+(.+)$/);
+      const mtgoMatch = cleanedLine.match(/^(\d+)x?\s+(.+)$/);
       if (mtgoMatch) {
         return {
           quantity: parseInt(mtgoMatch[1]),
@@ -304,9 +332,9 @@ const parseDeckLine = (line, format) => {
         };
       }
       break;
-      
+
     case 'detailed': // "4 Lightning Bolt (M10) 123"
-      const detailedMatch = line.match(/^(\d+)\s+([^(]+?)(?:\s*\([^)]+\))?/);
+      const detailedMatch = cleanedLine.match(/^(\d+)\s+([^(]+?)(?:\s*\([^)]+\))?/);
       if (detailedMatch) {
         return {
           quantity: parseInt(detailedMatch[1]),
@@ -314,9 +342,9 @@ const parseDeckLine = (line, format) => {
         };
       }
       break;
-      
+
     case 'deckbox': // "1x Lightning Bolt [M10]"
-      const deckboxMatch = line.match(/^(\d+)x?\s+([^[]+?)(?:\s*\[.*\])?$/);
+      const deckboxMatch = cleanedLine.match(/^(\d+)x?\s+([^[]+?)(?:\s*\[.*\])?$/);
       if (deckboxMatch) {
         return {
           quantity: parseInt(deckboxMatch[1]),
@@ -324,9 +352,9 @@ const parseDeckLine = (line, format) => {
         };
       }
       break;
-      
+
     default: // Simple format
-      const simpleMatch = line.match(/^(?:(\d+)x?\s+)?(.+)$/);
+      const simpleMatch = cleanedLine.match(/^(?:(\d+)x?\s+)?(.+)$/);
       if (simpleMatch) {
         return {
           quantity: parseInt(simpleMatch[1]) || 1,
@@ -334,35 +362,108 @@ const parseDeckLine = (line, format) => {
         };
       }
   }
-  
-  return { name: line.trim(), quantity: 1 };
+
+  return { name: cleanedLine.trim(), quantity: 1 };
 };
 
 // Deck Import Handler
 ipcMain.handle('deck-import', async (event, filePath, deckName, format = 'auto') => {
   try {
     console.log(`📥 Importing deck: ${deckName} from ${filePath}`);
-    
+
     // Read and parse the deck file
     const fileContent = await fs.readFile(filePath, 'utf-8');
     const deckData = parseDeckFile(fileContent, format);
-    
-    // Add format information
-    deckData.formatName = 'commander'; // Default format, can be changed later
-    
-    // Save the deck
+
+    // Transform deck data to match expected structure by looking up cards in database
+    const transformedDeck = {
+      mainboard: [],
+      sideboard: [],
+      commanders: [],
+      formatName: 'commander'
+    };
+
+    // Helper function to find card data from database
+    const findCardData = async (cardName) => {
+      try {
+        // Try to find card in the main database
+        const card = await bulkDataService.findCardByName(cardName);
+        if (card) {
+          return {
+            id: card.uuid || card.id || cardName,
+            uuid: card.uuid || card.id || cardName,
+            name: card.name,
+            manaCost: card.manaCost || '',
+            manaValue: card.manaValue || card.cmc || 0,
+            type: card.type_line || card.type || '',
+            text: card.oracle_text || card.text || '',
+            colors: card.colors || [],
+            color_identity: card.color_identity || card.colorIdentity || [],
+            power: card.power,
+            toughness: card.toughness,
+            rarity: card.rarity || '',
+            set: card.setCode || card.set || '',
+            image_uris: card.image_uris || {}
+          };
+        }
+      } catch (error) {
+        console.warn(`Could not find card data for "${cardName}":`, error);
+      }
+
+      // Fallback to basic structure if card not found in database
+      return {
+        id: cardName,
+        uuid: cardName,
+        name: cardName,
+        manaCost: '',
+        manaValue: 0,
+        type: '',
+        text: '',
+        colors: [],
+        color_identity: [],
+        rarity: '',
+        set: '',
+        image_uris: {}
+      };
+    };
+
+    // Transform mainboard
+    for (const entry of deckData.mainboard) {
+      const cardData = await findCardData(entry.card.name);
+      transformedDeck.mainboard.push({
+        card: cardData,
+        quantity: entry.quantity
+      });
+    }
+
+    // Transform sideboard
+    for (const entry of deckData.sideboard) {
+      const cardData = await findCardData(entry.card.name);
+      transformedDeck.sideboard.push({
+        card: cardData,
+        quantity: entry.quantity
+      });
+    }
+
+    // Transform commanders
+    for (const commander of deckData.commanders) {
+      const cardData = await findCardData(commander.name);
+      transformedDeck.commanders.push(cardData);
+    }
+
+    // Save the transformed deck
     await ensureDecksDir();
     const safeFilename = path.basename(deckName).replace(/[^a-z0-9\s-]/gi, '_');
     const deckFilePath = path.join(decksDir, `${safeFilename}.json`);
-    
-    await fs.writeFile(deckFilePath, JSON.stringify(deckData, null, 2), 'utf-8');
-    
+
+    await fs.writeFile(deckFilePath, JSON.stringify(transformedDeck, null, 2), 'utf-8');
+
     // Also add cards to collection
     const collectionName = `Deck: ${deckName}`;
     let totalCards = 0;
-    
+
     // Add mainboard cards to collection
-    for (const entry of deckData.mainboard) {
+    for (const entry of transformedDeck.mainboard) {
       await collectionImporter.addCard(collectionName, {
         card_name: entry.card.name,
         quantity: entry.quantity,
@@ -372,9 +473,9 @@ ipcMain.handle('deck-import', async (event, filePath, deckName, format = 'auto')
       });
       totalCards += entry.quantity;
     }
-    
+
     // Add sideboard cards to collection
-    for (const entry of deckData.sideboard) {
+    for (const entry of transformedDeck.sideboard) {
       await collectionImporter.addCard(collectionName, {
         card_name: entry.card.name,
         quantity: entry.quantity,
@@ -384,9 +485,9 @@ ipcMain.handle('deck-import', async (event, filePath, deckName, format = 'auto')
       });
       totalCards += entry.quantity;
     }
-    
+
     // Add commanders to collection
-    for (const commander of deckData.commanders) {
+    for (const commander of transformedDeck.commanders) {
       await collectionImporter.addCard(collectionName, {
         card_name: commander.name,
         quantity: 1,
@@ -396,22 +497,22 @@ ipcMain.handle('deck-import', async (event, filePath, deckName, format = 'auto')
       });
       totalCards += 1;
     }
-    
+
     // Sync collection to main database
     await collectionImporter.syncCollectionToMainDatabase();
-    
+
     console.log(`✅ Deck import complete: ${deckName} (${totalCards} cards)`);
-    
+
     return {
       success: true,
       deckName: safeFilename,
       totalCards,
-      mainboardCount: deckData.mainboard.length,
-      sideboardCount: deckData.sideboard.length,
-      commanderCount: deckData.commanders.length,
+      mainboardCount: transformedDeck.mainboard.length,
+      sideboardCount: transformedDeck.sideboard.length,
+      commanderCount: transformedDeck.commanders.length,
       collectionName
     };
-    
+
   } catch (error) {
     console.error('Deck import failed:', error);
     return {
@@ -775,7 +876,7 @@ const createWindow = () => {
       contextIsolation: true
     },
   });
-  
+
   mainWindow.once('ready-to-show', () => {
     console.log('Window ready to show');
     log.info('Window ready to show');
@@ -790,13 +891,13 @@ const createWindow = () => {
     mainWindow.webContents.openDevTools();
   } else {
     // Fix: The dist folder should be in the extraResource, not inside app directory
-    const indexPath = app.isPackaged 
+    const indexPath = app.isPackaged
       ? path.join(process.resourcesPath, 'dist', 'index.html')
       : path.join(__dirname, '..', 'dist', 'index.html');
-    
+
     console.log('Loading index.html from:', indexPath);
     log.info('Loading index.html from:', indexPath);
-    
+
     // Check if file exists before trying to load it
     if (fsSync.existsSync(indexPath)) {
       mainWindow.loadFile(indexPath).catch(err => {
@@ -806,14 +907,14 @@ const createWindow = () => {
     } else {
       console.error('Index file does not exist at:', indexPath);
       log.error('Index file does not exist at:', indexPath);
-      
+
       // Try alternative paths for troubleshooting
       const alternatives = [
         path.join(process.resourcesPath, 'app', 'dist', 'index.html'),
         path.join(__dirname, '..', 'dist', 'index.html'),
         path.join(app.getAppPath(), 'dist', 'index.html')
       ];
-      
+
       for (const altPath of alternatives) {
         if (fsSync.existsSync(altPath)) {
           console.log('Found index.html at alternative path:', altPath);
@@ -825,7 +926,7 @@ const createWindow = () => {
           return;
         }
       }
-      
+
       // If no file found, show error
       const { dialog } = require('electron');
       dialog.showErrorBox('File Not Found', `Could not find index.html at expected location: ${indexPath}`);
@@ -866,7 +967,7 @@ autoUpdater.on('update-downloaded', () => {
 const broadcast = (payload) => {
   try {
     BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('task-progress', payload));
-  } catch (e) {}
+  } catch (e) { }
 };
 
 app.on('ready', async () => {
@@ -911,10 +1012,10 @@ app.on('ready', async () => {
     // Initialize collection importer
     console.log('Initializing collection importer...');
     await collectionImporter.initialize();
-    
+
     // Connect bulk data service to collection importer for card lookups
     collectionImporter.bulkDataService = bulkDataService;
-    
+
     console.log('Collection importer initialized successfully.');
 
     // Auto-import text file collections (DISABLED to prevent undefined name errors)
@@ -934,7 +1035,7 @@ app.on('ready', async () => {
           // Only check for updates if running from a published distribution
           const fs = require('fs');
           const updateConfigPath = path.join(process.resourcesPath, 'app-update.yml');
-          
+
           if (fs.existsSync(updateConfigPath)) {
             log.info('🔄 Starting update check...');
             autoUpdater.checkForUpdatesAndNotify();

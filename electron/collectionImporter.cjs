@@ -45,7 +45,7 @@ class CollectionImporter {
       await this.db.exec('PRAGMA synchronous = NORMAL'); // Faster writes
       await this.db.exec('PRAGMA cache_size = 10000'); // Better performance
       await this.db.exec('PRAGMA temp_store = memory'); // Use memory for temp tables
-      
+
       // Create collections table with camelCase column names if it doesn't exist
       await this.db.exec(`
         CREATE TABLE IF NOT EXISTS user_collections (
@@ -89,9 +89,9 @@ class CollectionImporter {
   async importCSV(filePath, collectionName) {
     try {
       console.log(`📥 Importing CSV collection: ${collectionName} from ${filePath}`);
-      
+
       const fileContent = await fs.readFile(filePath, 'utf-8');
-      
+
       // Parse CSV with headers
       const records = parse(fileContent, {
         columns: true,
@@ -109,10 +109,10 @@ class CollectionImporter {
       // Process records in batches
       for (let i = 0; i < records.length; i += batchSize) {
         const batch = records.slice(i, i + batchSize);
-        
+
         await this.retryOperation(async () => {
           await this.db.exec('BEGIN IMMEDIATE TRANSACTION');
-          
+
           const insertStmt = await this.db.prepare(`
             INSERT OR REPLACE INTO user_collections 
             (collectionName, cardName, setCode, setName, collectorNumber, foil, rarity, 
@@ -222,7 +222,7 @@ class CollectionImporter {
   async importTXT(filePath, collectionName, format = 'simple') {
     try {
       console.log(`📥 Importing TXT collection: ${collectionName} from ${filePath}`);
-      
+
       const fileContent = await fs.readFile(filePath, 'utf-8');
       const lines = fileContent.split('\n').map(line => line.trim()).filter(line => line);
 
@@ -236,10 +236,10 @@ class CollectionImporter {
       // Process lines in batches
       for (let i = 0; i < lines.length; i += batchSize) {
         const batch = lines.slice(i, i + batchSize);
-        
+
         await this.retryOperation(async () => {
           await this.db.exec('BEGIN IMMEDIATE TRANSACTION');
-          
+
           const insertStmt = await this.db.prepare(`
             INSERT OR REPLACE INTO user_collections 
             (collectionName, cardName, setCode, collectorNumber, quantity, foil)
@@ -255,13 +255,13 @@ class CollectionImporter {
                 }
 
                 const cardData = this.parseTXTLine(line, format);
-                
+
                 if (!cardData.name || cardData.name.trim() === '') {
                   console.warn('⚠️ Skipping line with no card name:', line, 'Parsed data:', cardData);
                   skipped++;
                   continue;
                 }
-                
+
                 // Debug logging for the first few cards
                 if (imported < 3) {
                   console.log(`🔍 Debug: Line "${line}" parsed as:`, cardData);
@@ -303,7 +303,7 @@ class CollectionImporter {
       console.log('🔄 Starting collection sync to main database...');
       const syncResult = await this.syncCollectionToMainDatabase();
       console.log('✅ Collection sync completed, import process finished!');
-      
+
       return {
         success: true,
         imported,
@@ -404,7 +404,7 @@ class CollectionImporter {
   normalizeCondition(condition) {
     if (!condition) return 'near_mint';
     const normalized = condition.toString().toLowerCase().replace(/[^a-z]/g, '');
-    
+
     const conditionMap = {
       'nearmint': 'near_mint',
       'nm': 'near_mint',
@@ -547,7 +547,7 @@ class CollectionImporter {
     try {
       console.log('🔄 Syncing collection data to main database (Optimized with Token Support)...');
       const startTime = Date.now();
-      
+
       // Step 1: Get all unique cards from user collections with their total quantities
       const collectedCardsSummary = await this.db.all(`
         SELECT 
@@ -565,11 +565,11 @@ class CollectionImporter {
         this.isSyncing = false;
         return { success: true, synced: 0, notFound: 0, total: 0 };
       }
-      
+
       // Step 2: Get all unique card names and fetch all their printings at once from both cards and tokens.
       const uniqueNames = [...new Set(collectedCardsSummary.map(c => c.name.toLowerCase()))];
       const placeholders = uniqueNames.map(() => '?').join(',');
-      
+
       // Search both cards and tokens tables
       const [allPrintings, allTokens] = await Promise.all([
         this.bulkDataService.db.all(
@@ -581,11 +581,11 @@ class CollectionImporter {
           uniqueNames
         )
       ]);
-      
+
       // Step 3: Build a lookup map for fast access combining both cards and tokens.
       const printingsMap = new Map();
       const allResults = [...allPrintings, ...allTokens];
-      
+
       for (const p of allResults) {
         const nameKey = p.name.toLowerCase();
         if (!printingsMap.has(nameKey)) {
@@ -612,7 +612,7 @@ class CollectionImporter {
 
       // Step 5: Loop through the summary and find matches IN MEMORY.
       const foundUuids = new Set();
-      
+
       for (const collectedCard of collectedCardsSummary) {
         const potentialPrintings = printingsMap.get(collectedCard.name.toLowerCase());
         let bestMatch = null;
@@ -625,7 +625,7 @@ class CollectionImporter {
           const tokens = potentialPrintings.filter(p => p.type === 'token');
 
           // 1. Exact match in cards (name, set, number)
-          bestMatch = cards.find(p => 
+          bestMatch = cards.find(p =>
             lowerSetCode && collectedCard.collectorNumber &&
             p.setCode.toLowerCase() === lowerSetCode &&
             p.number === collectedCard.collectorNumber
@@ -634,7 +634,7 @@ class CollectionImporter {
           // 2. Set match in cards (name, set) - prefer English for tie-breaking
           if (!bestMatch && lowerSetCode) {
             bestMatch = cards.find(p => p.setCode.toLowerCase() === lowerSetCode && p.language === 'en')
-                      || cards.find(p => p.setCode.toLowerCase() === lowerSetCode);
+              || cards.find(p => p.setCode.toLowerCase() === lowerSetCode);
           }
 
           // 3. Name match in cards (any printing) - prefer English for tie-breaking
@@ -645,7 +645,7 @@ class CollectionImporter {
           // 4. If no card found, try tokens with same logic
           if (!bestMatch && tokens.length > 0) {
             // Exact match in tokens (name, set, number)
-            bestMatch = tokens.find(p => 
+            bestMatch = tokens.find(p =>
               lowerSetCode && collectedCard.collectorNumber &&
               p.setCode.toLowerCase() === lowerSetCode &&
               p.number === collectedCard.collectorNumber
@@ -654,7 +654,7 @@ class CollectionImporter {
             // Set match in tokens (name, set) - prefer English for tie-breaking
             if (!bestMatch && lowerSetCode) {
               bestMatch = tokens.find(p => p.setCode.toLowerCase() === lowerSetCode && p.language === 'en')
-                        || tokens.find(p => p.setCode.toLowerCase() === lowerSetCode);
+                || tokens.find(p => p.setCode.toLowerCase() === lowerSetCode);
             }
 
             // Name match in tokens (any printing) - prefer English for tie-breaking
@@ -672,13 +672,13 @@ class CollectionImporter {
         if (bestMatch) {
           foundUuids.add(bestMatch.uuid);
           const currentQuantity = currentCollectedMap.get(bestMatch.uuid) || 0;
-          
+
           // Only update if quantity changed
           if (currentQuantity !== collectedCard.total_quantity) {
-            updates.push({ 
-              uuid: bestMatch.uuid, 
+            updates.push({
+              uuid: bestMatch.uuid,
               quantity: collectedCard.total_quantity,
-              type: bestMatch.type 
+              type: bestMatch.type
             });
           }
         } else {
@@ -701,7 +701,7 @@ class CollectionImporter {
       await this.retryOperation(async () => {
         await this.bulkDataService.db.exec('BEGIN IMMEDIATE TRANSACTION');
         console.log(`🔄 Optimized updates: ${cardUpdates.length} cards, ${tokenUpdates.length} tokens, ${resets.length} resets`);
-        
+
         try {
           // Update cards table for regular cards
           if (cardUpdates.length > 0) {
@@ -724,7 +724,7 @@ class CollectionImporter {
             // Column might already exist, that's okay
             console.log('📝 Tokens table already has collected column');
           }
-          
+
           if (tokenUpdates.length > 0) {
             console.log(`📝 Updating ${tokenUpdates.length} tokens in tokens table...`);
             const tokenStmt = await this.bulkDataService.db.prepare(
@@ -746,7 +746,7 @@ class CollectionImporter {
             const tokenResetStmt = await this.bulkDataService.db.prepare(
               'UPDATE tokens SET collected = 0 WHERE uuid = ?'
             );
-            
+
             for (const uuid of resets) {
               // Try both tables since we don't know which one this UUID belongs to
               await resetStmt.run([uuid]);
@@ -768,7 +768,7 @@ class CollectionImporter {
       const totalUpdates = cardUpdates.length + tokenUpdates.length + resets.length;
       console.log(`✅ Collection sync complete in ${duration}ms: ${totalUpdates} items updated (${tokensFound} tokens), ${notFound} not found`);
       console.log(`📈 Sync details: ${cardUpdates.length} cards updated, ${tokenUpdates.length} tokens updated, ${resets.length} reset`);
-      
+
       return {
         success: true,
         synced: totalUpdates,
@@ -783,9 +783,9 @@ class CollectionImporter {
     } catch (error) {
       console.error('Error syncing collection to main database:', error);
       // Attempt to rollback if a transaction was started
-      try { 
-        await this.bulkDataService.db.exec('ROLLBACK'); 
-      } catch (rollbackError) { 
+      try {
+        await this.bulkDataService.db.exec('ROLLBACK');
+      } catch (rollbackError) {
         console.error('Error during sync rollback:', rollbackError);
       }
       return {
@@ -847,7 +847,7 @@ class CollectionImporter {
 
       // If no card found, try searching tokens table
       console.log(`🔍 Card not found, searching tokens for "${cardName}"`);
-      
+
       try {
         let tokenQuery = `SELECT * FROM tokens WHERE lower(name) = lower(?)`;
         let params = [cardName];
@@ -868,7 +868,7 @@ class CollectionImporter {
         tokenQuery += ` ORDER BY CASE WHEN language = 'en' THEN 0 ELSE 1 END LIMIT 1`;
 
         const token = await this.bulkDataService.db.get(tokenQuery, params);
-        
+
         if (token) {
           console.log(`🪙 Found token match for "${cardName}" (${token.setCode || 'unknown set'})`);
           return token;
@@ -880,7 +880,7 @@ class CollectionImporter {
             `SELECT * FROM tokens WHERE lower(name) = lower(?) ORDER BY CASE WHEN language = 'en' THEN 0 ELSE 1 END LIMIT 1`,
             [cardName]
           );
-          
+
           if (nameOnlyToken) {
             console.log(`🪙 Found token name match for "${cardName}" (${nameOnlyToken.setCode || 'unknown set'})`);
             return nameOnlyToken;
