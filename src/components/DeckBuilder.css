@@ -374,6 +374,18 @@
   background-color: #0056b3;
 }
 
+/* Remove from Deck button styles */
+.card-grid-item button.remove-from-deck,
+.card-grid-item-deck button.remove-from-deck {
+  background-color: var(--danger-color);
+  color: white;
+}
+
+.card-grid-item button.remove-from-deck:hover,
+.card-grid-item-deck button.remove-from-deck:hover {
+  background-color: #cc0000;
+}
+
 .card-grid-item button:disabled,
 .card-grid-item-deck button:disabled {
   background-color: #444;

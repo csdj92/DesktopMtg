@@ -910,17 +910,22 @@ const DeckBuilder = () => {
                 {searchLoading && <p>Searching...</p>}
                 {!searchLoading && filteredSearchResults.map(card => {
                   const isInDeck = deck.mainboard.some(entry => entry.card.id === card.id);
-                  const canAddMore = format !== 'commander' || isBasicLand(card) || !isInDeck;
 
                   return (
                     <div key={card.id} className="card-grid-item">
                       <Card card={card} onCardClick={(card) => handleCardClick(card, 'search')} />
                       <button
-                        onClick={(e) => { e.stopPropagation(); addCardToDeck(card); }}
-                        disabled={!canAddMore}
-                        title={!canAddMore ? 'Commander format allows only one copy of non-basic cards' : ''}
+                        className={isInDeck ? 'remove-from-deck' : ''}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (isInDeck) {
+                            removeCardFromDeck(card.id);
+                          } else {
+                            addCardToDeck(card);
+                          }
+                        }}
                       >
-                        {isInDeck && format === 'commander' && !isBasicLand(card) ? 'In Deck' : 'Add to Deck'}
+                        {isInDeck ? 'Remove from Deck' : 'Add to Deck'}
                       </button>
                     </div>
                   );
@@ -977,17 +982,22 @@ const DeckBuilder = () => {
                 {ownedLoading && <p>Loading collection...</p>}
                 {!ownedLoading && displayCollectionCards.map(entry => {
                   const isInDeck = deck.mainboard.some(deckEntry => deckEntry.card.id === entry.card.id);
-                  const canAddMore = format !== 'commander' || isBasicLand(entry.card) || !isInDeck;
 
                   return (
                     <div key={entry.card.id} className="card-grid-item">
                       <Card card={entry.card} quantity={entry.quantity} onCardClick={(card) => handleCardClick(card, 'collection')} />
                       <button
-                        onClick={(e) => { e.stopPropagation(); addCardToDeck(entry.card); }}
-                        disabled={!canAddMore}
-                        title={!canAddMore ? 'Commander format allows only one copy of non-basic cards' : ''}
+                        className={isInDeck ? 'remove-from-deck' : ''}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (isInDeck) {
+                            removeCardFromDeck(entry.card.id);
+                          } else {
+                            addCardToDeck(entry.card);
+                          }
+                        }}
                       >
-                        {isInDeck && format === 'commander' && !isBasicLand(entry.card) ? 'In Deck' : 'Add to Deck'}
+                        {isInDeck ? 'Remove from Deck' : 'Add to Deck'}
                       </button>
                     </div>
                   );
@@ -1160,17 +1170,22 @@ const DeckBuilder = () => {
                 {recoLoading && <p>Analyzing deck...</p>}
                 {!recoLoading && displayRecommendations.map(card => {
                   const isInDeck = deck.mainboard.some(entry => entry.card.id === card.id);
-                  const canAddMore = format !== 'commander' || isBasicLand(card) || !isInDeck;
 
                   return (
                     <div key={card.id} className="card-grid-item">
                       <Card card={card} onCardClick={(card) => handleCardClick(card, 'recommendations')} />
                       <button
-                        onClick={(e) => { e.stopPropagation(); addCardToDeck(card); }}
-                        disabled={!canAddMore}
-                        title={!canAddMore ? 'Commander format allows only one copy of non-basic cards' : ''}
+                        className={isInDeck ? 'remove-from-deck' : ''}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (isInDeck) {
+                            removeCardFromDeck(card.id);
+                          } else {
+                            addCardToDeck(card);
+                          }
+                        }}
                       >
-                        {isInDeck && format === 'commander' && !isBasicLand(card) ? 'In Deck' : 'Add to Deck'}
+                        {isInDeck ? 'Remove from Deck' : 'Add to Deck'}
                       </button>
                     </div>
                   );
