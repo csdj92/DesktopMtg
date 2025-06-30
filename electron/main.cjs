@@ -72,6 +72,10 @@ ipcMain.handle('bulk-data-search', (event, searchParams, options) => {
   return bulkDataService.searchCards(searchParams, options);
 });
 
+ipcMain.handle('bulk-data-search-tokens', (event, searchParams, options) => {
+  return bulkDataService.searchTokens(searchParams, options);
+});
+
 ipcMain.handle('bulk-data-find-card', (event, cardName) => {
   return bulkDataService.findCardByName(cardName);
 });

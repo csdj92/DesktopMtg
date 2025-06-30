@@ -5,17 +5,17 @@ import './HandSimulator.css';
 const Card = ({ card, onCardClick }) => {
   const getImageUrl = (cardData) => {
     if (!cardData) return 'https://placehold.co/600x800/1a1a1a/e0e0e0?text=No+Image';
-    
+
     // Handle double-faced cards
     if (cardData.card_faces && cardData.card_faces.length > 0 && cardData.card_faces[0].image_uris) {
       return cardData.card_faces[0].image_uris.normal;
     }
-    
+
     // Handle single-faced cards
     if (cardData.image_uris) {
       return cardData.image_uris.normal;
     }
-    
+
     return 'https://placehold.co/600x800/1a1a1a/e0e0e0?text=No+Image';
   };
 
@@ -38,10 +38,21 @@ const shuffleArray = (array) => {
   return shuffled;
 };
 
+// Utility to flatten deck entries into repeated card list based on quantity (same as DeckStatistics)
+const expandEntries = (entries) => {
+  const list = [];
+  entries.forEach(({ card, quantity }) => {
+    for (let i = 0; i < quantity; i++) {
+      list.push(card);
+    }
+  });
+  return list;
+};
+
 // Create a deck array from deck data (expanding quantities)
 const createDeckArray = (deckData) => {
   const cards = [];
-  
+
   // Add commanders (in formats where they start in play, but for simulation we include them)
   if (deckData.commanders) {
     deckData.commanders.forEach(commanderEntry => {
@@ -50,28 +61,23 @@ const createDeckArray = (deckData) => {
       }
     });
   }
-  
-  // Add mainboard cards
+
+  // Add mainboard cards using the same logic as DeckStatistics
   if (deckData.mainboard) {
-    deckData.mainboard.forEach(entry => {
-      if (entry && entry.card && entry.quantity) {
-        for (let i = 0; i < entry.quantity; i++) {
-          cards.push(entry.card);
-        }
-      }
-    });
+    cards.push(...expandEntries(deckData.mainboard));
   }
-  
+
   return cards;
 };
 
 // Calculate mana curve for hand analysis
 const calculateManaCurve = (cards) => {
   const curve = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, '7+': 0 };
-  
+
   cards.forEach(card => {
     if (card) {
-      const cmc = card.cmc || 0;
+      // Use same property access pattern as DeckStatistics
+      const cmc = card.manaValue ?? card.cmc ?? card.mana_value ?? 0;
       if (cmc >= 7) {
         curve['7+']++;
       } else {
@@ -79,14 +85,14 @@ const calculateManaCurve = (cards) => {
       }
     }
   });
-  
+
   return curve;
 };
 
 // Count lands in hand
 const countLands = (cards) => {
-  return cards.filter(card => 
-    card && card.type_line && card.type_line.toLowerCase().includes('land')
+  return cards.filter(card =>
+    card && (card.type || card.type_line || '').toLowerCase().includes('land')
   ).length;
 };
 
@@ -121,7 +127,7 @@ const HandSimulator = () => {
   // Load selected deck
   const loadDeck = useCallback(async (deckName) => {
     if (!deckName) return;
-    
+
     setLoading(true);
     try {
       const result = await window.electronAPI.deckLoad(deckName);
@@ -131,7 +137,7 @@ const HandSimulator = () => {
         setSelectedDeck(deckName);
         setCurrentHand([]);
         setMulliganCount(0);
-        
+
         // Create and shuffle the deck
         const deckArray = createDeckArray(result.deck);
         console.log('Created deck array:', deckArray.length, 'cards');
@@ -156,7 +162,7 @@ const HandSimulator = () => {
       alert("Deck has fewer than 7 cards!");
       return;
     }
-    
+
     const hand = shuffledDeck.slice(0, 7);
     setCurrentHand(hand);
   }, [shuffledDeck]);
@@ -164,11 +170,11 @@ const HandSimulator = () => {
   // Mulligan - reshuffle and draw new hand
   const mulligan = useCallback(() => {
     if (!deckData) return;
-    
+
     const deckArray = createDeckArray(deckData);
     const shuffled = shuffleArray(deckArray);
     setShuffledDeck(shuffled);
-    
+
     // Draw one less card for each mulligan (minimum 1)
     const handSize = Math.max(1, 7 - mulliganCount - 1);
     const newHand = shuffled.slice(0, handSize);
@@ -181,6 +187,19 @@ const HandSimulator = () => {
     // In a real game, you might want to track kept hands or do additional analysis
     console.log("Hand kept after", mulliganCount, "mulligans");
   }, [mulliganCount]);
+
+  // Draw new hand - reshuffle and draw full 7 cards without mulligan penalty
+  const drawNewHand = useCallback(() => {
+    if (!deckData) return;
+
+    const deckArray = createDeckArray(deckData);
+    const shuffled = shuffleArray(deckArray);
+    setShuffledDeck(shuffled);
+
+    // Draw a fresh 7-card hand
+    const newHand = shuffled.slice(0, 7);
+    setCurrentHand(newHand);
+  }, [deckData]);
 
   // Reset simulation
   const resetSimulation = useCallback(() => {
@@ -196,29 +215,29 @@ const HandSimulator = () => {
   // Calculate hand statistics
   const handStats = useMemo(() => {
     if (currentHand.length === 0) return null;
-    
+
     const validCards = currentHand.filter(card => card);
-    
+
     return {
       cardCount: currentHand.length,
       landCount: countLands(currentHand),
       manaCurve: calculateManaCurve(currentHand),
-      avgCmc: validCards.length > 0 ? validCards.reduce((sum, card) => sum + (card.cmc || 0), 0) / validCards.length : 0
+      avgCmc: validCards.length > 0 ? validCards.reduce((sum, card) => sum + (card.manaValue ?? card.cmc ?? card.mana_value ?? 0), 0) / validCards.length : 0
     };
   }, [currentHand]);
 
   // Deck statistics
   const deckStats = useMemo(() => {
     if (!deckData) return null;
-    
+
     const allCards = createDeckArray(deckData);
     const validCards = allCards.filter(card => card);
-    
+
     return {
       totalCards: allCards.length,
       landCount: countLands(allCards),
       manaCurve: calculateManaCurve(allCards),
-      avgCmc: validCards.length > 0 ? validCards.reduce((sum, card) => sum + (card.cmc || 0), 0) / validCards.length : 0
+      avgCmc: validCards.length > 0 ? validCards.reduce((sum, card) => sum + (card.manaValue ?? card.cmc ?? card.mana_value ?? 0), 0) / validCards.length : 0
     };
   }, [deckData]);
 
@@ -271,7 +290,7 @@ const HandSimulator = () => {
                   <span className="stat-value">{deckStats.avgCmc.toFixed(2)}</span>
                 </div>
               </div>
-              
+
               <div className="mana-curve">
                 <h4>Deck Mana Curve</h4>
                 <div className="curve-bars">
@@ -297,6 +316,9 @@ const HandSimulator = () => {
                 <button onClick={drawOpeningHand} disabled={currentHand.length > 0}>
                   Draw Opening Hand
                 </button>
+                <button onClick={drawNewHand} disabled={!deckData}>
+                  Draw New Hand
+                </button>
                 <button onClick={mulligan} disabled={currentHand.length === 0}>
                   Mulligan ({mulliganCount > 0 ? `${mulliganCount} taken` : 'None'})
                 </button>
@@ -316,7 +338,7 @@ const HandSimulator = () => {
           {currentHand.length > 0 && (
             <div className="hand-display">
               <h3>🃏 Current Hand ({currentHand.length} cards)</h3>
-              
+
               {/* Hand Stats */}
               {handStats && (
                 <div className="hand-stats">

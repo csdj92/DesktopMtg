@@ -46,22 +46,22 @@ class BulkDataService {
   async initialize() {
     try {
       console.log('Initializing bulk data service with static database...');
-      
+
       // Ensure data directory exists
       await fs.mkdir(BULK_DATA_DIR, { recursive: true });
-      
+
       // Initialize database connection
       await this.initializeDatabase();
-      
+
       // Ensure the 'collected' column exists for tracking user cards
       await this.addCollumnCollected();
-      
+
       // Get card count from the existing database
       this.cardCount = await this.getCardCount();
-      
+
       this.initialized = true;
       console.log(`Bulk data initialized with ${this.cardCount} cards from existing database.`);
-      
+
     } catch (error) {
       console.error('Failed to initialize bulk data service:', error);
     }
@@ -85,7 +85,7 @@ class BulkDataService {
     const tables = await this.db.all("SELECT name FROM sqlite_master WHERE type='table' AND name='cards'");
     if (tables.length > 0) {
       console.log('Database initialized successfully - using existing cards table');
-      
+
       // Ensure optimized indexes exist for fast card lookups
       await this.ensureOptimizedIndexes();
     } else {
@@ -190,7 +190,7 @@ class BulkDataService {
 
   async getCollectedCards(options = {}) {
     const { search = '', limit = 1000, offset = 0 } = options;
-    
+
     let query = `
       SELECT c.*, 
              ci.scryfallId,
@@ -210,15 +210,15 @@ class BulkDataService {
       WHERE c.collected >= 1
     `;
     const params = [];
-    
+
     if (search) {
       query += ' AND (lower(c.name) LIKE lower(?) OR lower(c.setCode) LIKE lower(?))';
       params.push(`%${search}%`, `%${search}%`);
     }
-    
+
     query += ' ORDER BY c.name ASC LIMIT ? OFFSET ?';
     params.push(limit, offset);
-    
+
     const result = await this.db.all(query, params);
     return Promise.all(result.map(row => this.convertDbRowToCard(row)));
   }
@@ -227,7 +227,7 @@ class BulkDataService {
     if (!this.db || !this.initialized) {
       return false;
     }
-    
+
     try {
       const result = await this.db.run(
         'UPDATE cards SET collected = ? WHERE uuid = ?',
@@ -245,7 +245,7 @@ class BulkDataService {
     if (!this.db || !this.initialized) {
       return false;
     }
-    
+
     try {
       const result = await this.db.run('UPDATE cards SET collected = 0 WHERE collected > 0');
       console.log(`Cleared ${result.changes} collected card(s) from main database`);
@@ -266,11 +266,11 @@ class BulkDataService {
     if (!this.db || !this.initialized) {
       return null;
     }
-    
+
     try {
       const totalCards = await this.db.get('SELECT COUNT(*) as count FROM cards');
       const collectedCards = await this.db.get('SELECT COUNT(*) as count FROM cards WHERE collected >= 1');
-      
+
       // Get collected by rarity
       const rarityStats = await this.db.all(`
         SELECT rarity, COUNT(*) as count 
@@ -278,7 +278,7 @@ class BulkDataService {
         WHERE collected >= 1 
         GROUP BY rarity
       `);
-      
+
       // Get collected by set (top 10)
       const setStats = await this.db.all(`
         SELECT setCode, COUNT(*) as count 
@@ -288,7 +288,7 @@ class BulkDataService {
         ORDER BY count DESC 
         LIMIT 10
       `);
-      
+
       return {
         total_cards: totalCards.count,
         collected_cards: collectedCards.count,
@@ -327,21 +327,21 @@ class BulkDataService {
 
   async getCardCount() {
     if (!this.db) return 0;
-    
+
     const result = await this.db.get('SELECT COUNT(*) as count FROM cards');
     return result.count;
   }
 
   async getCollectedCardCount() {
     if (!this.db) return 0;
-    
+
     const result = await this.db.get('SELECT COUNT(*) as count FROM cards WHERE collected >= 1');
     return result.count;
   }
 
   async shouldUpdate() {
     const cardCount = await this.getCardCount();
-    
+
     // If we have a database with cards, check if it was built with Python
     if (cardCount > 0) {
       try {
@@ -349,7 +349,7 @@ class BulkDataService {
         if (metadataExists) {
           const metadataContent = await fs.readFile(METADATA_FILE, 'utf-8');
           const metadata = JSON.parse(metadataContent);
-          
+
           // If built with Python, don't update (let Python handle updates)
           if (metadata.built_with && metadata.built_with.includes('Python')) {
             console.log('📦 Database was built with Python builder, skipping Node.js import');
@@ -360,7 +360,7 @@ class BulkDataService {
         console.error('Error checking metadata:', error);
       }
     }
-    
+
     if (!this.metadata || cardCount === 0) {
       return true; // No local data, need to download
     }
@@ -376,12 +376,12 @@ class BulkDataService {
     const now = new Date();
     if (now - lastUpdate > UPDATE_INTERVAL) {
       console.log('Local data is older than 7 days, checking for updates...');
-      
+
       try {
         const bulkInfo = await this.getBulkDataInfo();
         const latestUpdate = new Date(bulkInfo.updated_at);
         const localUpdate = new Date(this.metadata.updated_at);
-        
+
         return latestUpdate > localUpdate;
       } catch (error) {
         console.error('Error checking for updates:', error);
@@ -401,11 +401,11 @@ class BulkDataService {
         }
       }, (response) => {
         let data = '';
-        
+
         response.on('data', (chunk) => {
           data += chunk;
         });
-        
+
         response.on('end', () => {
           try {
             const bulkData = JSON.parse(data);
@@ -421,7 +421,7 @@ class BulkDataService {
           }
         });
       });
-      
+
       request.on('error', reject);
       request.setTimeout(10000, () => {
         request.destroy();
@@ -435,7 +435,7 @@ class BulkDataService {
     this._broadcast('task-progress', { task: 'download', state: 'start', percent: 0 });
 
     const bulkInfo = await this.getBulkDataInfo();
-    
+
     // Check if file already exists
     const fileExists = await this.fileExists(CARDS_FILE);
     if (fileExists) {
@@ -443,9 +443,9 @@ class BulkDataService {
       this._broadcast('task-progress', { task: 'download', state: 'done', percent: 100 });
       return;
     }
-    
+
     console.log(`Downloading bulk data: ${bulkInfo.name} (${Math.round(bulkInfo.size / 1024 / 1024)}MB)`);
-    
+
     return new Promise((resolve, reject) => {
       const request = https.get(bulkInfo.download_uri, {
         headers: {
@@ -456,35 +456,35 @@ class BulkDataService {
           reject(new Error(`HTTP ${response.statusCode}: ${response.statusMessage}`));
           return;
         }
-        
+
         // Stream directly to file instead of concatenating to string
         const writeStream = fsSync.createWriteStream(CARDS_FILE);
         let downloadedBytes = 0;
         const totalBytes = bulkInfo.size;
-        
+
         response.on('data', (chunk) => {
           downloadedBytes += chunk.length;
-          
+
           const percent = Math.round((downloadedBytes / totalBytes) * 100);
           this._broadcast('task-progress', { task: 'download', percent });
-          
+
           // Log progress every 10MB
           if (downloadedBytes % (10 * 1024 * 1024) < chunk.length) {
             console.log(`Download progress: ${percent}%`);
           }
         });
-        
+
         response.on('end', async () => {
           try {
             console.log('Download complete, saved to file');
-            
+
             // Save metadata
             const metadata = {
               ...bulkInfo,
               downloaded_at: new Date().toISOString()
             };
             await fs.writeFile(METADATA_FILE, JSON.stringify(metadata, null, 2));
-            
+
             console.log(`Successfully downloaded and saved bulk data to ${CARDS_FILE}`);
             this._broadcast('task-progress', { task: 'download', state: 'done', percent: 100 });
             resolve();
@@ -493,27 +493,27 @@ class BulkDataService {
             reject(error);
           }
         });
-        
+
         response.on('error', (error) => {
           writeStream.destroy();
           this._broadcast('task-progress', { task: 'download', state: 'fail' });
           reject(error);
         });
-        
+
         // Pipe the response to the file
         response.pipe(writeStream);
-        
+
         writeStream.on('error', (error) => {
           response.destroy();
           this._broadcast('task-progress', { task: 'download', state: 'fail' });
           reject(error);
         });
-        
+
         writeStream.on('finish', () => {
           console.log('File write completed');
         });
       });
-      
+
       request.on('error', (err) => {
         this._broadcast('task-progress', { task: 'download', state: 'fail' });
         reject(err);
@@ -529,23 +529,23 @@ class BulkDataService {
   async importCardsToDatabase() {
     this._broadcast('task-progress', { task: 'import', state: 'start' });
     console.log('Importing cards to database...');
-    
+
     // Option to use worker thread for memory isolation
     const useWorkerThread = process.env.USE_WORKER_THREAD !== 'false'; // Changed to use worker by default
-    
+
     if (useWorkerThread) {
       return this.importCardsWithWorker();
     }
-    
-    
+
+
     return new Promise((resolve, reject) => {
       const { Writable } = require('stream');
       const { pipeline } = require('stream');
-      
+
       let cardCount = 0;
       let batch = [];
       const BATCH_SIZE = 5; // Ultra-small batches for maximum memory efficiency
-      
+
       // Create a processing stream with proper backpressure handling
       const processingStream = new Writable({
         objectMode: true,
@@ -553,7 +553,7 @@ class BulkDataService {
         write(chunk, encoding, callback) {
           // Add card to batch
           batch.push(chunk.value);
-          
+
           // Process batch when it reaches BATCH_SIZE
           if (batch.length >= BATCH_SIZE) {
             this.processBatch(batch.slice())
@@ -562,27 +562,27 @@ class BulkDataService {
                 if (cardCount % 1000 === 0) {
                   this._broadcast('task-progress', { task: 'import', count: cardCount });
                 }
-                
+
                 // Enhanced memory monitoring
                 const memUsage = process.memoryUsage();
                 const memoryMB = Math.round(memUsage.heapUsed / 1024 / 1024);
                 const memoryTotalMB = Math.round(memUsage.heapTotal / 1024 / 1024);
-                
+
                 console.log(`Imported ${cardCount} cards... Memory: ${memoryMB}MB/${memoryTotalMB}MB (RSS: ${Math.round(memUsage.rss / 1024 / 1024)}MB)`);
-                
+
                 // Memory leak detection - warn if memory usage is growing too fast
                 if (cardCount > 0 && memoryMB > (cardCount / 1000) * 100) {
                   console.warn(`⚠️ Potential memory leak detected. Memory usage (${memoryMB}MB) seems high for ${cardCount} cards processed.`);
                 }
-                
+
                 batch = []; // Clear the batch to free memory
-                
+
                 // Force garbage collection every 1000 cards if available
                 if (cardCount % 1000 === 0 && global.gc) {
                   global.gc();
                   console.log(`🧹 Garbage collection triggered at ${cardCount} cards`);
                 }
-                
+
                 // Use setImmediate to yield control back to event loop
                 setImmediate(() => {
                   callback(); // Signal ready for next chunk
@@ -593,7 +593,7 @@ class BulkDataService {
             callback(); // Ready for next chunk
           }
         },
-        
+
         final(callback) {
           // Process remaining cards in batch
           if (batch.length > 0) {
@@ -609,14 +609,14 @@ class BulkDataService {
           }
         }
       });
-      
+
       // Bind the processBatch method to the stream context
       processingStream.processBatch = async (cards) => {
         if (cards.length === 0) return;
-        
+
         try {
           await this.db.exec('BEGIN TRANSACTION');
-          
+
           const stmt = await this.db.prepare(`
             INSERT OR REPLACE INTO cards 
             (id, name, mana_cost, cmc, type_line, oracle_text, power, toughness, colors, rarity, set_code, set_name, collector_number, released_at, image_uris, card_faces, data)
@@ -643,27 +643,27 @@ class BulkDataService {
               JSON.stringify(card.card_faces || []),
               JSON.stringify(card)
             ]);
-            
+
             // Nullify card reference to help GC
             card = null;
           }
 
           await stmt.finalize();
           await this.db.exec('COMMIT');
-          
+
           // Clear cards array to help garbage collection
           cards.length = 0;
-          
+
         } catch (error) {
           console.error('Error processing batch:', error);
           await this.db.exec('ROLLBACK');
           throw error;
         }
       };
-      
+
       // Bind the method to the correct context
       processingStream.processBatch = processingStream.processBatch.bind(this);
-      
+
       // Use pipeline for proper error handling and automatic backpressure
       pipeline(
         fsSync.createReadStream(CARDS_FILE),
@@ -676,14 +676,14 @@ class BulkDataService {
             reject(error);
           } else {
             console.log(`Finished importing ${cardCount} cards to database`);
-            
+
             try {
               // Update metadata with card count
               if (this.metadata) {
                 this.metadata.card_count = cardCount;
                 await fs.writeFile(METADATA_FILE, JSON.stringify(this.metadata, null, 2));
               }
-              
+
               resolve();
             } catch (metadataError) {
               console.error('Error updating metadata:', metadataError);
@@ -697,7 +697,7 @@ class BulkDataService {
 
   async importCardsWithWorker() {
     console.log('🧵 Using worker thread for memory-isolated import...');
-    
+
     return new Promise((resolve, reject) => {
       const workerPath = path.join(__dirname, 'importWorker.cjs');
       const worker = new Worker(workerPath, {
@@ -713,30 +713,30 @@ class BulkDataService {
         switch (message.type) {
           case 'memory_update':
             console.log(`📊 Worker Memory: ${message.memory.heapUsed}MB/${message.memory.heapTotal}MB (RSS: ${message.memory.rss}MB) | Cards: ${message.cardCount}`);
-            
+
             // Memory leak detection
             if (message.cardCount > 0 && message.memory.heapUsed > (message.cardCount / 1000) * 50) {
               console.warn(`⚠️ Worker memory usage seems high: ${message.memory.heapUsed}MB for ${message.cardCount} cards`);
             }
             break;
-            
+
           case 'progress':
             console.log(`🚀 Progress: ${message.cardCount} cards imported (${message.rate})`);
             break;
-            
+
           case 'gc_triggered':
             console.log(`🧹 Worker GC triggered at ${message.cardCount} cards`);
             break;
-            
+
           case 'completed':
             const elapsed = Date.now() - startTime;
             console.log(`✅ Worker completed: ${message.cardCount} cards in ${Math.round(elapsed / 1000)}s`);
             break;
-            
+
           case 'error':
             console.error('❌ Worker error:', message.error);
             break;
-            
+
           case 'success':
             console.log(`🎉 Import successful! ${message.cardCount} cards imported`);
             this.updateMetadataAfterImport(message.cardCount)
@@ -772,6 +772,82 @@ class BulkDataService {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  // Token search method
+  async searchTokens(searchParams, options = {}) {
+    if (!this.db || !this.initialized) {
+      return [];
+    }
+
+    // Handle backward compatibility with old query string format
+    if (typeof searchParams === 'string') {
+      searchParams = { name: searchParams };
+    }
+
+    const { name, text, type } = searchParams;
+    const { limit = 50 } = options;
+
+    // Build query to search tokens table with cardIdentifiers join for image URLs
+    let query = `
+      SELECT t.*, 
+             ci.scryfallId
+      FROM tokens t
+      LEFT JOIN cardIdentifiers ci ON t.uuid = ci.uuid
+      WHERE 1=1
+    `;
+    const params = [];
+
+    // Name search (case-insensitive)
+    if (name) {
+      query += ' AND lower(t.name) LIKE lower(?)';
+      params.push(`%${name}%`);
+    }
+
+    // Oracle text search (case-insensitive)
+    if (text) {
+      query += ' AND (lower(t.text) LIKE lower(?) OR lower(t.originalText) LIKE lower(?))';
+      params.push(`%${text}%`, `%${text}%`);
+    }
+
+    // Type line search (case-insensitive)
+    if (type) {
+      query += ' AND (lower(t.type) LIKE lower(?) OR lower(t.types) LIKE lower(?))';
+      params.push(`%${type}%`, `%${type}%`);
+    }
+
+    // Add ordering and limit - prioritize English tokens
+    query += ' ORDER BY CASE WHEN t.language = "English" OR t.language IS NULL THEN 0 ELSE 1 END, t.name';
+    query += ` LIMIT ${limit}`;
+
+    try {
+      const rows = await this.db.all(query, params);
+
+      // Debug token structure on first search only
+      if (rows.length > 0 && name === 'warrior') { // Only log once
+        console.log('🪙 Token structure analysis:');
+        console.log('🪙 First token result keys:', Object.keys(rows[0]));
+        console.log('🪙 Sample token data:', rows[0]);
+
+        // Check if there are any cardIdentifiers entries for tokens  
+        const sampleTokenUuid = rows[0].uuid;
+        const idCheck = await this.db.get("SELECT scryfallId FROM cardIdentifiers WHERE uuid = ?", [sampleTokenUuid]);
+        console.log(`🪙 CardIdentifiers lookup for ${sampleTokenUuid}:`, idCheck ? 'Found' : 'Not found');
+
+        // Check if tokens have a direct scryfallId or imageUris column
+        const tokenColumns = await this.db.all("PRAGMA table_info(tokens)");
+        const hasDirectScryfallId = tokenColumns.some(c => c.name === 'scryfallId');
+        const hasImageUris = tokenColumns.some(c => c.name.toLowerCase().includes('image'));
+        console.log('🪙 Token table has direct scryfallId:', hasDirectScryfallId);
+        console.log('🪙 Token table image columns:', tokenColumns.filter(c => c.name.toLowerCase().includes('image')).map(c => c.name));
+      }
+
+      // Convert database rows to card format expected by the UI
+      return Promise.all(rows.map(row => this.convertDbRowToCard(row)));
+    } catch (error) {
+      console.error('Error searching tokens:', error);
+      return [];
     }
   }
 
@@ -895,7 +971,7 @@ class BulkDataService {
       // Prioritize English cards, then sort by name
       query += ' ORDER BY CASE WHEN c.language = "English" OR c.language IS NULL THEN 0 ELSE 1 END, c.name';
     }
-    
+
     query += ` LIMIT ${limit}`;
 
     try {
@@ -937,7 +1013,7 @@ class BulkDataService {
     if (!cardRow.layout || (cardRow.layout !== 'transform' && cardRow.layout !== 'modal_dfc')) {
       return null;
     }
-    
+
     // The scryfallId from the main row is the canonical ID for both faces' images.
     const canonicalScryfallId = cardRow.scryfallId;
     if (!canonicalScryfallId) {
@@ -958,26 +1034,26 @@ class BulkDataService {
       if (faces.length < 2) {
         // Fallback for when we can't find the other face.
         const frontFace = {
-            name: cardRow.faceName || cardRow.name.split(' // ')[0],
-            mana_cost: cardRow.manaCost || '',
-            type_line: cardRow.type || '',
-            oracle_text: cardRow.text || '',
-            power: cardRow.power,
-            toughness: cardRow.toughness,
-            loyalty: cardRow.loyalty,
-            colors: this.parseJsonSafely(cardRow.colors) || [],
-            image_uris: {
-                small: `https://cards.scryfall.io/small/front/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
-                normal: `https://cards.scryfall.io/normal/front/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
-                large: `https://cards.scryfall.io/large/front/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
-                png: `https://cards.scryfall.io/png/front/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
-                art_crop: `https://cards.scryfall.io/art_crop/front/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
-                border_crop: `https://cards.scryfall.io/border_crop/front/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`
-            }
+          name: cardRow.faceName || cardRow.name.split(' // ')[0],
+          mana_cost: cardRow.manaCost || '',
+          type_line: cardRow.type || '',
+          oracle_text: cardRow.text || '',
+          power: cardRow.power,
+          toughness: cardRow.toughness,
+          loyalty: cardRow.loyalty,
+          colors: this.parseJsonSafely(cardRow.colors) || [],
+          image_uris: {
+            small: `https://cards.scryfall.io/small/front/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
+            normal: `https://cards.scryfall.io/normal/front/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
+            large: `https://cards.scryfall.io/large/front/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
+            png: `https://cards.scryfall.io/png/front/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
+            art_crop: `https://cards.scryfall.io/art_crop/front/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
+            border_crop: `https://cards.scryfall.io/border_crop/front/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`
+          }
         };
         return [frontFace];
       }
-      
+
       // Deduplicate faces to prevent issues with multiple printings
       const uniqueFaces = [];
       const seenFaceNames = new Set();
@@ -991,7 +1067,7 @@ class BulkDataService {
       return uniqueFaces.map((face, index) => {
         const facePath = index === 1 ? 'back/' : 'front/';
         const idPath = `${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`;
-        
+
         return {
           name: face.faceName,
           mana_cost: face.manaCost || '',
@@ -1052,7 +1128,7 @@ class BulkDataService {
       'paupercommander', 'penny', 'pioneer', 'predh', 'premodern', 'standard',
       'standardbrawl', 'timeless', 'vintage'
     ];
-    
+
     legalityFields.forEach(field => {
       // If the DB field is explicitly 'legal', mark it as such. Otherwise, default to 'not_legal'.
       const dbValue = row[field];
@@ -1072,7 +1148,7 @@ class BulkDataService {
       id: row.uuid || row.id || `${row.setCode}-${row.number}`,
       uuid: row.uuid,
       name: row.name,
-      
+
       // New schema properties (camelCase)
       manaCost: row.manaCost,
       manaValue: row.manaValue,
@@ -1080,7 +1156,7 @@ class BulkDataService {
       text: row.text,
       setCode: row.setCode,
       number: row.number,
-      
+
       // Legacy properties (snake_case) for backwards compatibility
       mana_cost: row.manaCost,
       cmc: row.manaValue || row.cmc,
@@ -1090,7 +1166,7 @@ class BulkDataService {
       set_code: row.setCode,
       set_name: row.setName,
       collector_number: row.number,
-      
+
       // Other properties
       power: row.power,
       toughness: row.toughness,
@@ -1107,7 +1183,7 @@ class BulkDataService {
       lang: row.language === 'English' ? 'en' : row.language,
       artist: row.artist,
       layout: row.layout,
-      
+
       // Include original row data for compatibility
       ...row
     };
@@ -1145,7 +1221,7 @@ class BulkDataService {
         WHERE c.name = ? AND (c.language = "English" OR c.language IS NULL) 
         LIMIT 1
       `, [name]);
-      
+
       if (exactMatch) {
         return await this.convertDbRowToCard(exactMatch);
       }
@@ -1170,7 +1246,7 @@ class BulkDataService {
         WHERE lower(c.name) = lower(?) AND (c.language = "English" OR c.language IS NULL) 
         LIMIT 1
       `, [name]);
-      
+
       if (exactMatch) {
         return await this.convertDbRowToCard(exactMatch);
       }
@@ -1247,7 +1323,7 @@ class BulkDataService {
           AND (c.language = "English" OR c.language IS NULL)
         LIMIT 1
       `, [name, setCode, collectorNumber]);
-      
+
       if (exactMatch) {
         const cardData = await this.convertDbRowToCard(exactMatch);
         // console.log(`Found exact match for ${name} (${setCode}) #${collectorNumber} - Language: ${cardData.lang || 'en'}`);
@@ -1277,7 +1353,7 @@ class BulkDataService {
           AND (c.language = "English" OR c.language IS NULL)
         LIMIT 1
       `, [name, setCode, collectorNumber]);
-      
+
       if (exactMatch) {
         const cardData = await this.convertDbRowToCard(exactMatch);
         // console.log(`Found exact match for ${name} (${setCode}) #${collectorNumber} - Language: ${cardData.lang || 'en'}`);
@@ -1306,7 +1382,7 @@ class BulkDataService {
           AND (c.language = "English" OR c.language IS NULL) 
         LIMIT 1
       `, [name, setCode]);
-      
+
       if (setMatch) {
         const card = await this.convertDbRowToCard(setMatch);
         console.log(`Found set match for ${name} (${setCode}), but collector number ${collectorNumber} didn't match ${card.collector_number} - Language: ${card.lang || 'en'}`);
@@ -1336,7 +1412,7 @@ class BulkDataService {
       );
 
       if (nameMatches.length === 0) {
-        return { 
+        return {
           error: 'No cards found with this name',
           suggestion: 'Try searching for partial matches'
         };
@@ -1348,7 +1424,7 @@ class BulkDataService {
       };
 
       if (setCode) {
-        const setMatches = nameMatches.filter(card => 
+        const setMatches = nameMatches.filter(card =>
           card.set_code.toLowerCase() === setCode.toLowerCase()
         );
         result.setMatches = setMatches.length;
@@ -1386,8 +1462,8 @@ class BulkDataService {
 
   async searchCardsSemantic(query, options = {}) {
     if (!this.initialized) {
-        console.warn('Bulk data service not ready for semantic search.');
-        return [];
+      console.warn('Bulk data service not ready for semantic search.');
+      return [];
     }
     return await semanticSearchService.search(query, options);
   }
@@ -1420,7 +1496,7 @@ class BulkDataService {
     try {
       // Check if we have a dedicated sets table, otherwise aggregate from cards
       const setsTable = await this.db.all("SELECT name FROM sqlite_master WHERE type='table' AND name='sets'");
-      
+
       if (setsTable.length > 0) {
         // Use dedicated sets table if available - optimized with LEFT JOIN
         const rows = await this.db.all(
@@ -1486,7 +1562,7 @@ class BulkDataService {
   async importCSV(filePath, collectionName) {
     try {
       console.log(`📥 Importing CSV collection: ${collectionName} from ${filePath}`);
-      
+
       // ... existing code ...
     } catch (error) {
       console.error(`Error importing CSV collection: ${collectionName}:`, error);
@@ -1510,7 +1586,7 @@ class BulkDataService {
       console.log(`Related links table is already populated with ${check.count} entries.`);
       return;
     }
-    
+
     console.log('Related links table is empty, proceeding with import...');
 
     // 3. Check if the bulk JSON file exists
@@ -1532,7 +1608,7 @@ class BulkDataService {
       stmt = await this.db.prepare(
         'INSERT OR IGNORE INTO cardRelatedLinks (uuid, gatherer, edhrec) VALUES (?, ?, ?)'
       );
-      
+
       // 2. Manually handle the transaction
       await this.db.exec('BEGIN IMMEDIATE');
       transactionStarted = true;
@@ -1546,12 +1622,12 @@ class BulkDataService {
         (data) => data.value, // unwrap the card object
         batch({ batchSize: 1000 }), // batch 1000 cards at a time
       ]);
-      
+
       // Get total file size to estimate progress
       const stats = fsSync.statSync(CARDS_FILE);
       const totalSize = stats.size;
       let processed = 0;
-      
+
       for await (const cards of pipeline) {
         // Run insertions for the batch
         for (const c of cards) {
@@ -1563,7 +1639,7 @@ class BulkDataService {
             await stmt.run(uuid, c.related_uris.gatherer ?? null, c.related_uris.edhrec ?? null);
           }
         }
-        
+
         processed += cards.length;
         const processedBytes = readStream.bytesRead;
         const percent = Math.round((processedBytes / totalSize) * 100);
@@ -1573,7 +1649,7 @@ class BulkDataService {
           this._broadcast('task-progress', { task: 'import', state: 'progress', percent });
         }
       }
-      
+
       // 4. Finalize the transaction
       await this.db.exec('COMMIT');
       transactionStarted = false;
@@ -1583,7 +1659,7 @@ class BulkDataService {
         console.log('Checkpointing WAL to main database...');
         const result = await this.db.get('PRAGMA wal_checkpoint(TRUNCATE)');
         console.log('WAL checkpoint result:', result);
-        
+
         // Verify data was written
         const count = await this.db.get('SELECT COUNT(*) as count FROM cardRelatedLinks');
         console.log(`Verification: ${count.count} related links in database`);
@@ -1620,11 +1696,11 @@ class BulkDataService {
 
   async forceImportRelatedLinks() {
     console.log('Force importing related links data...');
-    
+
     // Clear existing data
     await this.db.exec('DELETE FROM cardRelatedLinks');
     console.log('Cleared existing related links data');
-    
+
     // Re-run the import
     await this._ensureRelatedLinksData();
   }

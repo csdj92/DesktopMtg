@@ -128,7 +128,7 @@ const DeckBuilder = () => {
   const [ownedCards, setOwnedCards] = useState([]);
   const [ownedLoading, setOwnedLoading] = useState(false);
   const [leftPanelView, setLeftPanelView] = useState('collection'); // 'collection' | 'search'
-  const [rightPanelView, setRightPanelView] = useState('deck'); // 'deck' | 'recommendations'
+  const [rightPanelView, setRightPanelView] = useState('deck'); // 'deck' | 'recommendations' | 'tokens'
 
   // New state for recommendations
   const [recommendations, setRecommendations] = useState([]);
@@ -139,7 +139,7 @@ const DeckBuilder = () => {
   const [currentDeckName, setCurrentDeckName] = useState('');
 
   // Navigation state - tracks which card list context we're navigating
-  const [navigationContext, setNavigationContext] = useState('collection'); // 'collection' | 'search' | 'recommendations'
+  const [navigationContext, setNavigationContext] = useState('collection'); // 'collection' | 'search' | 'recommendations' | 'tokens'
 
   // NEW: controls for inline collection search and sorting
   const [collectionSearch, setCollectionSearch] = useState('');
@@ -770,6 +770,119 @@ const DeckBuilder = () => {
     }
   }, [deck.mainboard, deck.commanders, format, recoLoading]);
 
+  // NEW: Token analysis and suggestions
+  const [tokenSuggestions, setTokenSuggestions] = useState([]);
+  const [tokenLoading, setTokenLoading] = useState(false);
+
+  // Function to analyze card text for token patterns
+  const analyzeTokenPatterns = useCallback((cards) => {
+    const tokenNames = new Set();
+
+    cards.forEach(card => {
+      const text = card.oracle_text || card.text || '';
+      const lowerText = text.toLowerCase();
+
+      // Look for specific token names that are commonly used
+      const commonTokens = [
+        'treasure', 'treasures', 'food', 'clue', 'blood', 'gold', 'shard',
+        'soldier', 'goblin', 'elf', 'zombie', 'spirit', 'beast',
+        'dragon', 'angel', 'demon', 'elemental', 'construct',
+        'thopter', 'servo', 'saproling', 'plant', 'insect',
+        'knight', 'warrior', 'wizard', 'rogue', 'cleric',
+        'token', 'tokens', 'copy', 'copies'
+      ];
+
+      commonTokens.forEach(tokenType => {
+        if (lowerText.includes(tokenType + ' token') ||
+          lowerText.includes(tokenType + ' creature token') ||
+          (tokenType === 'treasure' && lowerText.includes('treasure')) ||
+          (tokenType === 'food' && lowerText.includes('food')) ||
+          (tokenType === 'clue' && lowerText.includes('clue'))) {
+          tokenNames.add(tokenType);
+        }
+      });
+
+      // Look for specific power/toughness patterns
+      const ptPatterns = [
+        /create.*?(\d+\/\d+).*?(\w+).*?creature token/gi,
+        /create.*?(\d+\/\d+).*?creature token/gi,
+        /(\d+\/\d+).*?(\w+).*?creature token/gi,
+      ];
+
+      ptPatterns.forEach(pattern => {
+        const matches = text.matchAll(pattern);
+        for (const match of matches) {
+          if (match[2]) {
+            tokenNames.add(match[2].toLowerCase()); // Add the creature type
+          }
+        }
+      });
+    });
+
+    return Array.from(tokenNames);
+  }, []);
+
+  // Function to search for token cards
+  const searchForTokens = useCallback(async (tokenNames) => {
+    if (!tokenNames.length) return [];
+
+    try {
+      const allTokens = [];
+
+      // Search for each token name using the dedicated token search API
+      for (const tokenName of tokenNames) {
+        // Try searching for the token name directly in the tokens table
+        const tokenResults = await window.electronAPI.bulkDataSearchTokens({
+          name: tokenName
+        }, { limit: 10 });
+
+        if (tokenResults && tokenResults.length > 0) {
+          allTokens.push(...tokenResults);
+        }
+      }
+
+      // Remove duplicates and return
+      const uniqueTokens = allTokens.filter((token, index, self) =>
+        index === self.findIndex(t => t.id === token.id)
+      );
+
+      return uniqueTokens.slice(0, 20); // Limit to 20 tokens to avoid overwhelming the UI
+    } catch (error) {
+      console.error('Failed to search for tokens:', error);
+      return [];
+    }
+  }, []);
+
+  // Handler to get token suggestions
+  const handleGetTokenSuggestions = useCallback(async () => {
+    if (tokenLoading) return;
+
+    setTokenLoading(true);
+    try {
+      // Analyze all cards in the deck
+      const allDeckCards = [
+        ...deck.mainboard.map(entry => entry.card),
+        ...deck.commanders
+      ];
+
+      if (allDeckCards.length === 0) {
+        setTokenSuggestions([]);
+        return;
+      }
+
+      const tokenNames = analyzeTokenPatterns(allDeckCards);
+      console.log('Token names found:', tokenNames);
+
+      const tokens = await searchForTokens(tokenNames);
+      setTokenSuggestions(tokens);
+    } catch (error) {
+      console.error('Failed to get token suggestions:', error);
+      setTokenSuggestions([]);
+    } finally {
+      setTokenLoading(false);
+    }
+  }, [deck.mainboard, deck.commanders, tokenLoading, analyzeTokenPatterns, searchForTokens]);
+
   // Filter and sort recommendations to only show cards from user's collection that match commander color identity and type filter
   const displayRecommendations = useMemo(() => {
     if (!recommendations.length) return [];
@@ -801,11 +914,13 @@ const DeckBuilder = () => {
         return filteredSearchResults;
       case 'recommendations':
         return displayRecommendations;
+      case 'tokens':
+        return tokenSuggestions;
       case 'collection':
       default:
         return displayCollectionCards;
     }
-  }, [navigationContext, filteredSearchResults, displayRecommendations, displayCollectionCards]);
+  }, [navigationContext, filteredSearchResults, displayRecommendations, tokenSuggestions, displayCollectionCards]);
 
   // Keyboard navigation using custom hook
   const navigation = useCardNavigation(
@@ -1107,6 +1222,7 @@ const DeckBuilder = () => {
           <div className="panel-toggle">
             <button onClick={() => setRightPanelView('deck')} className={rightPanelView === 'deck' ? 'active' : ''}>Deck Info</button>
             <button onClick={() => setRightPanelView('recommendations')} className={rightPanelView === 'recommendations' ? 'active' : ''}>Recommendations</button>
+            <button onClick={() => setRightPanelView('tokens')} className={rightPanelView === 'tokens' ? 'active' : ''}>Token Suggestions</button>
           </div>
 
           {rightPanelView === 'deck' && (
@@ -1182,6 +1298,43 @@ const DeckBuilder = () => {
                             removeCardFromDeck(card.id);
                           } else {
                             addCardToDeck(card);
+                          }
+                        }}
+                      >
+                        {isInDeck ? 'Remove from Deck' : 'Add to Deck'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {rightPanelView === 'tokens' && (
+            <div className="recommendations-view">
+              <button onClick={handleGetTokenSuggestions} disabled={tokenLoading}>
+                {tokenLoading ? 'Analyzing Tokens...' : 'Find Token Suggestions'}
+              </button>
+              <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', margin: '8px 0' }}>
+                Based on your deck's cards that create tokens
+              </p>
+              <div className="search-results-grid">
+                {tokenLoading && <p>Analyzing deck for token patterns...</p>}
+                {!tokenLoading && tokenSuggestions.length === 0 && <p>No token suggestions found. Make sure your deck has cards that create tokens!</p>}
+                {!tokenLoading && tokenSuggestions.map(token => {
+                  const isInDeck = deck.mainboard.some(entry => entry.card.id === token.id);
+
+                  return (
+                    <div key={token.id} className="card-grid-item">
+                      <Card card={token} onCardClick={(card) => handleCardClick(card, 'tokens')} />
+                      <button
+                        className={isInDeck ? 'remove-from-deck' : ''}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (isInDeck) {
+                            removeCardFromDeck(token.id);
+                          } else {
+                            addCardToDeck(token);
                           }
                         }}
                       >

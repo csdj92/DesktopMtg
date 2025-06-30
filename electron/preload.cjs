@@ -12,16 +12,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // File operations
   getCardFiles: () => ipcRenderer.invoke('get-card-files'),
   readCardFile: (filename) => ipcRenderer.invoke('read-card-file', filename),
-  
+
   // Bulk data operations
   bulkDataSearch: (query, options) => ipcRenderer.invoke('bulk-data-search', query, options),
+  bulkDataSearchTokens: (query, options) => ipcRenderer.invoke('bulk-data-search-tokens', query, options),
   bulkDataFindCard: (cardName) => ipcRenderer.invoke('bulk-data-find-card', cardName),
   bulkDataFindCardByDetails: (name, setCode, collectorNumber) => ipcRenderer.invoke('bulk-data-find-card-by-details', name, setCode, collectorNumber),
   debugCardLookup: (name, setCode) => ipcRenderer.invoke('debug-card-lookup', name, setCode),
   bulkDataStats: () => ipcRenderer.invoke('bulk-data-stats'),
   bulkDataInitialized: () => ipcRenderer.invoke('bulk-data-initialized'),
   bulkDataForceImportRelatedLinks: () => ipcRenderer.invoke('bulk-data-force-import-related-links'),
-  
+
   // Collection management
   collectionImportCSV: (filePath, collectionName) => ipcRenderer.invoke('collection-import-csv', filePath, collectionName),
   collectionImportTXT: (filePath, collectionName, format) => ipcRenderer.invoke('collection-import-txt', filePath, collectionName, format),
@@ -37,21 +38,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   collectionGetCardQuantity: (cardName, options) => ipcRenderer.invoke('collection-get-card-quantity', cardName, options),
   collectionMarkCard: (cardId, collected) => ipcRenderer.invoke('collection-mark-card', cardId, collected),
   collectionClearAll: () => ipcRenderer.invoke('collection-clear-all'),
-  
+
   // Deck Management
   deckSave: (filename, deckData) => ipcRenderer.invoke('deck-save', filename, deckData),
   deckList: () => ipcRenderer.invoke('deck-list'),
   deckLoad: (filename) => ipcRenderer.invoke('deck-load', filename),
   deckDelete: (filename) => ipcRenderer.invoke('deck-delete', filename),
   deckImport: (filePath, deckName, format) => ipcRenderer.invoke('deck-import', filePath, deckName, format),
-  
+
   // File dialogs
   showOpenDialog: (options) => ipcRenderer.invoke('show-open-dialog', options),
-  
+
   // Collection dialogs
   showCollectionNameDialog: (defaultName) => ipcRenderer.invoke('show-collection-name-dialog', defaultName),
   showFormatChoiceDialog: () => ipcRenderer.invoke('show-format-choice-dialog'),
-  
+
   // Version info (from the original preload)
   getVersions: () => process.versions,
 
