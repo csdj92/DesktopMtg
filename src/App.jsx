@@ -48,16 +48,16 @@ function App() {
   const [isSetBrowserOpen, setIsSetBrowserOpen] = useState(false);
 
   useEffect(() => {
-    loadCardFiles()
+    loadUserCollections()
     loadBulkDataStats()
   }, [])
 
-  const loadCardFiles = async () => {
+  const loadUserCollections = async () => {
     try {
-      const files = await window.electronAPI.getCardFiles()
-      setCardFiles(files)
+      const collections = await window.electronAPI.getUserCollections()
+      setCardFiles(collections.map(c => c.collectionName)) // Map collection names to file names for compatibility
     } catch (error) {
-      console.error('Error loading card files:', error)
+      console.error('Error loading user collections:', error)
     }
   }
 
@@ -160,7 +160,7 @@ function App() {
     }
     
     // ===============================
-    // Legacy TXT-based implementation (DISABLED)
+    // Legacy TXT-based implementation (DISABLED - Now using user_collections table)
     // ===============================
     
     // Check if we can use cached data
@@ -183,68 +183,68 @@ function App() {
       const sourceFilesMap = new Map() // Track which files each card comes from
       let totalValue = 0
       
-      for (const filename of cardFiles) {
+      for (const collectionName of cardFiles) {
         try {
-          const fileData = await window.electronAPI.readCardFile(filename)
-          const lines = fileData.content.split('\n')
-          const parsedCards = lines
-            .map(parseCardLine)
-            .filter(card => card !== null)
+          const collectionCards = await window.electronAPI.getUserCollectionCards(collectionName, { limit: 10000 })
           
-          // Process each card in this file
-          for (const parsedCard of parsedCards) {
+          // Process each card in this collection
+          for (const collectionCard of collectionCards) {
             try {
-              if (!parsedCard.name) {
-                console.warn('⚠️ App.loadMyCollection: record with undefined name', parsedCard);
+              if (!collectionCard.cardName) {
+                console.warn('⚠️ App.loadMyCollection: record with undefined name', collectionCard);
                 continue;
               }
               const scryfallCard = await window.electronAPI.bulkDataFindCardByDetails(
-                parsedCard.name, 
-                parsedCard.setCode, 
-                parsedCard.collectorNumber
+                collectionCard.cardName, 
+                collectionCard.setCode, 
+                collectionCard.collectorNumber
               )
               
               if (scryfallCard) {
                 // Create unique key for this card (name + set + collector number + foil status)
-                const cardKey = `${parsedCard.name}|${parsedCard.setCode}|${parsedCard.collectorNumber}|${parsedCard.isFoil}`
+                const cardKey = `${collectionCard.cardName}|${collectionCard.setCode}|${collectionCard.collectorNumber}|${collectionCard.foil === 'foil'}`
                 
                 if (allCardsMap.has(cardKey)) {
                   // Card already exists, add to quantity
                   const existingCard = allCardsMap.get(cardKey)
-                  existingCard.quantity += parsedCard.quantity
+                  existingCard.quantity += collectionCard.quantity
                   
-                  // Add to source files
+                  // Add to source collections
                   const sources = sourceFilesMap.get(cardKey)
-                  if (!sources.includes(filename)) {
-                    sources.push(filename)
+                  if (!sources.includes(collectionName)) {
+                    sources.push(collectionName)
                   }
                 } else {
                   // New card, add to collection
                   const aggregatedCard = {
-                    ...parsedCard,
+                    name: collectionCard.cardName,
+                    setCode: collectionCard.setCode || '',
+                    collectorNumber: collectionCard.collectorNumber || '',
+                    quantity: collectionCard.quantity || 1,
+                    isFoil: collectionCard.foil === 'foil',
                     scryfallData: scryfallCard,
                     cardKey
                   }
                   allCardsMap.set(cardKey, aggregatedCard)
-                  sourceFilesMap.set(cardKey, [filename])
+                  sourceFilesMap.set(cardKey, [collectionName])
                 }
                 
                 // Calculate value for stats
                 if (scryfallCard.prices) {
-                  const price = parsedCard.isFoil && scryfallCard.prices.usd_foil 
+                  const price = (collectionCard.foil === 'foil') && scryfallCard.prices.usd_foil 
                     ? parseFloat(scryfallCard.prices.usd_foil) 
                     : parseFloat(scryfallCard.prices.usd)
                   if (price) {
-                    totalValue += price * parsedCard.quantity
+                    totalValue += price * collectionCard.quantity
                   }
                 }
               }
             } catch (error) {
-              console.error(`Error processing card ${parsedCard.name}:`, error)
+              console.error(`Error processing card ${collectionCard.cardName}:`, error)
             }
           }
         } catch (error) {
-          console.error(`Error reading file ${filename}:`, error)
+          console.error(`Error reading collection ${collectionName}:`, error)
         }
       }
       
@@ -262,7 +262,7 @@ function App() {
         cards: aggregatedCards,
         stats: stats,
         timestamp: Date.now(),
-        fileList: [...cardFiles] // Store current file list for comparison
+        collectionList: [...cardFiles] // Store current collection list for comparison
       }
       setCollectionCache(cacheData)
       setLastFileCheck(Date.now())
@@ -284,10 +284,10 @@ function App() {
       return true
     }
     
-    // Check if file list has changed
-    if (collectionCache.fileList.length !== cardFiles.length ||
-        !collectionCache.fileList.every(file => cardFiles.includes(file))) {
-      console.log('File list changed, refreshing collection')
+    // Check if collection list has changed
+    if (collectionCache.collectionList.length !== cardFiles.length ||
+        !collectionCache.collectionList.every(collection => cardFiles.includes(collection))) {
+      console.log('Collection list changed, refreshing collection')
       return true
     }
     
@@ -347,37 +347,40 @@ function App() {
     return stats
   }
 
-  const selectFile = async (filename) => {
+  const selectCollection = async (collectionName) => {
     setFileLoading(true)
     setIsViewingCollection(false) // Clear collection view
     setCollectionCards([]) // Clear collection data
     try {
-      const fileData = await window.electronAPI.readCardFile(filename)
-      setSelectedFile(filename)
-      
-      const lines = fileData.content.split('\n')
-      const parsedCards = lines
-        .map(parseCardLine)
-        .filter(card => card !== null)
+      const collectionCards = await window.electronAPI.getUserCollectionCards(collectionName, { limit: 10000 })
+      setSelectedFile(collectionName)
       
       // Get Scryfall data for each card
       const cardsWithData = await Promise.all(
-        parsedCards.map(async (parsedCard) => {
+        collectionCards.map(async (collectionCard) => {
           try {
             // Use the new precise matching function that considers name, set, and collector number
             const scryfallCard = await window.electronAPI.bulkDataFindCardByDetails(
-              parsedCard.name, 
-              parsedCard.setCode, 
-              parsedCard.collectorNumber
+              collectionCard.cardName, 
+              collectionCard.setCode, 
+              collectionCard.collectorNumber
             )
             return {
-              ...parsedCard,
+              name: collectionCard.cardName,
+              setCode: collectionCard.setCode || '',
+              collectorNumber: collectionCard.collectorNumber || '',
+              quantity: collectionCard.quantity || 1,
+              isFoil: collectionCard.foil === 'foil',
               scryfallData: scryfallCard
             }
           } catch (error) {
-            console.error(`Error finding card ${parsedCard.name} (${parsedCard.setCode}) #${parsedCard.collectorNumber}:`, error)
+            console.error(`Error finding card ${collectionCard.cardName} (${collectionCard.setCode}) #${collectionCard.collectorNumber}:`, error)
             return {
-              ...parsedCard,
+              name: collectionCard.cardName,
+              setCode: collectionCard.setCode || '',
+              collectorNumber: collectionCard.collectorNumber || '',
+              quantity: collectionCard.quantity || 1,
+              isFoil: collectionCard.foil === 'foil',
               scryfallData: null
             }
           }
@@ -386,7 +389,7 @@ function App() {
       
       setFileCards(cardsWithData)
     } catch (error) {
-      console.error('Error reading file:', error)
+      console.error('Error reading collection:', error)
     } finally {
       setFileLoading(false)
     }
@@ -781,7 +784,7 @@ function App() {
         {activeTab === 'collections' ? (
           <div className="collections-view">
             <div className="sidebar">
-              <h3>Collection Files</h3>
+              <h3>Collections</h3>
               
               {/* My Collection Aggregator */}
               <div className="collection-section">
@@ -789,17 +792,17 @@ function App() {
                   className={`collection-item ${isViewingCollection ? 'selected' : ''}`}
                   onClick={loadMyCollection}
                 >
-                  📚 My Collection (All Files)
+                  📚 My Collection (All Collections)
                 </div>
               </div>
               
-              {/* Individual Files */}
+              {/* Individual Collections */}
               <div className="file-list">
                 {cardFiles.map((file) => (
                   <div
                     key={file}
                     className={`file-item ${selectedFile === file && !isViewingCollection ? 'selected' : ''}`}
-                    onClick={() => selectFile(file)}
+                    onClick={() => selectCollection(file)}
                   >
                     📄 {file}
                   </div>
@@ -808,8 +811,8 @@ function App() {
               
               {cardFiles.length === 0 && (
                 <div className="empty-state">
-                  <p>No card files found</p>
-                  <small>Add .txt files to the cards/ directory</small>
+                  <p>No collections found</p>
+                  <small>Import collections using the Collection Manager</small>
                 </div>
               )}
             </div>
@@ -937,7 +940,7 @@ function App() {
                 </div>
               )}
               
-              {/* Individual File View */}
+              {/* Individual Collection View */}
               {selectedFile && !fileLoading && !isViewingCollection && (
                 <div className="file-content">
                   <div className="file-header">
@@ -962,7 +965,7 @@ function App() {
               {!selectedFile && !isViewingCollection && !fileLoading && !collectionLoading && (
                 <div className="empty-state">
                   <h2>Select a collection</h2>
-                  <p>Choose "My Collection" to view your entire collection, or select a specific file to view individual decks</p>
+                  <p>Choose "My Collection" to view your entire collection, or select a specific collection to view individual collections</p>
                 </div>
               )}
             </div>

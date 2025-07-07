@@ -9,9 +9,9 @@ console.log('Preload script loaded.');
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld('electronAPI', {
-  // File operations
-  getCardFiles: () => ipcRenderer.invoke('get-card-files'),
-  readCardFile: (filename) => ipcRenderer.invoke('read-card-file', filename),
+  // User Collections operations
+  getUserCollections: () => ipcRenderer.invoke('get-user-collections'),
+  getUserCollectionCards: (collectionName, options) => ipcRenderer.invoke('get-user-collection-cards', collectionName, options),
 
   // Bulk data operations
   bulkDataSearch: (query, options) => ipcRenderer.invoke('bulk-data-search', query, options),
@@ -59,6 +59,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getCardCount: () => ipcRenderer.invoke('get-card-count'),
   searchCards: (searchTerm) => ipcRenderer.invoke('search-cards', searchTerm),
   searchCardsSemantic: (query, options) => ipcRenderer.invoke('search-cards-semantic', query, options),
+  testSemanticSearch: (query) => ipcRenderer.invoke('test-semantic-search', query),
   getCardsByIds: (ids) => ipcRenderer.invoke('get-cards-by-ids', ids),
   importCollection: (filePath) => ipcRenderer.invoke('import-collection', filePath),
   onImportProgress: (callback) => ipcRenderer.on('import-progress', (event, ...args) => callback(...args)),

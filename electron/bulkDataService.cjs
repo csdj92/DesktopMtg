@@ -1465,7 +1465,122 @@ class BulkDataService {
       console.warn('Bulk data service not ready for semantic search.');
       return [];
     }
-    return await semanticSearchService.search(query, options);
+    
+    // Enhance the query for better MTG-specific results
+    const enhancedQuery = this.enhanceSemanticQuery(query);
+    console.log(`🔍 Enhanced query: "${query}" → "${enhancedQuery}"`);
+    
+    return await semanticSearchService.search(enhancedQuery, options);
+  }
+
+  enhanceSemanticQuery(query) {
+    if (!query || typeof query !== 'string') return query;
+    
+    let enhanced = query.toLowerCase();
+    
+    // MTG-specific term expansions
+    const termExpansions = {
+      // Creature types and tribal
+      'elves': 'elf elves tribal',
+      'goblins': 'goblin goblins tribal',
+      'zombies': 'zombie zombies tribal',
+      'dragons': 'dragon dragons tribal',
+      'angels': 'angel angels tribal',
+      'vampires': 'vampire vampires tribal',
+      'humans': 'human humans tribal',
+      'artifacts': 'artifact artifacts metalcraft affinity',
+      
+      // Mechanics and strategies
+      'counterspells': 'counter target spell instant',
+      'card draw': 'draw cards card advantage',
+      'ramp': 'search basic land mana acceleration',
+      'removal': 'destroy target exile target creature removal',
+      'board wipe': 'destroy all creatures mass removal',
+      'lifegain': 'gain life lifelink life total',
+      'tokens': 'create token creature tokens populate',
+      'graveyard': 'graveyard flashback unearth dredge recursion',
+      'combo': 'infinite combo tutor search library',
+      'protection': 'hexproof shroud indestructible protection',
+      
+      // Card types
+      'instants': 'instant spells flash speed',
+      'sorceries': 'sorcery spells main phase',
+      'enchantments': 'enchantment permanent aura',
+      'planeswalkers': 'planeswalker loyalty ultimate',
+      'lands': 'land mana base fixing',
+      
+      // Power/toughness patterns
+      'big creatures': 'high power large toughness',
+      'small creatures': 'low mana cost efficient creatures',
+      'flying creatures': 'flying creature evasion',
+      'trample creatures': 'trample creature damage',
+      
+      // Format-specific
+      'commander': 'legendary creature command zone',
+      'edh': 'commander multiplayer legendary',
+      'multiplayer': 'each opponent all opponents',
+      
+      // Colors and identity
+      'white cards': 'white mana cost plains',
+      'blue cards': 'blue mana cost island',
+      'black cards': 'black mana cost swamp',
+      'red cards': 'red mana cost mountain',
+      'green cards': 'green mana cost forest',
+      'multicolor': 'multicolored hybrid mana',
+      'colorless': 'colorless artifact eldrazi'
+    };
+    
+    // Apply term expansions
+    Object.entries(termExpansions).forEach(([term, expansion]) => {
+      if (enhanced.includes(term)) {
+        enhanced = enhanced.replace(new RegExp(term, 'g'), expansion);
+      }
+    });
+    
+    // Handle specific patterns
+    
+    // Power/toughness queries
+    const powerMatch = enhanced.match(/(\d+)\s*power/);
+    const toughnessMatch = enhanced.match(/(\d+)\s*toughness/);
+    if (powerMatch) {
+      enhanced += ` ${powerMatch[1]}/${powerMatch[1]} power toughness creature`;
+    }
+    if (toughnessMatch) {
+      enhanced += ` ${toughnessMatch[1]}/${toughnessMatch[1]} power toughness creature`;
+    }
+    
+    // Mana cost queries
+    const manaMatch = enhanced.match(/(\d+)\s*mana(?:\s+cost)?/);
+    if (manaMatch) {
+      enhanced += ` converted mana cost ${manaMatch[1]} cmc`;
+    }
+    
+    // Color combination queries
+    const colorCombos = {
+      'azorius': 'white blue',
+      'dimir': 'blue black',
+      'rakdos': 'black red',
+      'gruul': 'red green',
+      'selesnya': 'green white',
+      'orzhov': 'white black',
+      'izzet': 'blue red',
+      'golgari': 'black green',
+      'boros': 'red white',
+      'simic': 'green blue'
+    };
+    
+    Object.entries(colorCombos).forEach(([guild, colors]) => {
+      if (enhanced.includes(guild)) {
+        enhanced = enhanced.replace(new RegExp(guild, 'g'), colors);
+      }
+    });
+    
+    // Add context for better semantic understanding
+    if (!enhanced.includes('magic') && !enhanced.includes('mtg')) {
+      enhanced = `magic the gathering ${enhanced}`;
+    }
+    
+    return enhanced.trim();
   }
 
   async getCardsByIds(ids) {

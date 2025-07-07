@@ -887,25 +887,18 @@ const DeckBuilder = () => {
   const displayRecommendations = useMemo(() => {
     if (!recommendations.length) return [];
 
-    // Create a map of owned card IDs for quick lookup
-    const ownedCardIds = new Set(ownedCards.map(entry => entry.card.id));
-
-    // Filter recommendations to only include cards we own
-    let filteredRecs = recommendations.filter(card => ownedCardIds.has(card.id));
+    // Since recommendations now come pre-filtered from the backend to only include owned cards,
+    // we just need to apply UI-level filters (type filter and sorting)
+    let filteredRecs = recommendations;
 
     // Apply type filter
     if (cardTypeFilter !== 'all') {
       filteredRecs = filteredRecs.filter(card => matchesTypeFilter(card, cardTypeFilter));
     }
 
-    // If we're in commander format and have a commander, also filter by color identity
-    if (format === 'commander' && deck.commanders.length > 0) {
-      filteredRecs = filteredRecs.filter(card => isCardInColorIdentity(card, commanderColorIdentity));
-    }
-
     // Apply sorting
     return sortCards(filteredRecs, collectionSort, sortDirection);
-  }, [recommendations, ownedCards, format, deck.commanders, commanderColorIdentity, cardTypeFilter, collectionSort, sortDirection]);
+  }, [recommendations, cardTypeFilter, collectionSort, sortDirection]);
 
   // Determine current card list for navigation based on context
   const currentCardList = useMemo(() => {
@@ -932,9 +925,9 @@ const DeckBuilder = () => {
 
   // Grid layout positions
   const layoutConfig = [
-    { i: 'left', x: 0, y: 0, w: 4, h: 14, minW: 2, minH: 8 },
-    { i: 'main', x: 4, y: 0, w: 8, h: 14, minW: 4, minH: 10 },
-    { i: 'right', x: 12, y: 0, w: 4, h: 14, minW: 2, minH: 8 }
+    { i: 'left', x: 0, y: 0, w: 4, h: 22, minW: 2, minH: 8 },
+    { i: 'main', x: 4, y: 0, w: 8, h: 22, minW: 4, minH: 10 },
+    { i: 'right', x: 12, y: 0, w: 4, h: 22, minW: 2, minH: 8 }
   ];
 
   return (
