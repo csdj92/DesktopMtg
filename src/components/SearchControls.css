@@ -34,7 +34,7 @@
 
 .search-advanced {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 1rem;
 }
 
@@ -86,6 +86,17 @@
 .search-field-group {
     flex-direction: row;
     gap: 0.5rem;
+    min-width: 0;
+}
+
+.search-field-group .search-field {
+    flex: 1;
+    min-width: 0;
+}
+
+.search-field-group .search-field input {
+    min-width: 0;
+    width: 100%;
 }
 
 .search-field input::placeholder {

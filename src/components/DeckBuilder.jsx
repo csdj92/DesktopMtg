@@ -13,7 +13,7 @@ import useCardNavigation from '../hooks/useCardNavigation';
 
 // --- Placeholder: Card Component ---
 // In a real app, this would be in its own file (e.g., '../Card.js')
-const Card = ({ card, quantity, onCardClick }) => {
+const Card = ({ card, quantity, onCardClick, showSynergyScore = false }) => {
   // CORRECTED LOGIC: Handle single-faced and double-faced cards
   const getImageUrl = (cardData) => {
     if (!cardData) return 'https://placehold.co/600x800/1a1a1a/e0e0e0?text=No+Image';
@@ -35,6 +35,9 @@ const Card = ({ card, quantity, onCardClick }) => {
     <div className="card-component" onClick={() => onCardClick(card)}>
       <img src={imageUrl} alt={card?.name || 'Card Image'} loading="lazy" />
       {quantity && <div className="card-quantity-badge">{quantity}</div>}
+      {showSynergyScore && card.synergy_score !== undefined && (
+        <div className="card-synergy-badge">{card.synergy_score.toFixed(1)}</div>
+      )}
     </div>
   );
 };
@@ -133,6 +136,7 @@ const DeckBuilder = () => {
   // New state for recommendations
   const [recommendations, setRecommendations] = useState([]);
   const [deckArchetype, setDeckArchetype] = useState(null);
+  const [deckAnalysis, setDeckAnalysis] = useState(null);
   const [recoLoading, setRecoLoading] = useState(false);
   const [format, setFormat] = useState('commander'); // 'commander' | 'standard'
   const [selectedCard, setSelectedCard] = useState(null); // For modal
@@ -146,6 +150,10 @@ const DeckBuilder = () => {
   const [collectionSort, setCollectionSort] = useState('name'); // 'name' | 'cmc' | 'power' | 'toughness' | 'rarity' | 'quantity'
   const [sortDirection, setSortDirection] = useState('asc'); // 'asc' | 'desc'
   const [cardTypeFilter, setCardTypeFilter] = useState('all'); // 'all' | 'creature' | 'land' | 'instant' | etc.
+
+  // NEW: separate controls for recommendations sorting
+  const [recommendationsSort, setRecommendationsSort] = useState('synergy'); // 'synergy' | 'name' | 'cmc' | 'power' | 'toughness' | 'rarity'
+  const [recommendationsSortDirection, setRecommendationsSortDirection] = useState('desc'); // 'asc' | 'desc'
 
   // Hold results returned by advanced search controls
   const [collectionSearchResults, setCollectionSearchResults] = useState(null); // null means no search yet
@@ -351,6 +359,17 @@ const DeckBuilder = () => {
         });
         break;
 
+      case 'synergy':
+        sorted.sort((a, b) => {
+          const cardA = a.card || a;
+          const cardB = b.card || b;
+          const aVal = cardA.synergy_score ?? 0;
+          const bVal = cardB.synergy_score ?? 0;
+          if (aVal === bVal) return cardA.name.localeCompare(cardB.name);
+          return direction === 'asc' ? aVal - bVal : bVal - aVal;
+        });
+        break;
+
       case 'name':
       default:
         sorted.sort((a, b) => {
@@ -371,8 +390,8 @@ const DeckBuilder = () => {
       setDeck(prev => {
         // This replaces any existing commander.
         const newCommanders = [card];
-        // Remove the new commander from the mainboard if it's there.
-        const newMainboard = prev.mainboard.filter(entry => entry.card.id !== card.id);
+        // Remove the new commander from the mainboard if it's there (by name to handle different printings)
+        const newMainboard = prev.mainboard.filter(entry => entry.card.name !== card.name);
         return {
           ...prev,
           commanders: newCommanders,
@@ -485,9 +504,16 @@ const DeckBuilder = () => {
       return;
     }
 
+    // Check if card is already a commander
+    if (format === 'commander' && deck.commanders.some(commander => commander.id === card.id)) {
+      alert("This card is already your commander and cannot be added to the mainboard.");
+      return;
+    }
+
     setDeck(prev => {
-      const existingEntry = prev.mainboard.find(entry => entry.card.id === card.id);
-      if (existingEntry) {
+      // Check for existing card by ID first
+      const existingEntryById = prev.mainboard.find(entry => entry.card.id === card.id);
+      if (existingEntryById) {
         // Commander singleton rule: only basic lands can have multiple copies
         if (format === 'commander' && !isBasicLand(card)) {
           alert("In Commander format, you can only have one copy of each non-basic card.");
@@ -500,10 +526,19 @@ const DeckBuilder = () => {
             : entry
         );
         return { ...prev, mainboard: newMainboard };
-      } else {
-        // Add new card
-        return { ...prev, mainboard: [...prev.mainboard, { card, quantity: 1 }] };
       }
+
+      // Check for existing card by name (singleton rule for different printings)
+      if (format === 'commander' && !isBasicLand(card)) {
+        const existingEntryByName = prev.mainboard.find(entry => entry.card.name === card.name);
+        if (existingEntryByName) {
+          alert(`In Commander format, you can only have one copy of "${card.name}". You already have this card in your deck.`);
+          return prev; // Don't modify the deck
+        }
+      }
+
+      // Add new card
+      return { ...prev, mainboard: [...prev.mainboard, { card, quantity: 1 }] };
     });
   };
 
@@ -514,7 +549,7 @@ const DeckBuilder = () => {
 
       // Commander singleton rule: only basic lands can have multiple copies
       if (format === 'commander' && !isBasicLand(cardEntry.card)) {
-        alert("In Commander format, you can only have one copy of each non-basic card.");
+        alert(`In Commander format, you can only have one copy of "${cardEntry.card.name}".`);
         return prev;
       }
 
@@ -660,6 +695,7 @@ const DeckBuilder = () => {
       // Clear recommendations from the previously loaded deck
       setRecommendations([]);
       setDeckArchetype(null);
+      setDeckAnalysis(null);
       alert(`Deck "${filename}" loaded.`);
     } else {
       alert(`Error loading deck: ${result.error}`);
@@ -680,6 +716,7 @@ const DeckBuilder = () => {
     setFormat('commander');
     setRecommendations([]);
     setDeckArchetype(null);
+    setDeckAnalysis(null);
     setCurrentDeckName('');
     // Clear any autosaved draft when starting fresh
     localStorage.removeItem('deckBuilderAutosave');
@@ -703,7 +740,7 @@ const DeckBuilder = () => {
     });
   }, [deck.mainboard]);
 
-  const memoizedDeckStats = useMemo(() => <DeckStatistics deck={deck} format={format} />, [deck, format]);
+  const memoizedDeckStats = useMemo(() => <DeckStatistics deck={deck} format={format} deckAnalysis={deckAnalysis} />, [deck, format, deckAnalysis]);
 
   // ---- Card database search handler (leftPanelView "search") ----
   const deckBulkSearch = useCallback(async (params) => {
@@ -756,15 +793,18 @@ const DeckBuilder = () => {
       if (result && Array.isArray(result.recommendations)) {
         setRecommendations(result.recommendations);
         setDeckArchetype(result.archetype || null);
+        setDeckAnalysis(result.deckAnalysis || null);
       } else {
         console.warn('Unexpected recommendations response:', result);
         setRecommendations([]);
         setDeckArchetype(null);
+        setDeckAnalysis(null);
       }
     } catch (error) {
       console.error('Failed to fetch recommendations:', error);
       setRecommendations([]);
       setDeckArchetype(null);
+      setDeckAnalysis(null);
     } finally {
       setRecoLoading(false);
     }
@@ -896,9 +936,9 @@ const DeckBuilder = () => {
       filteredRecs = filteredRecs.filter(card => matchesTypeFilter(card, cardTypeFilter));
     }
 
-    // Apply sorting
-    return sortCards(filteredRecs, collectionSort, sortDirection);
-  }, [recommendations, cardTypeFilter, collectionSort, sortDirection]);
+    // Apply sorting using separate recommendation sort controls
+    return sortCards(filteredRecs, recommendationsSort, recommendationsSortDirection);
+  }, [recommendations, cardTypeFilter, recommendationsSort, recommendationsSortDirection]);
 
   // Determine current card list for navigation based on context
   const currentCardList = useMemo(() => {
@@ -925,7 +965,7 @@ const DeckBuilder = () => {
 
   // Grid layout positions
   const layoutConfig = [
-    { i: 'left', x: 0, y: 0, w: 4, h: 22, minW: 2, minH: 8 },
+    { i: 'left', x: 0, y: 0, w: 4, h: 22, minW: 3, minH: 8 },
     { i: 'main', x: 4, y: 0, w: 8, h: 22, minW: 4, minH: 10 },
     { i: 'right', x: 12, y: 0, w: 4, h: 22, minW: 2, minH: 8 }
   ];
@@ -1167,7 +1207,7 @@ const DeckBuilder = () => {
                             <p className="details-line"><strong>Type:</strong> {cmd.type.replace(/\?\?\?/g, '—') || cmd.type_line.replace(/\?\?\?/g, '—')}</p>
                           )}
                           {(cmd.text || cmd.oracle_text) && (
-                            <p className="details-line whitespace-pre-line"><strong>Oracle Text:</strong> {cmd.text || cmd.oracle_text}</p>
+                            <p className="details-line" style={{ whiteSpace: 'pre-line' }}><strong>Oracle Text:</strong> {(cmd.text || cmd.oracle_text).replace(/\\n/g, '\n')}</p>
                           )}
                           {cmd.power && cmd.toughness && (
                             <p className="details-line"><strong>P/T:</strong> {cmd.power}/{cmd.toughness}</p>
@@ -1257,10 +1297,11 @@ const DeckBuilder = () => {
                   <option value="battle">Battles</option>
                 </select>
                 <select
-                  value={collectionSort}
-                  onChange={(e) => setCollectionSort(e.target.value)}
+                  value={recommendationsSort}
+                  onChange={(e) => setRecommendationsSort(e.target.value)}
                   title="Sort cards by"
                 >
+                  <option value="synergy">Synergy Score</option>
                   <option value="name">Name</option>
                   <option value="cmc">Mana Cost</option>
                   <option value="power">Power</option>
@@ -1269,10 +1310,10 @@ const DeckBuilder = () => {
                 </select>
                 <button
                   className="sort-direction-toggle"
-                  onClick={() => setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')}
-                  title={`Sort ${sortDirection === 'asc' ? 'ascending' : 'descending'} - click to toggle`}
+                  onClick={() => setRecommendationsSortDirection(recommendationsSortDirection === 'asc' ? 'desc' : 'asc')}
+                  title={`Sort ${recommendationsSortDirection === 'asc' ? 'ascending' : 'descending'} - click to toggle`}
                 >
-                  {sortDirection === 'asc' ? '↑' : '↓'}
+                  {recommendationsSortDirection === 'asc' ? '↑' : '↓'}
                 </button>
               </div>
               <div className="search-results-grid">
@@ -1282,7 +1323,7 @@ const DeckBuilder = () => {
 
                   return (
                     <div key={card.id} className="card-grid-item">
-                      <Card card={card} onCardClick={(card) => handleCardClick(card, 'recommendations')} />
+                      <Card card={card} onCardClick={(card) => handleCardClick(card, 'recommendations')} showSynergyScore={true} />
                       <button
                         className={isInDeck ? 'remove-from-deck' : ''}
                         onClick={(e) => {

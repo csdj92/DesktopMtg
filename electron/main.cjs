@@ -624,7 +624,7 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName) => {
     else manaCurve[cmc]++;
   });
   
-  const totalDeckCards = allDeckCards.length;
+  const totalDeckCards = allDeckCards.length || 1;
   const curveNeeds = {};
   Object.entries(manaCurve).forEach(([cost, count]) => {
     const percentage = count / totalDeckCards;
@@ -640,24 +640,32 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName) => {
     const cardText = `${card.oracle_text || card.text || ''} ${card.type_line || card.type || ''}`.toLowerCase();
     const cardCMC = card.manaValue || card.cmc || card.mana_value || 0;
     const cmcKey = cardCMC >= 7 ? '7+' : cardCMC.toString();
+    const cardName = (card.name || '').toLowerCase();
+    
+    // Add deterministic component based on card name for consistent ordering
+    const nameHash = cardName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    score += (nameHash % 100) / 100; // Small consistent boost (0-1 range)
     
     // Base semantic similarity score (preserve original ranking)
-    score += (1 - (card._distance || card.distance || 0)) * 100;
+    const semanticScore = card.semantic_score || (1 - (card._distance || card.distance || 0));
+    score += semanticScore * 100;
     
-    // Theme synergy bonuses
+    // Theme synergy bonuses (improved calculation)
     Object.entries(deckThemes).forEach(([theme, pattern]) => {
       if (deckThemeScores[theme] > 0) {
         const cardMatches = cardText.match(pattern);
         if (cardMatches) {
-          // Bonus based on how prominent this theme is in the deck
-          score += (deckThemeScores[theme] / totalDeckCards) * cardMatches.length * 50;
+          // More sophisticated scoring based on theme prominence
+          const themeStrength = Math.min(deckThemeScores[theme] / totalDeckCards, 0.6); // Cap at 60%
+          const matchStrength = Math.min(cardMatches.length, 3); // Cap matches to prevent outliers
+          score += themeStrength * matchStrength * 150; // Higher multiplier for better separation
         }
       }
     });
     
-    // Mana curve filling bonus
-    if (curveNeeds[cmcKey] > 0) {
-      score += curveNeeds[cmcKey] * 30; // Bonus for filling curve gaps
+    // Mana curve filling bonus (improved)
+    if (curveNeeds[cmcKey] > 0.05) { // Only bonus if significant gap
+      score += curveNeeds[cmcKey] * 80; // Higher bonus for curve needs
     }
     
     // Card type synergy
@@ -703,11 +711,130 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName) => {
       score += 12; // Tutoring effects
     }
     
-    return { ...card, synergy_score: score };
+    // Round to 2 decimal places for consistency
+    const finalScore = Math.round(score * 100) / 100;
+    
+    return { ...card, synergy_score: finalScore };
   });
   
-  // Sort by synergy score (highest first)
-  return scoredCards.sort((a, b) => b.synergy_score - a.synergy_score);
+  // Sort by synergy score (highest first), then by name for consistent tie-breaking
+  return scoredCards.sort((a, b) => {
+    const scoreDiff = b.synergy_score - a.synergy_score;
+    if (Math.abs(scoreDiff) < 0.01) { // Very close scores
+      return a.name.localeCompare(b.name); // Alphabetical tie-breaker
+    }
+    return scoreDiff;
+  });
+};
+
+// Helper function to calculate keyword-based similarity when semantic search isn't available
+const calculateKeywordSimilarity = (card, query) => {
+  if (!card || !query) return 0;
+  
+  const cardText = `${card.name || ''} ${card.type_line || card.type || ''} ${card.oracle_text || card.text || ''} ${card.mana_cost || ''}`.toLowerCase();
+  const queryLower = query.toLowerCase();
+  
+  let score = 0;
+  
+  // Extract key themes from query and score matches
+  const themes = {
+    'token': /token|populate|convoke|create.*creature/g,
+    'counter': /\+1\/\+1|counter|proliferate|evolve|adapt|monstrosity/g,
+    'artifact': /artifact|metalcraft|affinity|improvise/g,
+    'graveyard': /graveyard|flashback|unearth|dredge|delve|escape|disturb/g,
+    'control': /counter.*spell|destroy.*target|exile.*target|draw.*card/g,
+    'aggro': /haste|first strike|double strike|menace|aggressive/g,
+    'lifegain': /gain.*life|lifegain|lifelink/g,
+    'flying': /flying|fly/g,
+    'vigilance': /vigilance/g,
+    'commander': /commander|legendary/g,
+    'white': /white/g,
+    'midrange': /midrange/g
+  };
+  
+  // Score based on theme presence
+  Object.entries(themes).forEach(([theme, pattern]) => {
+    if (queryLower.includes(theme)) {
+      const matches = cardText.match(pattern);
+      if (matches) {
+        score += matches.length * 10; // Base theme match
+      }
+    }
+  });
+  
+  // Score based on card type relevance
+  const cardTypes = ['creature', 'instant', 'sorcery', 'artifact', 'enchantment', 'planeswalker', 'land'];
+  cardTypes.forEach(type => {
+    if (queryLower.includes(type) && cardText.includes(type)) {
+      score += 5;
+    }
+  });
+  
+  // Score based on mana cost (prefer cards that fill curve gaps)
+  const curveMatches = queryLower.match(/needs more (\d+)/);
+  if (curveMatches) {
+    const neededCost = parseInt(curveMatches[1]);
+    const cardCost = card.manaValue || card.cmc || card.mana_value || 0;
+    if (Math.abs(cardCost - neededCost) <= 1) {
+      score += 15; // Bonus for filling curve gaps
+    }
+  }
+  
+  // Score based on keyword abilities mentioned in query
+  const keywords = ['flying', 'vigilance', 'lifelink', 'first strike', 'double strike', 'trample', 'haste', 'deathtouch', 'menace', 'reach'];
+  keywords.forEach(keyword => {
+    if (queryLower.includes(keyword) && cardText.includes(keyword)) {
+      score += 8;
+    }
+  });
+  
+  // Normalize score to 0-1 range similar to semantic search
+  return Math.min(score / 100, 1);
+};
+
+// Helper function to extract key strategic insights from the deck analysis query
+const extractDeckInsights = (query) => {
+  if (!query) return null;
+  
+  const insights = [];
+  
+  // Extract deck archetype
+  const archetypeMatch = query.match(/Suggest cards for a \w+ (\w+) deck/);
+  if (archetypeMatch) {
+    insights.push(`Deck archetype: ${archetypeMatch[1]}`);
+  }
+  
+  // Extract key themes
+  const themesMatch = query.match(/Key themes include ([^.]+)/);
+  if (themesMatch) {
+    insights.push(`Key themes: ${themesMatch[1]}`);
+  }
+  
+  // Extract tribal synergies
+  const tribalMatch = query.match(/focuses on ([^.]+) tribal synergies/);
+  if (tribalMatch) {
+    insights.push(`Tribal synergies: ${tribalMatch[1]}`);
+  }
+  
+  // Extract important abilities
+  const abilitiesMatch = query.match(/Important abilities include ([^.]+)/);
+  if (abilitiesMatch) {
+    insights.push(`Key abilities: ${abilitiesMatch[1]}`);
+  }
+  
+  // Extract win conditions
+  const winConditionsMatch = query.match(/Win conditions focus on ([^.]+)/);
+  if (winConditionsMatch) {
+    insights.push(`Win conditions: ${winConditionsMatch[1]}`);
+  }
+  
+  // Extract mana curve needs
+  const curveMatch = query.match(/needs more ([^.]+) mana cost options/);
+  if (curveMatch) {
+    insights.push(`Mana curve needs: ${curveMatch[1]} cost cards`);
+  }
+  
+  return insights.length > 0 ? insights.join('. ') : null;
 };
 
 // Helper function to analyze the deck and create a rich search query
@@ -974,7 +1101,7 @@ ipcMain.handle('get-deck-recommendations', async (event, { deck, formatName }) =
       console.log('📡 Performing semantic search on owned cards...');
       
       // We'll use a different approach: search the full database but then map results to owned cards
-      const allSemanticResults = await bulkDataService.searchCardsSemantic(query, { limit: 1000 });
+      const allSemanticResults = await bulkDataService.searchCardsSemantic(query, { limit: 90000 });
       console.log('Full semantic search results:', allSemanticResults.length);
 
       // Create a map of semantic scores by card name
@@ -995,17 +1122,18 @@ ipcMain.handle('get-deck-recommendations', async (event, { deck, formatName }) =
       
       console.log('Cards with semantic scores:', scoredCards.filter(c => c.semantic_score > 0).length);
     } else {
-      console.log('⚠️ Semantic search not available, using random selection');
+      console.log('⚠️ Semantic search not available, using keyword-based scoring');
+      // Use deterministic keyword-based scoring instead of random
       scoredCards = eligibleCards.map(card => ({
         ...card,
-        semantic_score: Math.random()
+        semantic_score: calculateKeywordSimilarity(card, query)
       }));
       scoredCards.sort((a, b) => b.semantic_score - a.semantic_score);
     }
 
     // 9. Apply MTG-specific reranking based on deck synergy
     console.log('🎯 Applying MTG-specific reranking...');
-    const rerankedResults = rerankCardsByDeckSynergy(scoredCards.slice(0, 100), deck, formatName);
+    const rerankedResults = rerankCardsByDeckSynergy(scoredCards.slice(0, 200), deck, formatName);
     console.log('Reranked results count:', rerankedResults.length);
     
     if (rerankedResults.length > 0) {
@@ -1017,13 +1145,16 @@ ipcMain.handle('get-deck-recommendations', async (event, { deck, formatName }) =
     }
 
     // 10. Get final recommendations
-    const finalRecommendations = rerankedResults.slice(0, 20);
+    const finalRecommendations = rerankedResults.slice(0, 50);
     console.log('Final recommendations count:', finalRecommendations.length);
 
     const archetype = 'Collection-Based Recommendations v4';
     console.log('✅ Recommendations complete:', { archetype, count: finalRecommendations.length });
 
-    return { archetype, recommendations: finalRecommendations };
+    // Extract key strategic insights from the query
+    const deckInsights = extractDeckInsights(query);
+    
+    return { archetype, recommendations: finalRecommendations, deckAnalysis: deckInsights };
   } catch (error) {
     console.error('❌ Error getting deck recommendations:', error);
     console.error('Error stack:', error.stack);

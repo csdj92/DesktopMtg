@@ -33,7 +33,7 @@ const typeCategories = [
   'Battle',
 ];
 
-const DeckStatistics = ({ deck, format }) => {
+const DeckStatistics = ({ deck, format, deckAnalysis }) => {
   const analysis = useMemo(() => {
     const cards = [
       ...expandEntries(deck.mainboard),
@@ -91,6 +91,16 @@ const DeckStatistics = ({ deck, format }) => {
   return (
     <div className="widget deck-statistics space-y-4 p-4 bg-white dark:bg-zinc-800 rounded-md shadow-md">
       <h3 className="text-lg font-semibold mb-2">Deck Statistics</h3>
+      
+      {/* Deck Analysis Section */}
+      {deckAnalysis && (
+        <div className="deck-analysis-section mb-4">
+          <h4 className="text-sm font-medium text-gray-600 dark:text-gray-300 mb-2">Deck Analysis</h4>
+          <p className="text-sm text-gray-700 dark:text-gray-200 leading-relaxed bg-gray-50 dark:bg-zinc-700 p-3 rounded border-l-4 border-blue-400">
+            {deckAnalysis}
+          </p>
+        </div>
+      )}
 
       {/* Mana Curve */}
       <section>

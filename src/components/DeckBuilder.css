@@ -17,20 +17,24 @@
 
 /* Main Layout & Theme */
 .deck-builder-container {
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
   background-color: var(--bg-primary);
   color: var(--text-primary);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   position: relative;
 }
 
 /* GridLayout specific styles */
 .deck-builder-grid {
   width: 100% !important;
-  min-height: 100vh !important;
+  min-height: 100% !important;
   height: auto !important;
+  max-width: 100% !important;
+  overflow-x: hidden !important;
+  overflow-y: visible !important;
 }
 
 .panel {
@@ -54,8 +58,11 @@
 .react-grid-layout {
   position: relative;
   width: 100% !important;
-  min-width: 100vw;
+  max-width: 100% !important;
+  min-width: 0 !important;
   transition: height 200ms ease;
+  overflow-x: hidden;
+  overflow-y: visible;
 }
 
 .react-grid-item {
@@ -186,7 +193,10 @@
 .deck-builder-main-panel,
 .deck-builder-right-panel {
   height: 100%;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .deck-builder-right-panel {
@@ -272,11 +282,16 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 16px;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .deck-card-grid {
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  overflow: visible;
+  overflow-y: auto;
+  overflow-x: hidden;
   /* let parent handle scroll */
 }
 
@@ -329,6 +344,26 @@
   border: 1px solid #fff;
   font-size: 0.9rem;
   z-index: 5;
+}
+
+.card-synergy-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background-color: rgba(0, 255, 140, 0.9);
+  color: #000;
+  font-weight: bold;
+  border-radius: 4px;
+  min-width: 28px;
+  height: 20px;
+  padding: 2px 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #00ff8c;
+  font-size: 0.8rem;
+  z-index: 5;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
 
