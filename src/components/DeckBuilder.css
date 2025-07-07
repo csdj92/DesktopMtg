@@ -348,22 +348,109 @@
 
 .card-synergy-badge {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  background-color: rgba(0, 255, 140, 0.9);
+  bottom: 8px;
+  left: 8px;
   color: #000;
   font-weight: bold;
   border-radius: 4px;
-  min-width: 28px;
+  min-width: 32px;
   height: 20px;
   padding: 2px 4px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid #00ff8c;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   z-index: 5;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  cursor: help;
+  transition: all 0.2s ease;
+}
+
+.card-synergy-badge:hover {
+  transform: scale(1.05);
+}
+
+/* Synergy score quality classes */
+.card-synergy-badge.synergy-excellent {
+  background-color: rgba(255, 215, 0, 0.95); /* Gold */
+  border: 1px solid #ffd700;
+  color: #000;
+}
+
+.card-synergy-badge.synergy-great {
+  background-color: rgba(138, 43, 226, 0.9); /* Purple */
+  border: 1px solid #8a2be2;
+  color: #fff;
+}
+
+.card-synergy-badge.synergy-good {
+  background-color: rgba(0, 255, 140, 0.9); /* Green */
+  border: 1px solid #00ff8c;
+  color: #000;
+}
+
+.card-synergy-badge.synergy-decent {
+  background-color: rgba(255, 165, 0, 0.9); /* Orange */
+  border: 1px solid #ffa500;
+  color: #000;
+}
+
+.card-synergy-badge.synergy-fair {
+  background-color: rgba(128, 128, 128, 0.9); /* Gray */
+  border: 1px solid #808080;
+  color: #fff;
+}
+
+/* Synergy Legend Styles */
+.synergy-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.synergy-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+}
+
+.synergy-badge-mini {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 16px;
+  padding: 1px 3px;
+  border-radius: 3px;
+  font-size: 0.65rem;
+  font-weight: bold;
+  border: 1px solid;
+}
+
+.synergy-badge-mini.synergy-excellent {
+  background-color: rgba(255, 215, 0, 0.95);
+  border-color: #ffd700;
+  color: #000;
+}
+
+.synergy-badge-mini.synergy-great {
+  background-color: rgba(138, 43, 226, 0.9);
+  border-color: #8a2be2;
+  color: #fff;
+}
+
+.synergy-badge-mini.synergy-good {
+  background-color: rgba(0, 255, 140, 0.9);
+  border-color: #00ff8c;
+  color: #000;
+}
+
+.synergy-badge-mini.synergy-decent {
+  background-color: rgba(255, 165, 0, 0.9);
+  border-color: #ffa500;
+  color: #000;
 }
 
 
@@ -518,6 +605,125 @@
   /* Scroll handled by inner mainboard container */
 }
 
+/* NEW: Category management controls */
+.category-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.category-controls button {
+  background-color: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.2s ease;
+}
+
+.category-controls button:hover {
+  background-color: var(--bg-widget);
+  color: var(--text-primary);
+  border-color: var(--accent-primary);
+}
+
+/* NEW: Card type category styles */
+.card-type-category {
+  margin-bottom: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: var(--bg-secondary);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.category-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background-color: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.2s ease;
+}
+
+.category-header:hover {
+  background-color: var(--bg-widget);
+}
+
+.category-header.expanded {
+  background-color: var(--bg-widget);
+}
+
+.category-title {
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.category-count {
+  background-color: var(--accent-primary);
+  color: white;
+  border-radius: 12px;
+  padding: 2px 8px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  min-width: 20px;
+  text-align: center;
+}
+
+.category-toggle {
+  color: var(--text-secondary);
+  font-size: 1.2rem;
+  font-weight: bold;
+  transition: transform 0.2s ease;
+}
+
+.category-toggle.expanded {
+  transform: rotate(90deg);
+}
+
+.category-content {
+  padding: 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 16px;
+  background-color: var(--bg-secondary);
+}
+
+.category-content.collapsed {
+  display: none;
+}
+
+/* NEW: Scrollable categories container */
+.categories-container {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+}
+
+.categories-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+.categories-container::-webkit-scrollbar-track {
+  background: var(--bg-tertiary);
+}
+
+.categories-container::-webkit-scrollbar-thumb {
+  background-color: #555;
+  border-radius: 4px;
+}
+
 .deck-stats-and-actions {
   padding: 12px 16px;
   display: flex;
@@ -540,17 +746,25 @@
   padding: 4px 8px;
 }
 
-.command-zone-container,
-.mainboard-container {
+.command-zone-container {
   padding: 8px 16px;
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
+}
+
+.mainboard-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 0; /* Allow flex item to shrink below content size */
 }
 
 .mainboard-container {
   flex-grow: 1;
-  padding-bottom: 8px;
+  padding: 8px 16px 16px 16px;
   overflow-y: auto;
+  overflow-x: hidden;
+  max-height: 100%;
   /* enable scroll for deck list */
 }
 
@@ -558,7 +772,8 @@
 .mainboard-container h3 {
   margin: 0 0 16px 0;
   border-bottom: 1px solid var(--border-color);
-  padding-bottom: 8px;
+  padding: 0 0 8px 0;
+  flex-shrink: 0;
 }
 
 .command-zone {

@@ -11,6 +11,31 @@ import SpellbookExport from './SpellbookExport';
 import useCardNavigation from '../hooks/useCardNavigation';
 
 
+// Helper functions for synergy score interpretation
+const getSynergyScoreClass = (score) => {
+  if (score >= 300) return 'synergy-excellent';
+  if (score >= 250) return 'synergy-great';
+  if (score >= 200) return 'synergy-good';
+  if (score >= 150) return 'synergy-decent';
+  return 'synergy-fair';
+};
+
+const getSynergyScoreDisplay = (score) => {
+  if (score >= 300) return `★★★ ${score.toFixed(0)}`;
+  if (score >= 250) return `★★☆ ${score.toFixed(0)}`;
+  if (score >= 200) return `★☆☆ ${score.toFixed(0)}`;
+  if (score >= 150) return `◆ ${score.toFixed(0)}`;
+  return score.toFixed(0);
+};
+
+const getSynergyScoreLabel = (score) => {
+  if (score >= 300) return 'Excellent Synergy';
+  if (score >= 250) return 'Great Synergy';
+  if (score >= 200) return 'Good Synergy';
+  if (score >= 150) return 'Decent Synergy';
+  return 'Fair Synergy';
+};
+
 // --- Placeholder: Card Component ---
 // In a real app, this would be in its own file (e.g., '../Card.js')
 const Card = ({ card, quantity, onCardClick, showSynergyScore = false }) => {
@@ -36,7 +61,12 @@ const Card = ({ card, quantity, onCardClick, showSynergyScore = false }) => {
       <img src={imageUrl} alt={card?.name || 'Card Image'} loading="lazy" />
       {quantity && <div className="card-quantity-badge">{quantity}</div>}
       {showSynergyScore && card.synergy_score !== undefined && (
-        <div className="card-synergy-badge">{card.synergy_score.toFixed(1)}</div>
+        <div 
+          className={`card-synergy-badge ${getSynergyScoreClass(card.synergy_score)}`}
+          title={getSynergyScoreLabel(card.synergy_score)}
+        >
+          {getSynergyScoreDisplay(card.synergy_score)}
+        </div>
       )}
     </div>
   );
@@ -154,6 +184,9 @@ const DeckBuilder = () => {
   // NEW: separate controls for recommendations sorting
   const [recommendationsSort, setRecommendationsSort] = useState('synergy'); // 'synergy' | 'name' | 'cmc' | 'power' | 'toughness' | 'rarity'
   const [recommendationsSortDirection, setRecommendationsSortDirection] = useState('desc'); // 'asc' | 'desc'
+
+  // NEW: state for tracking which card type categories are expanded
+  const [expandedCategories, setExpandedCategories] = useState(new Set(['Creatures', 'Lands'])); // Start with creatures and lands expanded
 
   // Hold results returned by advanced search controls
   const [collectionSearchResults, setCollectionSearchResults] = useState(null); // null means no search yet
@@ -283,6 +316,49 @@ const DeckBuilder = () => {
     if (typeLine.includes('battle')) types.push('battle');
 
     return types;
+  };
+
+  // Helper to get the primary type for grouping
+  const getPrimaryCardType = (card) => {
+    if (!card) return 'Other';
+    const types = getCardTypes(card);
+    
+    // Return the first type found, or 'Other' if none
+    if (types.length > 0) {
+      return types[0].charAt(0).toUpperCase() + types[0].slice(1) + 's'; // Pluralize
+    }
+    return 'Other';
+  };
+
+  // Helper to group deck cards by type
+  const groupCardsByType = (mainboard) => {
+    const groups = {};
+    
+    mainboard.forEach(entry => {
+      const type = getPrimaryCardType(entry.card);
+      if (!groups[type]) {
+        groups[type] = [];
+      }
+      groups[type].push(entry);
+    });
+
+    // Sort each group by name
+    Object.keys(groups).forEach(type => {
+      groups[type].sort((a, b) => a.card.name.localeCompare(b.card.name));
+    });
+
+    // Define preferred order for card types
+    const typeOrder = ['Creatures', 'Lands', 'Instants', 'Sorceries', 'Enchantments', 'Artifacts', 'Planeswalkers', 'Battles', 'Other'];
+    
+    // Return groups in preferred order
+    const orderedGroups = {};
+    typeOrder.forEach(type => {
+      if (groups[type]) {
+        orderedGroups[type] = groups[type];
+      }
+    });
+
+    return orderedGroups;
   };
 
   const matchesTypeFilter = (card, filter) => {
@@ -739,6 +815,34 @@ const DeckBuilder = () => {
       return 0;
     });
   }, [deck.mainboard]);
+
+  // NEW: Group mainboard cards by type
+  const groupedMainboard = useMemo(() => {
+    return groupCardsByType(deck.mainboard);
+  }, [deck.mainboard]);
+
+  // Helper function to toggle category expansion
+  const toggleCategory = (categoryName) => {
+    setExpandedCategories(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(categoryName)) {
+        newSet.delete(categoryName);
+      } else {
+        newSet.add(categoryName);
+      }
+      return newSet;
+    });
+  };
+
+  // Helper function to expand all categories
+  const expandAllCategories = () => {
+    setExpandedCategories(new Set(Object.keys(groupedMainboard)));
+  };
+
+  // Helper function to collapse all categories
+  const collapseAllCategories = () => {
+    setExpandedCategories(new Set());
+  };
 
   const memoizedDeckStats = useMemo(() => <DeckStatistics deck={deck} format={format} deckAnalysis={deckAnalysis} />, [deck, format, deckAnalysis]);
 
@@ -1226,26 +1330,73 @@ const DeckBuilder = () => {
 
           <div className="mainboard-container">
             <h3>Mainboard ({mainboardCount} cards)</h3>
-            <div className="deck-card-grid">
-              {sortedMainboard.map(entry => (
-                <div key={entry.card.id} className="card-grid-item-deck">
-                  <Card card={entry.card} quantity={entry.quantity} onCardClick={handleCardClick} />
-                  <div className="deck-card-actions">
-                    <button
-                      onClick={() => incrementQty(entry.card.id)}
-                      disabled={format === 'commander' && !isBasicLand(entry.card)}
-                      title={format === 'commander' && !isBasicLand(entry.card) ? 'Commander format allows only one copy of non-basic cards' : ''}
+            
+            {/* Category management controls */}
+            {Object.keys(groupedMainboard).length > 1 && (
+              <div className="category-controls">
+                <button onClick={expandAllCategories}>Expand All</button>
+                <button onClick={collapseAllCategories}>Collapse All</button>
+              </div>
+            )}
+
+            {/* Scrollable categories container */}
+            <div className="categories-container">
+              {/* Grouped cards by type */}
+              {Object.entries(groupedMainboard).map(([categoryName, cards]) => {
+                const isExpanded = expandedCategories.has(categoryName);
+                const totalCards = cards.reduce((sum, entry) => sum + entry.quantity, 0);
+                
+                return (
+                  <div key={categoryName} className="card-type-category">
+                    <div 
+                      className={`category-header ${isExpanded ? 'expanded' : ''}`}
+                      onClick={() => toggleCategory(categoryName)}
                     >
-                      +
-                    </button>
-                    <button onClick={() => decrementQty(entry.card.id)}>-</button>
-                    <button className="remove-button" onClick={() => removeCardFromDeck(entry.card.id)}>Remove</button>
-                    {format === 'commander' && isCardCommander(entry.card) && (
-                      <button className="set-commander-button" onClick={() => setCommander(entry.card)}>Set Commander</button>
-                    )}
+                      <div className="category-title">
+                        <span>{categoryName}</span>
+                        <span className="category-count">{totalCards}</span>
+                      </div>
+                      <span className={`category-toggle ${isExpanded ? 'expanded' : ''}`}>
+                        ▶
+                      </span>
+                    </div>
+                    
+                    <div className={`category-content ${!isExpanded ? 'collapsed' : ''}`}>
+                      {cards.map(entry => (
+                        <div key={entry.card.id} className="card-grid-item-deck">
+                          <Card card={entry.card} quantity={entry.quantity} onCardClick={handleCardClick} />
+                          <div className="deck-card-actions">
+                            <button
+                              onClick={() => incrementQty(entry.card.id)}
+                              disabled={format === 'commander' && !isBasicLand(entry.card)}
+                              title={format === 'commander' && !isBasicLand(entry.card) ? 'Commander format allows only one copy of non-basic cards' : ''}
+                            >
+                              +
+                            </button>
+                            <button onClick={() => decrementQty(entry.card.id)}>-</button>
+                            <button className="remove-button" onClick={() => removeCardFromDeck(entry.card.id)}>Remove</button>
+                            {format === 'commander' && isCardCommander(entry.card) && (
+                              <button className="set-commander-button" onClick={() => setCommander(entry.card)}>Set Commander</button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
+                );
+              })}
+
+              {/* Empty state */}
+              {Object.keys(groupedMainboard).length === 0 && (
+                <div style={{ 
+                  textAlign: 'center', 
+                  color: 'var(--text-secondary)', 
+                  padding: '40px 20px',
+                  fontStyle: 'italic'
+                }}>
+                  No cards in mainboard. Add cards from your collection or search results.
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </div>
@@ -1280,6 +1431,30 @@ const DeckBuilder = () => {
                 {recoLoading ? 'Getting Suggestions...' : 'Suggest Cards'}
               </button>
               {deckArchetype && <h4>Suggestions for: {deckArchetype}</h4>}
+              
+              {/* Synergy Score Legend */}
+              <div className="synergy-legend" style={{ 
+                fontSize: '0.8rem', 
+                color: 'var(--text-secondary)', 
+                margin: '8px 0',
+                padding: '8px',
+                backgroundColor: 'var(--bg-tertiary)',
+                borderRadius: '4px'
+              }}>
+                <strong>Synergy Scores:</strong> 
+                <span className="synergy-legend-item">
+                  <span className="synergy-badge-mini synergy-excellent">★★★</span> 300+ Excellent
+                </span>
+                <span className="synergy-legend-item">
+                  <span className="synergy-badge-mini synergy-great">★★☆</span> 250+ Great
+                </span>
+                <span className="synergy-legend-item">
+                  <span className="synergy-badge-mini synergy-good">★☆☆</span> 200+ Good
+                </span>
+                <span className="synergy-legend-item">
+                  <span className="synergy-badge-mini synergy-decent">◆</span> 150+ Decent
+                </span>
+              </div>
               <div className="collection-controls">
                 <select
                   value={cardTypeFilter}
