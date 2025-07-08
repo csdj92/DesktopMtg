@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import './HandSimulator.css';
+import useImageCache from '../hooks/useImageCache';
 
 // Card component for displaying cards in hand
 const Card = ({ card, onCardClick }) => {
   const getImageUrl = (cardData) => {
-    if (!cardData) return 'https://placehold.co/600x800/1a1a1a/e0e0e0?text=No+Image';
+    if (!cardData) return null;
 
     // Handle double-faced cards
     if (cardData.card_faces && cardData.card_faces.length > 0 && cardData.card_faces[0].image_uris) {
@@ -16,14 +17,20 @@ const Card = ({ card, onCardClick }) => {
       return cardData.image_uris.normal;
     }
 
-    return 'https://placehold.co/600x800/1a1a1a/e0e0e0?text=No+Image';
+    return null;
   };
 
-  const imageUrl = getImageUrl(card);
+  const rawImageUrl = getImageUrl(card);
+  const { imageUrl, isLoading } = useImageCache(rawImageUrl);
 
   return (
     <div className="simulator-card" onClick={() => onCardClick && onCardClick(card)}>
-      <img src={imageUrl} alt={card?.name || 'Card Image'} loading="lazy" />
+      <img 
+        src={imageUrl} 
+        alt={card?.name || 'Card Image'} 
+        loading="lazy"
+        className={isLoading ? 'loading' : ''}
+      />
     </div>
   );
 };
@@ -396,7 +403,7 @@ const HandSimulator = () => {
               <h3>{selectedCard.name}</h3>
               <p><strong>Type:</strong> {selectedCard.type_line}</p>
               <p><strong>CMC:</strong> {selectedCard.cmc}</p>
-              {selectedCard.oracle_text && <p><strong>Text:</strong> {selectedCard.oracle_text}</p>}
+              {selectedCard.oracle_text && <p><strong>Text:</strong> {selectedCard.oracle_text.replace(/\?\?\?/g, '—')}</p>}
             </div>
           </div>
         </div>

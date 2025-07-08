@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   collectionGetCardQuantity: (cardName, options) => ipcRenderer.invoke('collection-get-card-quantity', cardName, options),
   collectionMarkCard: (cardId, collected) => ipcRenderer.invoke('collection-mark-card', cardId, collected),
   collectionClearAll: () => ipcRenderer.invoke('collection-clear-all'),
+  collectionSync: () => ipcRenderer.invoke('collection-sync'),
 
   // Deck Management
   deckSave: (filename, deckData) => ipcRenderer.invoke('deck-save', filename, deckData),

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import './DeckBuilder.css';
+import useImageCache from '../hooks/useImageCache';
 import CardDetailModal from './CardDetailModal';
 import DeckStatistics from './DeckStatistics';
 import SearchControls from './SearchControls';
@@ -41,7 +42,7 @@ const getSynergyScoreLabel = (score) => {
 const Card = ({ card, quantity, onCardClick, showSynergyScore = false }) => {
   // CORRECTED LOGIC: Handle single-faced and double-faced cards
   const getImageUrl = (cardData) => {
-    if (!cardData) return 'https://placehold.co/600x800/1a1a1a/e0e0e0?text=No+Image';
+    if (!cardData) return null;
     // Check for double-faced cards, which have a `card_faces` array
     if (cardData.card_faces && cardData.card_faces.length > 0 && cardData.card_faces[0].image_uris) {
       return cardData.card_faces[0].image_uris.normal;
@@ -51,14 +52,20 @@ const Card = ({ card, quantity, onCardClick, showSynergyScore = false }) => {
       return cardData.image_uris.normal;
     }
     // Final fallback if no image is found
-    return 'https://placehold.co/600x800/1a1a1a/e0e0e0?text=No+Image';
+    return null;
   };
 
-  const imageUrl = getImageUrl(card);
+  const rawImageUrl = getImageUrl(card);
+  const { imageUrl, isLoading } = useImageCache(rawImageUrl);
 
   return (
     <div className="card-component" onClick={() => onCardClick(card)}>
-      <img src={imageUrl} alt={card?.name || 'Card Image'} loading="lazy" />
+      <img 
+        src={imageUrl} 
+        alt={card?.name || 'Card Image'} 
+        loading="lazy"
+        className={isLoading ? 'loading' : ''}
+      />
       {quantity && <div className="card-quantity-badge">{quantity}</div>}
       {showSynergyScore && card.synergy_score !== undefined && (
         <div 
@@ -1311,7 +1318,7 @@ const DeckBuilder = () => {
                             <p className="details-line"><strong>Type:</strong> {cmd.type.replace(/\?\?\?/g, '—') || cmd.type_line.replace(/\?\?\?/g, '—')}</p>
                           )}
                           {(cmd.text || cmd.oracle_text) && (
-                            <p className="details-line" style={{ whiteSpace: 'pre-line' }}><strong>Oracle Text:</strong> {(cmd.text || cmd.oracle_text).replace(/\\n/g, '\n')}</p>
+                            <p className="details-line" style={{ whiteSpace: 'pre-line' }}><strong>Oracle Text:</strong> {(cmd.text || cmd.oracle_text).replace(/\\n/g, '\n').replace(/\?\?\?/g, '—')}</p>
                           )}
                           {cmd.power && cmd.toughness && (
                             <p className="details-line"><strong>P/T:</strong> {cmd.power}/{cmd.toughness}</p>

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import './Card.css'; // Import the dedicated stylesheet
 import CardDetailModal from './components/CardDetailModal';
+import useImageCache from './hooks/useImageCache';
 
 const Card = ({ card, quantity = 1, disableModal = false }) => {
   const [currentFace, setCurrentFace] = useState(0);
@@ -16,7 +17,7 @@ const Card = ({ card, quantity = 1, disableModal = false }) => {
 
   // Robustly get the correct image URL for any face
   const getImageUrl = (face) => {
-    if (!face) return 'https://placehold.co/488x680/1a1a1a/e0e0e0?text=No+Image';
+    if (!face) return null;
     if (face.image_uris) {
       return face.image_uris.normal || face.image_uris.large;
     }
@@ -24,8 +25,11 @@ const Card = ({ card, quantity = 1, disableModal = false }) => {
     if (card.image_uris) {
       return card.image_uris.normal || card.image_uris.large;
     }
-    return 'https://placehold.co/488x680/1a1a1a/e0e0e0?text=No+Image';
+    return null;
   };
+
+  const rawImageUrl = getImageUrl(cardFace);
+  const { imageUrl, isLoading } = useImageCache(rawImageUrl);
   
   const handleFlip = (e) => {
     e.stopPropagation(); // Prevent card click events when flipping
@@ -43,8 +47,6 @@ const Card = ({ card, quantity = 1, disableModal = false }) => {
 
   const price = card.prices?.usd ? `$${card.prices.usd}` : (card.prices?.usd_foil ? `$${card.prices.usd_foil} (Foil)`: null);
 
-  const imageUrl = getImageUrl(cardFace);
-
   return (
     <>
       <div 
@@ -53,7 +55,12 @@ const Card = ({ card, quantity = 1, disableModal = false }) => {
         onMouseLeave={() => setIsHovered(false)}
         onClick={handleCardClick}
       >
-        <img src={imageUrl} alt={cardFace.name || card.name} className="card-image-background" />
+        <img 
+          src={imageUrl} 
+          alt={cardFace.name || card.name} 
+          className={`card-image-background ${isLoading ? 'loading' : ''}`}
+          loading="lazy"
+        />
 
         {/* Header for badges and flip button */}
         <div className="card-header">

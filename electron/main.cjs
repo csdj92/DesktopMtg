@@ -148,12 +148,10 @@ ipcMain.handle('collection-get', async (event, collectionName, options) => {
 // NEW: Simple direct method to get collected cards without any complex logic
 ipcMain.handle('collection-get-simple', async (event, options = {}) => {
   try {
-    console.log('🎯 Using getCollectedCards helper');
     const cards = await bulkDataService.getCollectedCards(options);
-    console.log(`📚 Found ${cards.length} collected cards from helper`);
     return cards;
   } catch (error) {
-    console.error('Error in simple collection get:', error);
+    console.error('Error getting collected cards:', error);
     return [];
   }
 });

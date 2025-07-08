@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Card from './Card'
 import SearchControls from './components/SearchControls';
 import CollectionManager from './components/CollectionManager';
@@ -96,187 +96,7 @@ function App() {
     return null
   }
 
-  const loadMyCollection = async () => {
-    setIsViewingCollection(true)
-    setSelectedFile(null) // Clear individual file selection
-    setCollectionLoading(true)
-    
-    try {
-      console.log('🎯 Loading My Collection with simple direct method');
-      
-      // Use the new simple method that directly queries collected cards
-      const collectedCards = await window.electronAPI.collectionGetSimple({ limit: 10000, offset: 0 });
-      
-      console.log(`📚 Found ${collectedCards.length} collected cards`);
-      
-      if (collectedCards.length === 0) {
-        console.log('No collected cards found, showing empty collection');
-        setCollectionCards([]);
-        setCollectionStats({ totalCards: 0, totalValue: 0, byRarity: {} });
-        filterCollectionCards([], {});
-        return;
-      }
-      
-      // Process cards into the expected format
-      const processedCards = collectedCards.map(card => ({
-        name: card.name,
-        setCode: card.setCode || card.set_code || card.set || '',
-        collectorNumber: card.number || card.collector_number || '',
-        isFoil: false,
-        quantity: 1,
-        scryfallData: card,
-        cardKey: `${card.name}|${card.setCode || card.set_code || ''}|${card.number || card.collector_number || ''}|false`,
-        sourceFiles: ['Database Collection']
-      }));
-      
-      // Calculate stats
-      let totalValue = 0;
-      processedCards.forEach(card => {
-        if (card.scryfallData.prices) {
-          const price = parseFloat(card.scryfallData.prices.usd);
-          if (price) {
-            totalValue += price * card.quantity;
-          }
-        }
-      });
-      
-      const stats = generateCollectionStats(processedCards, totalValue);
-      
-      setCollectionCards(processedCards);
-      setCollectionStats(stats);
-      filterCollectionCards(processedCards, {});
-      console.log('✅ Simple collection loading complete');
-      
-      // Done – skip legacy TXT processing entirely
-      return;
-      
-    } catch (error) {
-      console.error('Error loading collection with simple method:', error);
-      setCollectionCards([]);
-      setCollectionStats({ totalCards: 0, totalValue: 0, byRarity: {} });
-      filterCollectionCards([], {});
-    } finally {
-      setCollectionLoading(false);
-    }
-    
-    // ===============================
-    // Legacy TXT-based implementation (DISABLED - Now using user_collections table)
-    // ===============================
-    
-    // Check if we can use cached data
-    const needsRefresh = await shouldRefreshCollection()
-    
-    if (!needsRefresh && collectionCache) {
-      console.log('Using cached collection data')
-      setCollectionCards(collectionCache.cards)
-      setCollectionStats(collectionCache.stats)
-      filterCollectionCards(collectionCache.cards, {})
-      return
-    }
-    
-    console.log('Refreshing collection data...')
-    setCollectionLoading(true)
-    
-    try {
-      // Load all card files
-      const allCardsMap = new Map() // Key: cardId, Value: aggregated card data
-      const sourceFilesMap = new Map() // Track which files each card comes from
-      let totalValue = 0
-      
-      for (const collectionName of cardFiles) {
-        try {
-          const collectionCards = await window.electronAPI.getUserCollectionCards(collectionName, { limit: 10000 })
-          
-          // Process each card in this collection
-          for (const collectionCard of collectionCards) {
-            try {
-              if (!collectionCard.cardName) {
-                console.warn('⚠️ App.loadMyCollection: record with undefined name', collectionCard);
-                continue;
-              }
-              const scryfallCard = await window.electronAPI.bulkDataFindCardByDetails(
-                collectionCard.cardName, 
-                collectionCard.setCode, 
-                collectionCard.collectorNumber
-              )
-              
-              if (scryfallCard) {
-                // Create unique key for this card (name + set + collector number + foil status)
-                const cardKey = `${collectionCard.cardName}|${collectionCard.setCode}|${collectionCard.collectorNumber}|${collectionCard.foil === 'foil'}`
-                
-                if (allCardsMap.has(cardKey)) {
-                  // Card already exists, add to quantity
-                  const existingCard = allCardsMap.get(cardKey)
-                  existingCard.quantity += collectionCard.quantity
-                  
-                  // Add to source collections
-                  const sources = sourceFilesMap.get(cardKey)
-                  if (!sources.includes(collectionName)) {
-                    sources.push(collectionName)
-                  }
-                } else {
-                  // New card, add to collection
-                  const aggregatedCard = {
-                    name: collectionCard.cardName,
-                    setCode: collectionCard.setCode || '',
-                    collectorNumber: collectionCard.collectorNumber || '',
-                    quantity: collectionCard.quantity || 1,
-                    isFoil: collectionCard.foil === 'foil',
-                    scryfallData: scryfallCard,
-                    cardKey
-                  }
-                  allCardsMap.set(cardKey, aggregatedCard)
-                  sourceFilesMap.set(cardKey, [collectionName])
-                }
-                
-                // Calculate value for stats
-                if (scryfallCard.prices) {
-                  const price = (collectionCard.foil === 'foil') && scryfallCard.prices.usd_foil 
-                    ? parseFloat(scryfallCard.prices.usd_foil) 
-                    : parseFloat(scryfallCard.prices.usd)
-                  if (price) {
-                    totalValue += price * collectionCard.quantity
-                  }
-                }
-              }
-            } catch (error) {
-              console.error(`Error processing card ${collectionCard.cardName}:`, error)
-            }
-          }
-        } catch (error) {
-          console.error(`Error reading collection ${collectionName}:`, error)
-        }
-      }
-      
-      // Convert map to array and add source information
-      const aggregatedCards = Array.from(allCardsMap.values()).map(card => ({
-        ...card,
-        sourceFiles: sourceFilesMap.get(card.cardKey)
-      }))
-      
-      // Generate collection statistics
-      const stats = generateCollectionStats(aggregatedCards, totalValue)
-      
-      // Cache the results
-      const cacheData = {
-        cards: aggregatedCards,
-        stats: stats,
-        timestamp: Date.now(),
-        collectionList: [...cardFiles] // Store current collection list for comparison
-      }
-      setCollectionCache(cacheData)
-      setLastFileCheck(Date.now())
-      
-      setCollectionCards(aggregatedCards)
-      setCollectionStats(stats)
-      filterCollectionCards(aggregatedCards, {})
-      
-    } catch (error) {
-      console.error('Error loading collection:', error)
-    } finally {
-      setCollectionLoading(false)
-    }
-  }
+
 
   const shouldRefreshCollection = async () => {
     // No cache means we need to refresh
@@ -306,6 +126,27 @@ function App() {
     console.log('Forcing collection refresh...')
     setCollectionCache(null) // Clear cache to force refresh
     await loadMyCollection()
+  }
+
+  const syncCollection = async () => {
+    console.log('Syncing collections to main database...')
+    setCollectionLoading(true)
+    try {
+      const result = await window.electronAPI.collectionSync()
+      if (result.success) {
+        console.log('✅ Collection sync completed successfully')
+        // Refresh the collection view after successful sync
+        await loadMyCollection()
+      } else {
+        console.error('❌ Collection sync failed:', result.error)
+        alert('Collection sync failed: ' + (result.error || 'Unknown error'))
+      }
+    } catch (error) {
+      console.error('❌ Collection sync error:', error)
+      alert('Collection sync error: ' + error.message)
+    } finally {
+      setCollectionLoading(false)
+    }
   }
 
   const generateCollectionStats = (cards, totalValue) => {
@@ -726,6 +567,93 @@ function App() {
     setFilteredCollectionCards(filtered)
   }
 
+  const loadMyCollection = useCallback(async () => {
+    setIsViewingCollection(true);
+    setSelectedFile(null); // Clear individual file selection
+    setCollectionLoading(true);
+    
+    try {
+      // Check if we have valid cached data (cache for 5 minutes)
+      const cacheValidDuration = 5 * 60 * 1000; // 5 minutes
+      const now = Date.now();
+      
+      if (collectionCache && 
+          collectionCache.timestamp && 
+          (now - collectionCache.timestamp) < cacheValidDuration) {
+        setCollectionCards(collectionCache.cards);
+        setCollectionStats(collectionCache.stats);
+        filterCollectionCards(collectionCache.cards, {});
+        return;
+      }
+      
+      // Use the new simple method that directly queries collected cards
+      const collectedCards = await window.electronAPI.collectionGetSimple({ limit: 10000, offset: 0 });
+      
+      if (collectedCards.length === 0) {
+        setCollectionCards([]);
+        setCollectionStats({ totalCards: 0, totalValue: 0, byRarity: {} });
+        filterCollectionCards([], {});
+        return;
+      }
+      
+      let totalValue = 0;
+
+      // Single pass: map each card and track total price
+      const processedCards = collectedCards.map((card) => {
+        let priceUsd = 0;
+        if (card.prices?.usd) {
+          priceUsd = parseFloat(card.prices.usd) || 0;
+          totalValue += priceUsd;
+        }
+        return {
+          name: card.name,
+          setCode: card.setCode || card.set_code || card.set || '',
+          collectorNumber: card.number || card.collector_number || '',
+          isFoil: false,
+          quantity: 1,
+          scryfallData: card,
+          cardKey: `${card.name}|${card.setCode || card.set_code || ''}|${
+            card.number || card.collector_number || ''
+          }|false`,
+          sourceFiles: ['Database Collection'],
+        };
+      });
+      
+      const stats = generateCollectionStats(processedCards, totalValue);
+      
+      // Cache the results
+      const cacheData = {
+        cards: processedCards,
+        stats: stats,
+        timestamp: now
+      };
+      setCollectionCache(cacheData);
+      
+      setCollectionCards(processedCards);
+      setCollectionStats(stats);
+      filterCollectionCards(processedCards, {});
+      
+      return;
+      
+    } catch (error) {
+      console.error('Error loading collection with simple method:', error);
+      setCollectionCards([]);
+      setCollectionStats({ totalCards: 0, totalValue: 0, byRarity: {} });
+      filterCollectionCards([], {});
+    } finally {
+      setCollectionLoading(false);
+    }
+  }, [
+    collectionCache,
+    setIsViewingCollection,
+    setSelectedFile,
+    setCollectionLoading,
+    setCollectionCards,
+    setCollectionStats,
+    setCollectionCache,
+    filterCollectionCards,
+  ]);
+
   const handleSetClick = async (set) => {
     try {
       setSearchLoading(true);
@@ -831,13 +759,24 @@ function App() {
                   <div className="collection-header">
                     <div className="collection-title-row">
                       <h2>📚 My Collection</h2>
-                      <button 
-                        className="refresh-button"
-                        onClick={refreshCollection}
-                        title="Refresh collection data"
-                      >
-                        🔄 Refresh
-                      </button>
+                      <div className="collection-buttons">
+                        <button 
+                          className="refresh-button"
+                          onClick={syncCollection}
+                          title="Sync collections to main database"
+                          disabled={collectionLoading}
+                        >
+                          🔄 Sync
+                        </button>
+                        <button 
+                          className="refresh-button"
+                          onClick={refreshCollection}
+                          title="Refresh collection data"
+                          disabled={collectionLoading}
+                        >
+                          🔄 Refresh
+                        </button>
+                      </div>
                     </div>
                     {collectionStats && (
                       <div className="collection-stats">

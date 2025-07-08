@@ -465,6 +465,11 @@ text{
   color: var(--color-text-primary);
 }
 
+.collection-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .refresh-button {
   background: transparent;
   border: 1px solid var(--color-border);
@@ -478,10 +483,15 @@ text{
   transition: all 0.2s ease;
 }
 
-.refresh-button:hover {
+.refresh-button:hover:not(:disabled) {
   color: var(--color-text-primary);
   background-color: var(--color-surface-alt);
   border-color: var(--color-accent);
+}
+
+.refresh-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .collection-stats {

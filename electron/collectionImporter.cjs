@@ -965,6 +965,17 @@ class CollectionImporter {
       });
 
       console.log(`➕ Added ${quantity} x "${card_name}" to collection "${collectionName}"`);
+      
+      // Sync to main database so the collection view is updated immediately
+      console.log('🔄 Syncing to main database after card addition...');
+      try {
+        await this.syncCollectionToMainDatabase();
+        console.log('✅ Sync completed successfully');
+      } catch (syncError) {
+        console.warn('⚠️ Sync failed after card addition:', syncError);
+        // Don't fail the add operation if sync fails
+      }
+      
       return { success: true };
     } catch (error) {
       console.error('Error adding card to collection:', error);
@@ -1003,6 +1014,18 @@ class CollectionImporter {
         [qty, collectionName, card_name, set_code, collector_number, this.normalizeFoil(foil)]
       );
 
+      if (result.changes > 0) {
+        // Sync to main database so the collection view is updated immediately
+        console.log('🔄 Syncing to main database after quantity update...');
+        try {
+          await this.syncCollectionToMainDatabase();
+          console.log('✅ Sync completed successfully');
+        } catch (syncError) {
+          console.warn('⚠️ Sync failed after quantity update:', syncError);
+          // Don't fail the update operation if sync fails
+        }
+      }
+
       return { success: result.changes > 0 };
     } catch (error) {
       console.error('Error updating card quantity:', error);
@@ -1030,6 +1053,18 @@ class CollectionImporter {
         `DELETE FROM user_collections WHERE collectionName = ? AND lower(cardName) = lower(?) AND setCode = ? AND collectorNumber = ? AND foil = ?`,
         [collectionName, card_name, set_code, collector_number, this.normalizeFoil(foil)]
       );
+
+      if (result.changes > 0) {
+        // Sync to main database so the collection view is updated immediately
+        console.log('🔄 Syncing to main database after card deletion...');
+        try {
+          await this.syncCollectionToMainDatabase();
+          console.log('✅ Sync completed successfully');
+        } catch (syncError) {
+          console.warn('⚠️ Sync failed after card deletion:', syncError);
+          // Don't fail the delete operation if sync fails
+        }
+      }
 
       return { success: result.changes > 0 };
     } catch (error) {

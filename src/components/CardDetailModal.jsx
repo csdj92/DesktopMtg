@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './CardDetailModal.css';
+import useImageCache from '../hooks/useImageCache';
 
 const CardDetailModal = ({
   card,
@@ -46,18 +47,19 @@ const CardDetailModal = ({
   const legalities = card.legalities || {};
 
   const getImageUrl = (face) => {
-    if (!face) return 'https://placehold.co/488x680/1a1a1a/e0e0e0?text=No+Image';
+    if (!face) return null;
     if (face.image_uris) {
       return face.image_uris.normal || face.image_uris.large;
     }
     if (card.image_uris) {
       return card.image_uris.normal || card.image_uris.large;
     }
-    return 'https://placehold.co/488x680/1a1a1a/e0e0e0?text=No+Image';
+    return null;
   };
 
   const cardFace = card.card_faces ? card.card_faces[0] : card;
-  const imageUrl = getImageUrl(cardFace);
+  const rawImageUrl = getImageUrl(cardFace);
+  const { imageUrl, isLoading } = useImageCache(rawImageUrl);
 
   const resetForm = () => {
     setCollectionInput('My Collection');
@@ -169,7 +171,12 @@ const CardDetailModal = ({
         </div>
         <div className="modal-body">
           <div className="modal-card-image">
-            <img src={imageUrl} alt={card.name} />
+            <img 
+              src={imageUrl} 
+              alt={card.name} 
+              className={isLoading ? 'loading' : ''}
+              loading="lazy"
+            />
             <div className="legalities">
               <h3>Legalities</h3>
               <ul>
