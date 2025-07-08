@@ -24,6 +24,9 @@ const colorMap = {
   C: { name: 'Colorless', class: 'bg-gray-300 text-gray-900', symbol: '⚪', hex: '#CAC5C0' },
 };
 
+// Mapping of mana symbols to human-readable names for charts
+const manaSymbolNames = { W: 'White', U: 'Blue', B: 'Black', R: 'Red', G: 'Green', C: 'Colorless', X: 'Variable' };
+
 const typeCategories = [
   'Creature',
   'Instant',
@@ -52,7 +55,7 @@ const StatCard = ({ title, icon, children, className = '', headerContent }) => (
     transition={{ duration: 0.4 }}
     whileHover={{ scale: 1.02, transition: { duration: 0.2 } }}
   >
-    <div className="flex items-center justify-between mb-4">
+    <div className="flex items-center justify-between mb-2">
       <div className="flex items-center gap-3 text-lg font-semibold text-gray-800 dark:text-gray-200">
         {icon}
         <h4 className="font-semibold">{title}</h4>
@@ -96,7 +99,7 @@ const EnhancedBarChart = ({ data, title, color, showPercentages = false }) => {
                 </span>
               </div>
               <div className="flex items-center ml-2 min-w-[2rem]">
-                <span className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                <span className="text-xl text-left font-bold text-gray-700 dark:text-gray-300">
                   {item.value}
                 </span>
               </div>
@@ -118,16 +121,28 @@ const ManaCurveChart = ({ data, title }) => {
   const maxValue = Math.max(...data);
   const total = data.reduce((sum, val) => sum + val, 0);
 
+  // Distinct colors for each mana cost bucket
+  const bucketColors = [
+    '#9CA3AF', // 0 - gray
+    '#F87171', // 1 - red
+    '#FB923C', // 2 - orange
+    '#FBBF24', // 3 - amber
+    '#34D399', // 4 - emerald
+    '#60A5FA', // 5 - blue
+    '#A78BFA', // 6 - violet
+    '#F472B6', // 7+ - pink
+  ];
+
   return (
     <div className="space-y-2">
       <h5 className="text-sm font-medium">{title}</h5>
-      <div className="flex items-end space-x-1 h-32 bg-gray-50 dark:bg-zinc-800/30 rounded-lg p-2">
+      <div className="flex items-end space-x-1 h-[200px] bg-gray-50 dark:bg-zinc-800/30 rounded-lg p-2">
         {data.map((count, idx) => {
           const heightPercent = maxValue > 0 ? (count / maxValue) * 100 : 0;
           const percentage = total > 0 ? (count / total) * 100 : 0;
 
           return (
-            <div key={idx} className="flex-1 flex flex-col items-center">
+            <div key={idx} className="flex-1 flex flex-col items-center h-full">
               {/* Count */}
               <motion.div
                 className="text-xs mb-1 font-medium"
@@ -139,17 +154,14 @@ const ManaCurveChart = ({ data, title }) => {
               </motion.div>
 
               {/* Bar Area (fills remaining space) */}
-              <div className="flex-1 flex items-end w-full">
+              <div className="flex-1 flex items-end w-full h-full">
                 <motion.div
-                  className="w-full bg-gradient-to-t from-indigo-500 to-indigo-300 dark:from-indigo-600 dark:to-indigo-400 rounded-t-md relative group cursor-pointer"
+                  className="w-full rounded-t-md relative group cursor-pointer"
                   style={{
                     height: `${heightPercent}%`,
                     minHeight: count > 0 ? '8px' : '4px',
+                    backgroundColor: '#6366f1',
                   }}
-                  initial={{ height: 0 }}
-                  animate={{ height: `${heightPercent}%` }}
-                  transition={{ duration: 0.6, delay: idx * 0.1 }}
-                  whileHover={{ backgroundColor: 'rgba(99, 102, 241, 0.8)', scaleY: 1.05 }}
                 >
                   {count > 0 && (
                     <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 bg-zinc-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
@@ -305,7 +317,6 @@ const CreatureScatterPlot = ({ data, title }) => {
                   initial={{ opacity: 0, scale: 0 }}
                   animate={{ opacity: 1, scale: 1 }}
                   transition={{ delay: index * 0.02 }}
-                  whileHover={{ scale: 1.5, zIndex: 20 }}
                 >
                   <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-max bg-black text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-30">
                     {creature.name} (P/T: {creature.power}/{creature.toughness})
@@ -345,6 +356,12 @@ const DeckStatistics = ({ deck, format, deckAnalysis }) => {
 
     // Basic counts
     const manaCurveCounts = Array(manaBucketLabels.length).fill(0);
+
+    // Arrays & accumulators for mana value statistics
+    const allManaCosts = [];
+    const nonlandManaCosts = [];
+    let totalManaCostAll = 0;
+
     const typeCounts = {};
     typeCategories.forEach(t => (typeCounts[t] = 0));
     const colorCounts = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 };
@@ -366,14 +383,20 @@ const DeckStatistics = ({ deck, format, deckAnalysis }) => {
       const primaryFace = (card.card_faces && card.card_faces.length > 0) ? card.card_faces[0] : card;
       const tLine = (primaryFace.type_line || card.type_line || card.type || '').toLowerCase();
 
-      // Mana curve
+      // Mana curve / mana value tracking
       // Use root card's cmc, as it's usually defined there for the whole card
       const cmc = card.manaValue ?? card.cmc ?? card.mana_value ?? 0;
-      const idx = cmc >= 7 ? 7 : Math.max(0, Math.min(7, Math.round(cmc)));
-      manaCurveCounts[idx] += 1;
 
-      // Track total mana cost for average
+      // Accumulate for statistics (includes lands)
+      allManaCosts.push(cmc);
+      totalManaCostAll += cmc;
+
+      const idx = cmc >= 7 ? 7 : Math.max(0, Math.min(7, Math.round(cmc)));
+
+      // Only non-land cards are considered for the mana curve visual & non-land stats
       if (!tLine.includes('land')) {
+        manaCurveCounts[idx] += 1;
+        nonlandManaCosts.push(cmc);
         totalManaCost += cmc;
         validManaCards += 1;
         nonlandCards.push(card);
@@ -456,8 +479,25 @@ const DeckStatistics = ({ deck, format, deckAnalysis }) => {
       });
     });
 
+    // Helper to calculate median
+    const calculateMedian = (arr) => {
+      if (!arr || arr.length === 0) return 0;
+      const sorted = [...arr].sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      return sorted.length % 2 !== 0
+        ? sorted[mid]
+        : (sorted[mid - 1] + sorted[mid]) / 2;
+    };
+
     const totalCards = cards.length || 1;
-    const avgManaCost = validManaCards > 0 ? totalManaCost / validManaCards : 0;
+
+    const avgManaCostWithLands = totalCards > 0 ? totalManaCostAll / totalCards : 0;
+    const avgManaCostWithoutLands = validManaCards > 0 ? totalManaCost / validManaCards : 0;
+
+    const medianManaCostWithLands = calculateMedian(allManaCosts);
+    const medianManaCostWithoutLands = calculateMedian(nonlandManaCosts);
+
+    const totalManaValue = totalManaCostAll;
 
     // Calculate curve quality (how well distributed the curve is)
     const idealCurve = [0.05, 0.15, 0.25, 0.25, 0.15, 0.10, 0.05, 0.05]; // Rough ideal percentages
@@ -473,13 +513,17 @@ const DeckStatistics = ({ deck, format, deckAnalysis }) => {
       rarityCounts,
       manaSymbolCounts,
       totalCards,
-      avgManaCost,
-      keywords: Array.from(keywords.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10),
-      powerToughnessDistribution,
+      avgManaCost: avgManaCostWithoutLands,
+      avgManaCostWithLands,
+      medianManaCostWithLands,
+      medianManaCostWithoutLands,
+      totalManaValue,
       curveDeviation,
       nonlandCards: nonlandCards.length,
       landCards: totalCards - nonlandCards.length,
-      creatureStats
+      creatureStats,
+      keywords: Array.from(keywords.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10),
+      powerToughnessDistribution,
     };
   }, [deck]);
 
@@ -498,7 +542,7 @@ const DeckStatistics = ({ deck, format, deckAnalysis }) => {
 
   const manaSymbolChartData = Object.entries(analysis.manaSymbolCounts)
     .filter(([_, count]) => count > 0)
-    .map(([symbol, count]) => ({ label: symbol, value: count }));
+    .map(([symbol, count]) => ({ label: manaSymbolNames[symbol] || symbol, value: count }));
 
   const powerToughnessChartData = Object.entries(analysis.powerToughnessDistribution)
     .filter(([_, count]) => count > 0)
@@ -513,6 +557,16 @@ const DeckStatistics = ({ deck, format, deckAnalysis }) => {
     { label: 'Non-lands', value: analysis.nonlandCards, color: 'text-purple-500', icon: <SwordsIcon size={22} /> },
     { label: 'Lands', value: analysis.landCards, color: 'text-amber-500', icon: <Mountain size={22} /> },
   ];
+
+  // Header content for Mana Curve card
+  const manaCurveHeader = (
+    <div className="text-right">
+      <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center justify-end gap-4">
+        <span>Avg MV: <span className="font-semibold text-gray-800 dark:text-gray-200">{analysis.avgManaCostWithLands.toFixed(2)}</span> / <span className="font-semibold">{analysis.avgManaCost.toFixed(2)}</span></span>
+        <span>Total MV: <span className="font-semibold text-gray-800 dark:text-gray-200">{analysis.totalManaValue}</span></span>
+      </div>
+    </div>
+  );
 
   return (
     <div className="widget deck-statistics space-y-4 p-4 bg-gray-100 dark:bg-zinc-900 rounded-lg">
@@ -564,7 +618,15 @@ const DeckStatistics = ({ deck, format, deckAnalysis }) => {
         
         {/* Mana Curve Section */}
         <StatCard title="Mana Curve" icon={<BarChart3 size={20} />} className="lg:col-span-2">
+        <div className="mt-4 pt-4 border-t border-gray-200 dark:border-zinc-700">
+            <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center justify-center gap-4">
+              <span>Avg Mana Value: <span className="font-semibold text-gray-800 dark:text-gray-200">{analysis.avgManaCostWithLands.toFixed(2)}</span> / <span className="font-semibold"> Without Lands: {analysis.avgManaCost.toFixed(2)}</span></span>
+              <span>Total Mana Value: <span className="font-semibold text-gray-800 dark:text-gray-200">{analysis.totalManaValue}</span></span>
+            </div>
+          </div>
           <ManaCurveChart data={analysis.manaCurveCounts} title="" />
+          {/* Mana value statistics below the chart */}
+          
           <AnimatePresence>
             {showAdvanced && (
               <motion.div
