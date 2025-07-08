@@ -43,7 +43,7 @@
     "electron-log": "^5.1.6",
     "electron-squirrel-startup": "^1.0.1",
     "electron-updater": "^6.2.3",
-    "framer-motion": "^12.18.1",
+    "framer-motion": "^12.23.0",
     "lodash.debounce": "^4.0.8",
     "lucide-react": "^0.517.0",
     "python-shell": "^5.0.0",
