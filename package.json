@@ -24,6 +24,7 @@
     "electron:publish": "npm run build && electron-builder build --publish=always",
     "electron:publish:win": "npm run build && electron-builder build --win --publish=always",
     "download-model": "node scripts/download-model.js",
+    "download-model:force": "node scripts/download-model.js --force",
     "postinstall": "npm run download-model"
   },
   "dependencies": {

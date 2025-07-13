@@ -77,7 +77,37 @@ function SemanticSearchV2({
         searchTime: `${searchTime}ms`
       });
 
-      setResults(finalResults);
+      // Fetch image URLs for each result
+      console.log('Fetching image URLs for search results...');
+      const resultsWithImages = await Promise.all(
+        finalResults.map(async (result) => {
+          try {
+            // For collection cards, they might already have image data
+            if (result.scryfallData && result.scryfallData.image_uris) {
+              return {
+                ...result,
+                image_uri: result.scryfallData.image_uris.normal || result.scryfallData.image_uris.large
+              };
+            }
+            
+            // For semantic search results, fetch the full card data
+            const fullCard = await window.electronAPI.bulkDataFindCard(result.name);
+            if (fullCard && fullCard.image_uris) {
+              return {
+                ...result,
+                image_uri: fullCard.image_uris.normal || fullCard.image_uris.large
+              };
+            }
+            
+            return result; // Return without image if not found
+          } catch (error) {
+            console.warn(`Failed to fetch image for card: ${result.name}`, error);
+            return result; // Return without image on error
+          }
+        })
+      );
+
+      setResults(resultsWithImages);
 
       // Notify parent if callback provided
       if (typeof onResults === 'function') {
@@ -233,9 +263,9 @@ function SemanticSearchV2({
                   card={{
                     id: `semantic-${card.name}-${index}`,
                     name: card.name,
-                            mana_cost: card.manaCost || card.mana_cost,
-        type_line: card.type || card.type_line,
-        oracle_text: card.text || card.oracle_text,
+                    mana_cost: card.manaCost || card.mana_cost,
+                    type_line: card.type || card.type_line,
+                    oracle_text: card.text || card.oracle_text,
                     image_uris: card.image_uri ? { normal: card.image_uri } : null,
                   }}
                   disableModal={true}
