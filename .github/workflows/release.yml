@@ -105,77 +105,43 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
-      # 9- Build complete application with resources (matches local build process)
-      - name: Build complete application with resources
+      # 9- Build and publish with electron-builder for auto-updates
+      - name: Build and publish with electron-builder
         env:
-          DEBUG: electron-forge:*
-        run: npm run build:complete
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run electron:publish:win
 
-      # 10- Verify packaged output
-      - name: Verify packaged output
-        shell: powershell
-        run: |
-          # Check if the packaged app exists
-          if (Test-Path "out/desktopmtg-win32-x64") {
-            Write-Host "SUCCESS: Packaged app found"
-            
-            # Check if database was packaged
-            if (Test-Path "out/desktopmtg-win32-x64/resources/Database/database.sqlite") {
-              $dbSize = (Get-Item "out/desktopmtg-win32-x64/resources/Database/database.sqlite").Length / 1MB
-              Write-Host "SUCCESS: Database packaged: $([math]::Round($dbSize, 2)) MB"
-            } else {
-              Write-Error "ERROR: Database not found in packaged app"
-              exit 1
-            }
-            
-            # Check if HTML files were packaged
-            if (Test-Path "out/desktopmtg-win32-x64/resources/dist/index.html") {
-              Write-Host "SUCCESS: HTML files packaged"
-            } else {
-              Write-Error "ERROR: HTML files not found in packaged app"
-              exit 1
-            }
-            
-            # Calculate total size
-            $totalSize = (Get-ChildItem -Path "out/desktopmtg-win32-x64" -Recurse | Measure-Object -Property Length -Sum).Sum / 1GB
-            Write-Host "INFO: Total packaged size: $([math]::Round($totalSize, 2)) GB"
-          } else {
-            Write-Error "ERROR: Packaged app not found"
-            exit 1
-          }
-
-      # 11- Create distributables (installers)
-      - name: Create distributables
-        env:
-          DEBUG: electron-forge:*
-        run: npm run make
-
-      # 12- Verify distributables were created
+      # 10- Verify distributables were created
       - name: Verify distributables
         shell: powershell
         run: |
-          Write-Host "Listing all files in out/make directory:"
-          if (Test-Path "out/make") {
-            Get-ChildItem -Path "out/make" -Recurse | Format-Table Name, Length, FullName
+          Write-Host "Listing all files in dist-electron directory:"
+          if (Test-Path "dist-electron") {
+            Get-ChildItem -Path "dist-electron" -Recurse | Format-Table Name, Length, FullName
             
             # Check for setup executable
-            if (Get-ChildItem -Path "out/make" -Recurse -Filter "*.exe" | Where-Object { $_.Name -like "*Setup*" }) {
+            if (Get-ChildItem -Path "dist-electron" -Recurse -Filter "*.exe" | Where-Object { $_.Name -like "*Setup*" -or $_.Name -like "*DesktopMTG*" }) {
               Write-Host "SUCCESS: Setup executable found"
             } else {
               Write-Warning "Setup executable not found"
             }
             
             # Check for ZIP file
-            if (Get-ChildItem -Path "out/make" -Recurse -Filter "*.zip") {
+            if (Get-ChildItem -Path "dist-electron" -Recurse -Filter "*.zip") {
               Write-Host "SUCCESS: ZIP distribution found"
             } else {
               Write-Warning "ZIP distribution not found"
             }
+            
+            # Check for latest.yml (required for auto-updates)
+            if (Get-ChildItem -Path "dist-electron" -Recurse -Filter "latest.yml") {
+              Write-Host "SUCCESS: latest.yml found (auto-update metadata)"
+            } else {
+              Write-Warning "latest.yml not found - auto-updates may not work"
+            }
           } else {
-            Write-Error "ERROR: out/make directory not found"
+            Write-Error "ERROR: dist-electron directory not found"
             exit 1
           }
 
-      # 13- Publish → creates/updates GitHub Release & uploads artifacts
-      - name: Publish Electron app to GitHub Release
-        run: npm run publish
+      # Note: electron-builder with --publish=always automatically creates GitHub release and uploads artifacts

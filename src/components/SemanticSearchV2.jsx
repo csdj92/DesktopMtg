@@ -17,6 +17,14 @@ function SemanticSearchV2({
   const [selectedCard, setSelectedCard] = useState(null);
   const [cardDetailLoading, setCardDetailLoading] = useState(false);
   const [fullCardCache, setFullCardCache] = useState(new Map());
+  const [modelProgress, setModelProgress] = useState(null);
+
+  useEffect(() => {
+    if (window.electronAPI?.onSemanticModelProgress) {
+      const handler = (p) => setModelProgress(p);
+      window.electronAPI.onSemanticModelProgress(handler);
+    }
+  }, []);
 
   const defaultPlaceholder = "Describe a card (e.g., 'flying creatures that cost 3 mana')";
 
@@ -41,6 +49,7 @@ function SemanticSearchV2({
 
       // If collectionCards are provided, filter & map results to that subset
       if (Array.isArray(collectionCards) && collectionCards.length > 0) {
+        // console.log('Filtering results to collection cards:', collectionCards.length);
         const nameToDistance = new Map();
         searchResults.forEach(r => {
           // Use lowercase for case-insensitive match
@@ -198,9 +207,11 @@ function SemanticSearchV2({
       {/* Loading State */}
       {isLoading && (
         <div className="loading-state">
-          <div className="spinner"></div>
-          <p>Searching for: "{query}"</p>
-          <small>This may take a few seconds...</small>
+          {modelProgress !== null ? (
+            <p>Downloading model: {(modelProgress * 100).toFixed(1)}%</p>
+          ) : (
+            <p>Searching...</p>
+          )}
         </div>
       )}
 

@@ -1,4 +1,12 @@
 provider: github
 owner: csdj92
 repo: DesktopMtg
-updaterCacheDirName: desktopmtg-updater 
+updaterCacheDirName: desktopmtg-updater
+publishAutoUpdate: true
+# Optional: Add update channel support
+# channel: latest
+# Optional: Add request timeout
+# timeout: 60000
+# Optional: Add retry configuration
+# requestHeaders:
+#   User-Agent: "DesktopMTG-Updater" 

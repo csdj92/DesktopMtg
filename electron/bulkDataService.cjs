@@ -18,6 +18,7 @@ const SCRYFALL_BULK_API = 'https://api.scryfall.com/bulk-data';
 const BULK_DATA_DIR = path.join(app.getPath('userData'), 'scryfall-data');
 const CARDS_FILE = path.join(BULK_DATA_DIR, 'cards.json');
 const DATABASE_FILE = resolveDatabasePath();
+console.log('[bulkDataService] Using database at:', DATABASE_FILE);
 const METADATA_FILE = path.join(BULK_DATA_DIR, 'metadata.json');
 
 // Check every 7 days for updates
@@ -45,7 +46,8 @@ class BulkDataService {
 
   async initialize() {
     try {
-      console.log('Initializing bulk data service with static database...');
+      console.log('Initializing bulk data service...');
+      console.log(`[bulkDataService] Database will be located at: ${DATABASE_FILE}`);
 
       // Ensure data directory exists
       await fs.mkdir(BULK_DATA_DIR, { recursive: true });
@@ -60,14 +62,28 @@ class BulkDataService {
       this.cardCount = await this.getCardCount();
 
       this.initialized = true;
-      console.log(`Bulk data initialized with ${this.cardCount} cards from existing database.`);
+      console.log(`Bulk data initialized with ${this.cardCount} cards from user database.`);
 
     } catch (error) {
-      console.error('Failed to initialize bulk data service:', error);
+      console.error('[bulkDataService] Failed to initialize bulk data service:', error);
+      console.error('Database file path:', DATABASE_FILE);
+      
+      // Broadcast error to UI
+      this._broadcast('bulk-data-error', {
+        message: 'Failed to initialize database. Please restart the application.',
+        error: error.message
+      });
     }
   }
 
   async initializeDatabase() {
+    // Check if database file exists
+    if (!fsSync.existsSync(DATABASE_FILE)) {
+      throw new Error(`Database file not found at: ${DATABASE_FILE}. Please ensure the database is properly bundled with the application.`);
+    }
+
+    console.log(`Opening database at: ${DATABASE_FILE}`);
+    
     this.db = await open({
       filename: DATABASE_FILE,
       driver: sqlite3.Database
@@ -89,6 +105,7 @@ class BulkDataService {
       // Ensure optimized indexes exist for fast card lookups
       await this.ensureOptimizedIndexes();
     } else {
+      console.warn('No cards table found - this may be an empty database. Creating tables...');
       // Fallback: Create cards table if it doesn't exist (for backward compatibility)
       await this.db.exec(`
         CREATE TABLE IF NOT EXISTS cards (
@@ -1152,15 +1169,16 @@ class BulkDataService {
       // New schema properties (camelCase)
       manaCost: row.manaCost,
       manaValue: row.manaValue,
-      type: row.type,
+      type: row.type_line || row.type || row.types,
       text: row.text,
       setCode: row.setCode,
       number: row.number,
+      supertypes: row.supertypes,
 
       // Legacy properties (snake_case) for backwards compatibility
       mana_cost: row.manaCost,
       cmc: row.manaValue || row.cmc,
-      type_line: row.type || row.types,
+      type_line: row.type_line || row.type || row.types,
       oracle_text: row.text || row.originalText,
       set: row.setCode,
       set_code: row.setCode,

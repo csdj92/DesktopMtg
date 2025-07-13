@@ -10,11 +10,11 @@ export default defineConfig({
     renderer({
       nodeIntegration: true,
       resolve: {
-        ' @xenova/transformers': {
-          type: 'cjs'
+        '@xenova/transformers': {
+          type: 'esm'
         },
         '@lancedb/lancedb': {
-          type: 'cjs'
+          type: 'esm'
         }
       }
     })
@@ -46,6 +46,9 @@ export default defineConfig({
       // Ignore transient SQLite files that change during imports (prevents dev-page reload)
       ignored: ['**/Database/**']
     }
+  },
+  optimizeDeps: {
+    exclude: ['@xenova/transformers', '@lancedb/lancedb']
   },
   // Add specific settings for production build
   define: {

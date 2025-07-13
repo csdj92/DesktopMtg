@@ -3,15 +3,60 @@ const fs = require('fs');
 const { app } = require('electron');
 
 /**
- * Returns the absolute path to `Database/database.sqlite` no matter how the app
- * is packaged (asar on/off) or whether it is running from source.
+ * Returns the absolute path to the writable database in the user's AppData directory.
+ * If the database doesn't exist there, it copies it from the bundled resources.
  *
- * Resolution order:
- * 1. Extra-resource copy at `<resources>/Database/database.sqlite` (preferred – writable)
- * 2. Plain-copy inside `<resources>/app/Database/database.sqlite` when `asar=false`
- * 3. Source tree path `<repo>/Database/database.sqlite` when running in dev
+ * This ensures the database is always writable by copying it to:
+ * - Windows: %APPDATA%/DesktopMTG/Database/database.sqlite
+ * - macOS: ~/Library/Application Support/DesktopMTG/Database/database.sqlite  
+ * - Linux: ~/.config/DesktopMTG/Database/database.sqlite
  */
 function resolveDatabasePath() {
+  // Get the user data directory (AppData on Windows, ~/Library/Application Support on macOS, ~/.config on Linux)
+  const userDataDir = app.getPath('userData');
+  const userDbDir = path.join(userDataDir, 'Database');
+  const userDbPath = path.join(userDbDir, 'database.sqlite');
+
+  // If the database already exists in the user directory, use it
+  if (fs.existsSync(userDbPath)) {
+    console.log('[dbPathResolver] Database already exists in user directory:', userDbPath);
+    return userDbPath;
+  }
+
+  // Database doesn't exist in user directory, so we need to copy it from resources
+  console.log('[dbPathResolver] Database not found in user directory, copying from resources...');
+
+  // Find the source database from bundled resources
+  const sourceDbPath = findBundledDatabasePath();
+  console.log('[dbPathResolver] Attempting to copy database from', sourceDbPath, 'to', userDbPath);
+  
+  if (!sourceDbPath) {
+    console.error('[dbPathResolver] Could not find bundled database in resources!');
+    // Return the user path anyway so the app can create a new database if needed
+    return userDbPath;
+  }
+
+  try {
+    // Ensure the user database directory exists
+    fs.mkdirSync(userDbDir, { recursive: true });
+
+    // Copy the database from resources to user directory
+    fs.copyFileSync(sourceDbPath, userDbPath);
+    
+    console.log('[dbPathResolver] Database copy success:', fs.existsSync(userDbPath));
+    return userDbPath;
+  } catch (error) {
+    console.error('[dbPathResolver] Failed to copy database to user directory:', error);
+    // Fallback to the source path (may be read-only but better than nothing)
+    return sourceDbPath;
+  }
+}
+
+/**
+ * Finds the bundled database in the app resources.
+ * Checks multiple locations depending on how the app is packaged.
+ */
+function findBundledDatabasePath() {
   const candidates = [];
 
   // 1) When the DB is shipped via `extraResource` it lives beside Electron's
@@ -33,13 +78,14 @@ function resolveDatabasePath() {
   for (const p of candidates) {
     try {
       if (fs.existsSync(p)) {
+        console.log(`Found bundled database at: ${p}`);
         return p;
       }
     } catch {}
   }
 
-  // Nothing exists yet → return first candidate so callers create it there
-  return candidates[0];
+  console.warn('No bundled database found in any of the expected locations:', candidates);
+  return null;
 }
 
 module.exports = { resolveDatabasePath }; 

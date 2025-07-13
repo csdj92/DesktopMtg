@@ -43,7 +43,7 @@ function App() {
   const [collectionSearchMode, setCollectionSearchMode] = useState('regular'); // 'regular' or 'semantic'
   
   // UI state
-  const [activeTab, setActiveTab] = useState('collections') // 'collections', 'search', 'semantic-search', 'deckbuilder', or 'import'
+  const [activeTab, setActiveTab] = useState('collections') // 'collections', 'search', 'semantic-search', 'deckbuilder', 'hand-simulator', 'import', or 'synergy'
   const [selectedSet, setSelectedSet] = useState(null);
   const [isSetBrowserOpen, setIsSetBrowserOpen] = useState(false);
 
@@ -979,6 +979,8 @@ function App() {
           <DeckBuilder />
         ) : activeTab === 'hand-simulator' ? (
           <HandSimulator />
+        ) : activeTab === 'synergy' ? (
+          <RerankerDemo />
         ) : (
           <div className="import-view">
             <CollectionManager />

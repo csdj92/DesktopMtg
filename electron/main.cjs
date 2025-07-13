@@ -7,11 +7,12 @@ const collectionImporter = require('./collectionImporter.cjs');
 const { spawnSync } = require('child_process');
 const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
+const { buildGreedyCommanderDeck } = require('./reranker/deckGenerator.cjs');
+const rulesEngine = require('./rulesEngine.cjs');
 // const { PythonShell } = require('python-shell'); // COMMENTED OUT: No longer using Python builder
 
 // Configure app paths before ready event to avoid cache permission issues
-const userDataPath = path.join(require('os').homedir(), 'AppData', 'Local', 'DesktopMTG');
-app.setPath('userData', userDataPath);
+const userDataPath = app.getPath('userData');
 app.setPath('crashDumps', path.join(userDataPath, 'crashDumps'));
 
 // Disable hardware acceleration before the app is ready.
@@ -170,14 +171,23 @@ ipcMain.handle('collection-delete', (event, collectionName) => {
 });
 
 ipcMain.handle('collection-add-card', async (event, collectionName, cardData) => {
+  if (!collectionImporter.db) {
+    return { success: false, error: 'Collection database not ready. Please try again in a moment.' };
+  }
   return collectionImporter.addCard(collectionName, cardData);
 });
 
 ipcMain.handle('collection-update-card-quantity', async (event, collectionName, cardKey, newQty) => {
+  if (!collectionImporter.db) {
+    return { success: false, error: 'Collection database not ready. Please try again in a moment.' };
+  }
   return collectionImporter.updateCardQuantity(collectionName, cardKey, newQty);
 });
 
 ipcMain.handle('collection-delete-card', async (event, collectionName, cardKey) => {
+  if (!collectionImporter.db) {
+    return { success: false, error: 'Collection database not ready. Please try again in a moment.' };
+  }
   return collectionImporter.deleteCard(collectionName, cardKey);
 });
 
@@ -589,6 +599,11 @@ const isCardInColorIdentity = (card, commanderId) => {
   return card.color_identity.every(color => commanderId.has(color));
 };
 
+// Enhanced deck validation using rules engine
+const validateDeckWithRules = (deck, format) => {
+  return rulesEngine.validateDeck(deck, format);
+};
+
 // Helper function to rerank cards based on deck synergy
 const rerankCardsByDeckSynergy = (cards, deck, formatName) => {
   if (!cards || cards.length === 0) return [];
@@ -666,17 +681,36 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName) => {
       score += curveNeeds[cmcKey] * 80; // Higher bonus for curve needs
     }
     
-    // Card type synergy
+    // Tribal synergy bonuses
     const cardTypeLine = card.type_line || card.type || '';
     if (cardTypeLine.toLowerCase().includes('creature')) {
-      // Check for tribal synergies
-      allDeckCards.forEach(deckCard => {
-        const deckCardText = deckCard.oracle_text || deckCard.text || '';
-        if (deckCardText.toLowerCase().includes('creature type') || 
-            deckCardText.toLowerCase().includes('choose a creature type')) {
-          score += 15; // Tribal deck bonus
-        }
-      });
+      // Extract creature types from this card
+      const typeMatch = cardTypeLine.match(/creature\s+—\s+(.+)/i);
+      if (typeMatch) {
+        const cardTribes = typeMatch[1].split(' ').map(tribe => 
+          tribe.replace(/[^a-zA-Z]/g, '').toLowerCase()
+        ).filter(tribe => tribe.length > 2);
+        
+        // Check if this card matches any of the deck's tribal themes
+        cardTribes.forEach(cardTribe => {
+          allDeckCards.forEach(deckCard => {
+            const deckTypeLine = (deckCard.type_line || deckCard.type || '').toLowerCase();
+            if (deckTypeLine.includes('creature') && deckTypeLine.includes(cardTribe)) {
+              score += 25; // Strong tribal synergy bonus
+            }
+          });
+        });
+      }
+      
+      // Check for tribal support cards (cards that care about creature types)
+      const cardText = (card.oracle_text || card.text || '').toLowerCase();
+      if (cardText.includes('creature type') || 
+          cardText.includes('choose a creature type') ||
+          cardText.includes('creatures you control') ||
+          cardText.includes('creatures of the chosen type') ||
+          cardText.includes('other') && cardText.includes('creatures')) {
+        score += 20; // Tribal support card bonus
+      }
     }
     
     // Keyword synergy bonuses
@@ -894,9 +928,15 @@ const analyzeDeckForQuery = (deck, formatName) => {
     if (typeLine.includes('creature')) {
       const typeMatch = typeLine.match(/creature\s+—\s+(.+)/);
       if (typeMatch) {
+        // Split by spaces and clean up each type
         typeMatch[1].split(' ').forEach(tribe => {
-          if (tribe.length > 2) {
-            tribes.set(tribe, (tribes.get(tribe) || 0) + 1);
+          // Clean up the tribe name (remove punctuation, make lowercase)
+          const cleanTribe = tribe.replace(/[^a-zA-Z]/g, '').toLowerCase();
+          // Only count meaningful creature types (longer than 2 chars)
+          if (cleanTribe.length > 2) {
+            // Capitalize first letter for consistency
+            const formattedTribe = cleanTribe.charAt(0).toUpperCase() + cleanTribe.slice(1);
+            tribes.set(formattedTribe, (tribes.get(formattedTribe) || 0) + 1);
           }
         });
       }
@@ -927,12 +967,12 @@ const analyzeDeckForQuery = (deck, formatName) => {
     .slice(0, 3)
     .map(([theme, count]) => ({ theme, count }));
 
-  // Get top tribes
+  // Get top tribes (require at least 4 cards of the same type to be considered tribal)
   const topTribes = [...tribes.entries()]
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 2)
-    .filter(([tribe, count]) => count >= 3)
-    .map(([tribe]) => tribe);
+    .slice(0, 3)
+    .filter(([tribe, count]) => count >= 4) // Increased threshold for tribal significance
+    .map(([tribe, count]) => ({ tribe, count }));
 
   // Get top keywords
   const topKeywords = [...keywords.entries()]
@@ -968,7 +1008,11 @@ const analyzeDeckForQuery = (deck, formatName) => {
 
   // Add tribal themes
   if (topTribes.length > 0) {
-    query += `. The deck focuses on ${topTribes.join(' and ')} tribal synergies`;
+    const tribalDescriptions = topTribes.map(({ tribe, count }) => {
+      const percentage = Math.round((count / totalCards) * 100);
+      return `${tribe} tribal (${count} cards, ${percentage}%)`;
+    });
+    query += `. The deck focuses on ${tribalDescriptions.join(' and ')} synergies`;
   }
 
   // Add primary themes
@@ -1019,6 +1063,62 @@ const analyzeDeckForQuery = (deck, formatName) => {
 
   return query;
 }
+
+// IPC handler for the new auto-build feature
+ipcMain.handle('auto-build-commander-deck', async () => {
+  try {
+    console.log('🤖 Starting Auto-Build Commander Deck process...');
+    
+    // 1. Get the user's full collection to serve as the card pool
+    const cardPool = await bulkDataService.getCollectedCards({ limit: 20000 });
+    if (!cardPool || cardPool.length < 100) {
+      throw new Error('Could not load a large enough card pool from the collection.');
+    }
+    console.log(`🤖 Loaded ${cardPool.length} cards from collection.`);
+
+    // 2. The deck building logic requires semantic scores. We'll generate them on the fly.
+    // To do this, we first need a "concept" which we'll derive from a randomly chosen commander.
+    const cmdrPool = cardPool.filter(c => {
+      const type = (c.type_line || c.type || '').toLowerCase();
+      const isLegendary = type.includes('legendary') && (type.includes('creature') || type.includes('background'));
+
+      // Commander legality might be "legal", "Legal", or undefined. Treat undefined or any case-insensitive
+      // "legal" / "restricted" as allowable.
+      const legalStatus = c.legalities?.commander;
+      const notBanned = !legalStatus || ["legal", "restricted"].includes(String(legalStatus).toLowerCase());
+
+      return isLegendary && notBanned;
+    });
+    if (cmdrPool.length === 0) throw new Error("No valid commanders found in collection.");
+    const commanderForQuery = cmdrPool[Math.floor(Math.random() * cmdrPool.length)];
+
+    // 3. Generate a query and get semantic scores for the whole pool based on that commander
+    const query = analyzeDeckForQuery({ commanders: [commanderForQuery], mainboard: [] }, 'commander');
+    const allSemanticResults = await bulkDataService.searchCardsSemantic(query, { limit: 90000 });
+    
+    const semanticScoreMap = new Map();
+    allSemanticResults.forEach(result => {
+      semanticScoreMap.set(result.name, 1 - (result._distance || result.distance || 0));
+    });
+
+    // 4. Enrich the entire card pool with these scores.
+    const enrichedCardPool = cardPool.map(card => ({
+      ...card,
+      semantic_score: semanticScoreMap.get(card.name) || 0,
+    }));
+    console.log(`🤖 Enriched card pool with ${semanticScoreMap.size} semantic scores.`);
+
+    // 5. Run the greedy builder with the enriched pool
+    const { deck, synergy } = buildGreedyCommanderDeck(enrichedCardPool, 5);
+
+    console.log(`🤖 Auto-Build complete. Best synergy score: ${synergy}`);
+    return { success: true, deck, synergy };
+
+  } catch (error) {
+    console.error('❌ Error in auto-build-commander-deck:', error);
+    return { success: false, error: error.message, deck: null };
+  }
+});
 
 // Deck Recommendations
 ipcMain.handle('get-deck-recommendations', async (event, { deck, formatName }) => {
@@ -1089,7 +1189,7 @@ ipcMain.handle('get-deck-recommendations', async (event, { deck, formatName }) =
     });
 
     // 7. Check if semantic search is available
-    const semanticSearchInitialized = await bulkDataService.ensureSemanticSearchInitialized();
+    const semanticSearchInitialized = true;
     console.log('Semantic search initialized:', semanticSearchInitialized);
 
     let scoredCards = [];
@@ -1561,4 +1661,138 @@ ipcMain.handle('test-semantic-search', async (event, query = 'lightning bolt') =
     console.error('❌ Test semantic search error:', error);
     return { error: error.message, results: [] };
   }
+});
+
+// Debug path resolution
+ipcMain.handle('debug-semantic-paths', async () => {
+  console.log('🔍 Debugging semantic search paths...');
+  
+  try {
+    const { resolveVectorDbPath } = require('./vectordbResolver.cjs');
+    const { resolveCachePath } = require('./cacheResolver.cjs');
+    
+    const vectorDbPath = await resolveVectorDbPath();
+    const cachePath = await resolveCachePath();
+    
+    console.log('Vector DB path:', vectorDbPath);
+    console.log('Cache path:', cachePath);
+    
+    const fs = require('fs');
+    const vectorDbExists = fs.existsSync(vectorDbPath);
+    const cacheExists = fs.existsSync(cachePath);
+    
+    console.log('Vector DB exists:', vectorDbExists);
+    console.log('Cache exists:', cacheExists);
+    
+    let vectorDbContents = [];
+    if (vectorDbExists) {
+      try {
+        vectorDbContents = fs.readdirSync(vectorDbPath);
+        console.log('Vector DB contents:', vectorDbContents);
+      } catch (error) {
+        console.error('Error reading vector DB contents:', error);
+      }
+    }
+    
+    return {
+      vectorDbPath,
+      cachePath,
+      vectorDbExists,
+      cacheExists,
+      vectorDbContents
+    };
+  } catch (error) {
+    console.error('❌ Debug paths error:', error);
+    return { error: error.message };
+  }
+});
+
+// Debug worker initialization
+ipcMain.handle('debug-worker-init', async () => {
+  console.log('🔍 Debugging worker initialization...');
+  
+  try {
+    const semanticSearchService = require('./semanticSearch.cjs');
+    
+    // Try to initialize the service
+    await semanticSearchService.initialize();
+    
+    return {
+      initialized: true,
+      message: 'Worker initialized successfully'
+    };
+  } catch (error) {
+    console.error('❌ Worker initialization error:', error);
+    return { 
+      initialized: false, 
+      error: error.message,
+      stack: error.stack 
+    };
+  }
+});
+
+// Rules Engine IPC Handlers
+// =================================================================
+
+// Check card legality in format
+ipcMain.handle('rules-check-card-legal', (event, card, format) => {
+  return rulesEngine.isCardLegal(card, format);
+});
+
+// Validate deck construction
+ipcMain.handle('rules-validate-deck', (event, deck, format) => {
+  return rulesEngine.validateDeck(deck, format);
+});
+
+// Get format information
+ipcMain.handle('rules-get-format-info', (event, format) => {
+  return rulesEngine.getFormatInfo(format);
+});
+
+// Get all supported formats
+ipcMain.handle('rules-get-supported-formats', () => {
+  return rulesEngine.getSupportedFormats();
+});
+
+// Get deck building suggestions
+ipcMain.handle('rules-get-deck-suggestions', (event, deck, format) => {
+  return rulesEngine.getDeckBuildingSuggestions(deck, format);
+});
+
+// Update banned/restricted lists
+ipcMain.handle('rules-update-banned-list', (event, format, cardName, action) => {
+  return rulesEngine.updateBannedList(format, cardName, action);
+});
+
+// Get color identity for cards
+ipcMain.handle('rules-get-color-identity', (event, cards) => {
+  const identity = rulesEngine.getColorIdentity(cards);
+  return Array.from(identity);
+});
+
+// Check if cards are within color identity
+ipcMain.handle('rules-check-color-identity', (event, cardColors, commanderIdentity) => {
+  const cardColorSet = new Set(cardColors);
+  const commanderColorSet = new Set(commanderIdentity);
+  return rulesEngine.isWithinColorIdentity(cardColorSet, commanderColorSet);
+});
+
+// Check if card has keyword
+ipcMain.handle('rules-check-keyword', (event, card, keyword) => {
+  return rulesEngine.hasKeyword(card, keyword);
+});
+
+// Check if card is basic land
+ipcMain.handle('rules-is-basic-land', (event, cardName) => {
+  return rulesEngine.isBasicLand(cardName);
+});
+
+// Analyze mana curve
+ipcMain.handle('rules-analyze-mana-curve', (event, cards) => {
+  return rulesEngine.analyzeManaCarve(cards);
+});
+
+// Analyze color balance
+ipcMain.handle('rules-analyze-color-balance', (event, cards) => {
+  return rulesEngine.analyzeColorBalance(cards);
 }); 

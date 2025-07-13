@@ -461,9 +461,10 @@ const DeckStatistics = ({ deck, format, deckAnalysis }) => {
       }
 
       // Keyword analysis - check both faces for keywords
+      const cardFaces = Array.isArray(card.card_faces) ? card.card_faces : [];
       const cardText = [
           (card.oracle_text || card.text || ''),
-          ...((card.card_faces || []).map(face => face.oracle_text || face.text || ''))
+          ...cardFaces.map(face => face.oracle_text || face.text || '')
       ].join('\n').toLowerCase();
       
       const commonKeywords = [

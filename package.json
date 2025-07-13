@@ -21,7 +21,15 @@
     "package:with-resources": "npm run package && node scripts/copy-resources-post.cjs",
     "make": "electron-forge make",
     "make:complete": "npm run build && npm run package:with-resources && npm run make",
-    "publish": "electron-forge publish"
+    "publish": "electron-forge publish",
+    "electron:build": "npm run build && electron-builder build",
+    "electron:build:win": "npm run build && electron-builder build --win",
+    "electron:build:mac": "npm run build && electron-builder build --mac",
+    "electron:build:linux": "npm run build && electron-builder build --linux",
+    "electron:publish": "npm run build && electron-builder build --publish=always",
+    "electron:publish:win": "npm run build && electron-builder build --win --publish=always",
+    "download-model": "node scripts/download-model.js",
+    "postinstall": "npm run download-model"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.21.0",
@@ -39,6 +47,7 @@
     "apache-arrow": "^18.1.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "color-name": "^2.0.0",
     "csv-parse": "^5.5.6",
     "electron-log": "^5.1.6",
     "electron-squirrel-startup": "^1.0.1",
@@ -77,6 +86,7 @@
     "concurrently": "^8.2.2",
     "cross-env": "^7.0.3",
     "electron": "^31.0.1",
+    "electron-builder": "^25.1.8",
     "eslint": "^9.25.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.19",
@@ -89,76 +99,115 @@
     "vite-plugin-electron-renderer": "^0.14.6",
     "wait-on": "^7.2.0"
   },
-  "config": {
-    "forge": {
-      "packagerConfig": {
-        "asar": false,
-        "extraResource": [
-          "./dist",
-          "./Database/",
-          "./vectordb",
-          "./app-update.yml"
-        ]
+  "build": {
+    "appId": "com.cjdavis.desktopmtg",
+    "productName": "DesktopMTG",
+    "asar": false,
+    "asarUnpack": [
+      "Database/**/*",
+      "vectordb/**/*",
+      "cache/**/*"
+    ],
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "Database/**/*",
+      "vectordb/**/*",
+      "cache/**/*",
+      "app-update.yml",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist",
+        "to": "dist"
       },
-      "rebuildConfig": {},
-      "makers": [
+      {
+        "from": "Database",
+        "to": "Database"
+      },
+      {
+        "from": "vectordb",
+        "to": "vectordb"
+      },
+      {
+        "from": "app-update.yml",
+        "to": "app-update.yml"
+      },
+      {
+        "from": "cache",
+        "to": "cache"
+      }
+    ],
+    "win": {
+      "target": [
         {
-          "name": "@electron-forge/maker-zip",
-          "platforms": [
-            "win32"
+          "target": "nsis",
+          "arch": [
+            "x64"
           ]
         },
         {
-          "name": "@electron-forge/maker-squirrel",
-          "platforms": [
-            "win32"
-          ],
-          "config": {
-            "name": "desktopmtg",
-            "setupExe": "DesktopMTG_Setup.exe",
-            "authors": "C.J Davis",
-            "description": "Desktop Magic: The Gathering collection manager and deck builder"
-          }
-        },
-        {
-          "name": "@electron-forge/maker-deb",
-          "platforms": [
-            "linux"
-          ],
-          "config": {}
-        },
-        {
-          "name": "@electron-forge/maker-rpm",
-          "platforms": [
-            "linux"
-          ],
-          "config": {}
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
         }
       ],
-      "plugins": [
+      "artifactName": "${productName}-${version}-win32-${arch}.${ext}"
+    },
+    "mac": {
+      "target": [
         {
-          "name": "@electron-forge/plugin-fuses",
-          "config": {
-            "version": "1",
-            "EnableCookieEncryption": true,
-            "EnableNodeOptionsEnvironmentVariable": true,
-            "EnableEmbeddedAsarIntegrityValidation": true
-          }
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
       ],
-      "publishers": [
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
+    },
+    "linux": {
+      "target": [
         {
-          "name": "@electron-forge/publisher-github",
-          "config": {
-            "repository": {
-              "owner": "csdj92",
-              "name": "DesktopMtg"
-            },
-            "prerelease": false,
-            "draft": false
-          }
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
         }
-      ]
+      ],
+      "artifactName": "${productName}-${version}-linux-${arch}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "csdj92",
+        "repo": "DesktopMtg",
+        "private": false
+      }
+    ],
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     }
   }
 }

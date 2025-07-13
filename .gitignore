@@ -30,22 +30,10 @@ out/
 # python-3.8.9-embed-amd64/*  # COMMENTED OUT - need Python for build
 resources/*
 *.md
-test-service.cjs
-test-database.js
-test-optimized-sets.cjs
-test-database.cjs
-test-collection.cjs
-test_getcollectedcards.cjs
-test_fdn24.cjs
-setup-git-aliases.ps1
-setup-git-aliases.bat
-test_collected_query.sql
-performance-test.cjs
-final-performance-test.cjs
-check-sets-table.cjs
-analyze-indexes.cjs
-check-tables.cjs
-debug_card_lookup.sql
+tests/*
 
 # Mock/test data - contains large files that exceed GitHub limits
 mock-userdata/
+
+dist-electron/*
+markdown/*

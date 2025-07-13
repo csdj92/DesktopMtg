@@ -13,9 +13,8 @@ const { Worker } = require('worker_threads');
 
 // --- FIX #1: Corrected the database directory name ---
 // The Python script created 'mtg_db', so we need to point to that folder.
-const userDataDir = app ? app.getPath('userData') : path.resolve(__dirname, '..', 'userData');
-const LANCE_DB_DIR = path.join(userDataDir, 'vectordb');
-const TABLE_NAME = 'magic_cards';
+const { resolveVectorDbPath } = require('./vectordbResolver.cjs');
+const { resolveCachePath } = require('./cacheResolver.cjs');
 
 class SemanticSearchService {
   constructor() {
@@ -37,6 +36,7 @@ class SemanticSearchService {
 
     this.initializationPromise = new Promise((resolve, reject) => {
       console.log('Initializing Semantic Search Worker...');
+      console.log('[SemanticSearch] Initializing worker...');
       this.worker = new Worker(path.join(__dirname, 'searchWorker.cjs'));
 
       const initTimeout = setTimeout(() => {
@@ -58,6 +58,16 @@ class SemanticSearchService {
           }
           this.taskQueue.delete(id);
         }
+        // Stream progress updates that don't belong to a specific task
+        if (type === 'model-progress' && payload && typeof payload.progress === 'number') {
+          console.log(`[SemanticSearch] Model download progress: ${(payload.progress * 100).toFixed(1)}%`);
+          try {
+            const { BrowserWindow } = require('electron');
+            BrowserWindow.getAllWindows().forEach(w => {
+              w.webContents.send('semantic-model-progress', payload.progress);
+            });
+          } catch {}
+        }
       });
 
       this.worker.on('error', (err) => {
@@ -77,30 +87,25 @@ class SemanticSearchService {
       // app is packaged it will be copied into the resources path – we handle both
       // cases here.
 
-      const isPackaged = app ? app.isPackaged : false;
-      // In packaged apps the `resources` directory becomes the base for static assets.
-      // During development the code lives two directories above this file.
-      const dbDirPath = isPackaged
-        ? path.join(process.resourcesPath, 'vectordb')
-        : path.resolve(__dirname, '..', 'vectordb');
+      resolveVectorDbPath().then(dbDirPath => {
+        resolveCachePath().then(cachePath => {
+          // Check if vectordb exists before initializing
+          const fs = require('fs');
+          if (!fs.existsSync(dbDirPath)) {
+            console.log('Vector database not found at:', dbDirPath);
+            console.log('Semantic search will be disabled');
+            this.isInitialized = false;
+            resolve();
+            return;
+          }
 
-      // Check if vectordb exists before initializing
-      const fs = require('fs');
-      if (!fs.existsSync(dbDirPath)) {
-        console.log('Vector database not found at:', dbDirPath);
-        console.log('Semantic search will be disabled');
-        this.isInitialized = false;
-        resolve();
-        return;
-      }
-
-      // Send the absolute path to the worker so it can connect to the database.
-      this.postMessage('initialize', { dbDirPath }).then(resolve).catch(reject);
-    });
-
-    return this.initializationPromise;
+          // Send the absolute paths to the worker so it can connect to the database and load the model.
+          this.postMessage('initialize', { dbDirPath, cachePath }).then(resolve).catch(reject);
+        }).catch(reject);
+      }).catch(reject);
+    }); 
   }
-  
+
   /**
    * Posts a message to the worker and returns a promise that resolves with the result.
    */
@@ -133,6 +138,7 @@ class SemanticSearchService {
         ...options
       };
       
+      console.log(`[SemanticSearch] Sending search query to worker: "${query}"`);
       return await this.postMessage('search', { query, options: searchOptions });
     } catch (error) {
       console.error('Error during semantic search communication:', error);
@@ -145,10 +151,21 @@ class SemanticSearchService {
    */
   terminate() {
     if (this.worker) {
-      this.worker.terminate();
-      this.worker = null;
-      this.initializationPromise = null;
-      console.log('Semantic Search Worker terminated.');
+      // Try graceful cleanup first
+      this.postMessage('cleanup', {}).catch(() => {
+        // If cleanup fails, force terminate
+        console.log('Cleanup message failed, force terminating worker');
+      }).finally(() => {
+        // Always terminate after a brief delay
+        setTimeout(() => {
+          if (this.worker) {
+            this.worker.terminate();
+            this.worker = null;
+            this.initializationPromise = null;
+            console.log('Semantic Search Worker terminated.');
+          }
+        }, 1000);
+      });
     }
   }
 

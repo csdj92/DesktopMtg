@@ -1081,6 +1081,36 @@ const DeckBuilder = () => {
     { i: 'right', x: 12, y: 0, w: 4, h: 22, minW: 2, minH: 8 }
   ];
 
+  const [autoBuildLoading, setAutoBuildLoading] = useState(false);
+
+  const handleAutoBuildCommander = useCallback(async () => {
+    if (autoBuildLoading) return;
+    if (format !== 'commander') {
+      alert('Auto build currently supports Commander format only.');
+      return;
+    }
+    setAutoBuildLoading(true);
+    try {
+      const result = await window.electronAPI.autoBuildCommanderDeck();
+      if (!result.success || !result.deck) {
+        throw new Error(result.error || 'Failed to generate a deck');
+      }
+
+      const { deck: generated, synergy } = result;
+
+      // Transform into DeckBuilder state shape
+      const transformedMainboard = (generated.mainboard || []).map(card => ({ card, quantity: 1 }));
+      setDeck({ commanders: generated.commanders || [], mainboard: transformedMainboard, sideboard: [] });
+      setRightPanelView('deck');
+      console.log('🛠️ Auto-built deck synergy score:', synergy?.toFixed?.(0));
+    } catch (err) {
+      console.error('Auto build error:', err);
+      alert('Auto build failed: ' + err.message);
+    } finally {
+      setAutoBuildLoading(false);
+    }
+  }, [autoBuildLoading, format]);
+
   return (
     <div className="deck-builder-container">
       {selectedCard && (
@@ -1427,6 +1457,9 @@ const DeckBuilder = () => {
                 onDelete={handleDeleteDeck}
                 onNew={handleNewDeck}
               />
+              <button className="auto-build-button" onClick={handleAutoBuildCommander} disabled={autoBuildLoading || ownedLoading}>
+                {autoBuildLoading ? 'Building Deck…' : 'Auto Build Commander Deck'}
+              </button>
               {memoizedDeckStats}
               <SpellbookExport deck={deck} />
             </div>

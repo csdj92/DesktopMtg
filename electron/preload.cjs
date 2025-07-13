@@ -60,6 +60,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getCardCount: () => ipcRenderer.invoke('get-card-count'),
   searchCards: (searchTerm) => ipcRenderer.invoke('search-cards', searchTerm),
   searchCardsSemantic: (query, options) => ipcRenderer.invoke('search-cards-semantic', query, options),
+  onSemanticModelProgress: (callback) => ipcRenderer.on('semantic-model-progress', (e, progress) => callback(progress)),
   testSemanticSearch: (query) => ipcRenderer.invoke('test-semantic-search', query),
   getCardsByIds: (ids) => ipcRenderer.invoke('get-cards-by-ids', ids),
   importCollection: (filePath) => ipcRenderer.invoke('import-collection', filePath),
@@ -68,6 +69,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
   getDeckRecommendations: (deck) => ipcRenderer.invoke('get-deck-recommendations', deck),
+  autoBuildCommanderDeck: () => ipcRenderer.invoke('auto-build-commander-deck'),
 
   // Set browsing
   listSets: () => ipcRenderer.invoke('list-sets'),

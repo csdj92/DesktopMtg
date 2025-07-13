@@ -8,6 +8,7 @@ const { resolveDatabasePath } = require('./dbPathResolver.cjs');
 
 // Use the same database as the bulk data service
 const DATABASE_FILE = resolveDatabasePath();
+console.log('[collectionImporter] Using database at:', DATABASE_FILE);
 
 class CollectionImporter {
   constructor() {
@@ -81,7 +82,8 @@ class CollectionImporter {
       console.log('Collection database initialized');
       return true;
     } catch (error) {
-      console.error('Failed to initialize collection database:', error);
+      console.error('[collectionImporter] Failed to initialize collection database:', error);
+      console.error('Database file path:', DATABASE_FILE);
       return false;
     }
   }
