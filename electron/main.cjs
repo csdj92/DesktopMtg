@@ -9,6 +9,22 @@ const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
 const { buildGreedyCommanderDeck } = require('./reranker/deckGenerator.cjs');
 const rulesEngine = require('./rulesEngine.cjs');
+const { weights } = require('./reranker/weights.cjs');
+const settingsManager = require('./settingsManager.cjs');
+const { loadElectronLlm } = require('@electron/llm');
+const { 
+  isCardInColorIdentity, 
+  rerankCardsByDeckSynergy, 
+  calculateKeywordSimilarity, 
+  calculateSmartHybridScore,
+  normalizeStrategyScores,
+  extractDeckInsights, 
+  analyzeDeckForQuery,
+  // 🔧 NEW: Import advanced pattern analysis functions
+  parseOracleTextPatterns,
+  calculateMechanicalSynergy,
+  enhanceCardsWithMechanicalSynergy
+} = require('./deckRecommendationEngine.cjs');
 // const { PythonShell } = require('python-shell'); // COMMENTED OUT: No longer using Python builder
 
 // Configure app paths before ready event to avoid cache permission issues
@@ -32,6 +48,39 @@ process.on('uncaughtException', (error) => {
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
   log.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+// Settings Management
+// =================================================================
+
+// IPC Handlers for Settings
+ipcMain.handle('get-settings', async () => {
+  return settingsManager.getSettings();
+});
+
+ipcMain.handle('save-settings', async (event, newSettings) => {
+  return await settingsManager.saveSettings(newSettings);
+});
+
+ipcMain.handle('reset-settings', async () => {
+  return await settingsManager.resetSettings();
+});
+
+// 🧪 Strategy Testing IPC Handlers
+ipcMain.handle('set-active-strategy', async (event, strategy) => {
+  const settings = settingsManager.getSettings();
+  settings.recommendations.activeStrategy = strategy;
+  await settingsManager.saveSettings(settings);
+  console.log(`🔄 Active strategy changed to: ${strategy}`);
+  return { success: true, activeStrategy: strategy };
+});
+
+ipcMain.handle('get-available-strategies', () => {
+  const strategies = [
+    'primary_fallback', 'weighted_70_30', 'weighted_50_50', 'weighted_30_70',
+    'max_score', 'average', 'multiplicative', 'additive', 'semantic_only', 'keyword_only'
+  ];
+  return { strategies, activeStrategy: settingsManager.getSettings().recommendations.activeStrategy };
 });
 
 // IPC Handlers
@@ -226,6 +275,15 @@ ipcMain.handle('collection-clear-all', async () => {
 
 // Deck Management
 // =================================================================
+
+// NEW: Expose Rules Engine
+ipcMain.handle('deck-validate', (event, deck, format) => {
+  if (!rulesEngine) {
+    console.error('Rules engine is not initialized!');
+    return { valid: false, errors: ['Rules engine not available.'] };
+  }
+  return rulesEngine.validateDeck(deck, format);
+});
 
 const decksDir = path.join(app.getPath('userData'), 'decks');
 
@@ -592,477 +650,10 @@ ipcMain.handle('deck-delete', async (event, filename) => {
   }
 });
 
-/// Helper function to check if a card's colors are within the commander's identity
-const isCardInColorIdentity = (card, commanderId) => {
-  if (!commanderId || commanderId.size === 0) return true;
-  if (!card.color_identity || card.color_identity.length === 0) return true;
-  return card.color_identity.every(color => commanderId.has(color));
-};
-
 // Enhanced deck validation using rules engine
 const validateDeckWithRules = (deck, format) => {
   return rulesEngine.validateDeck(deck, format);
 };
-
-// Helper function to rerank cards based on deck synergy
-const rerankCardsByDeckSynergy = (cards, deck, formatName) => {
-  if (!cards || cards.length === 0) return [];
-  
-  const allDeckCards = [...deck.mainboard, ...(deck.commanders || [])];
-  const deckText = allDeckCards.map(card => `${card.oracle_text || card.text || ''} ${card.type_line || card.type || ''}`).join(' ').toLowerCase();
-  
-  // Analyze deck themes for scoring
-  const deckThemes = {
-    graveyard: /graveyard|flashback|unearth|dredge|delve|escape|disturb/g,
-    counters: /\+1\/\+1|counter|proliferate|evolve|adapt|monstrosity/g,
-    tokens: /token|populate|convoke|create.*creature/g,
-    artifacts: /artifact|metalcraft|affinity|improvise/g,
-    spells: /instant|sorcery|storm|prowess|magecraft/g,
-    lifegain: /gain.*life|lifegain|lifelink/g,
-    sacrifice: /sacrifice|devour|exploit|emerge/g,
-    tribal: /choose.*type|tribal|changeling/g
-  };
-  
-  const deckThemeScores = {};
-  Object.entries(deckThemes).forEach(([theme, pattern]) => {
-    const matches = deckText.match(pattern);
-    deckThemeScores[theme] = matches ? matches.length : 0;
-  });
-  
-  // Calculate mana curve needs
-  const manaCurve = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, '7+': 0 };
-  allDeckCards.forEach(card => {
-    const cmc = card.manaValue || card.cmc || card.mana_value || 0;
-    if (cmc >= 7) manaCurve['7+']++;
-    else manaCurve[cmc]++;
-  });
-  
-  const totalDeckCards = allDeckCards.length || 1;
-  const curveNeeds = {};
-  Object.entries(manaCurve).forEach(([cost, count]) => {
-    const percentage = count / totalDeckCards;
-    // Ideal curve percentages (rough guidelines)
-    const idealPercentages = { 0: 0.05, 1: 0.15, 2: 0.20, 3: 0.20, 4: 0.15, 5: 0.10, 6: 0.08, '7+': 0.07 };
-    const ideal = idealPercentages[cost] || 0.05;
-    curveNeeds[cost] = Math.max(0, ideal - percentage); // Higher need = bigger gap
-  });
-  
-  // Score each card
-  const scoredCards = cards.map(card => {
-    let score = 0;
-    const cardText = `${card.oracle_text || card.text || ''} ${card.type_line || card.type || ''}`.toLowerCase();
-    const cardCMC = card.manaValue || card.cmc || card.mana_value || 0;
-    const cmcKey = cardCMC >= 7 ? '7+' : cardCMC.toString();
-    const cardName = (card.name || '').toLowerCase();
-    
-    // Add deterministic component based on card name for consistent ordering
-    const nameHash = cardName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    score += (nameHash % 100) / 100; // Small consistent boost (0-1 range)
-    
-    // Base semantic similarity score (preserve original ranking)
-    const semanticScore = card.semantic_score || (1 - (card._distance || card.distance || 0));
-    score += semanticScore * 100;
-    
-    // Theme synergy bonuses (improved calculation)
-    Object.entries(deckThemes).forEach(([theme, pattern]) => {
-      if (deckThemeScores[theme] > 0) {
-        const cardMatches = cardText.match(pattern);
-        if (cardMatches) {
-          // More sophisticated scoring based on theme prominence
-          const themeStrength = Math.min(deckThemeScores[theme] / totalDeckCards, 0.6); // Cap at 60%
-          const matchStrength = Math.min(cardMatches.length, 3); // Cap matches to prevent outliers
-          score += themeStrength * matchStrength * 150; // Higher multiplier for better separation
-        }
-      }
-    });
-    
-    // Mana curve filling bonus (improved)
-    if (curveNeeds[cmcKey] > 0.05) { // Only bonus if significant gap
-      score += curveNeeds[cmcKey] * 80; // Higher bonus for curve needs
-    }
-    
-    // Tribal synergy bonuses
-    const cardTypeLine = card.type_line || card.type || '';
-    if (cardTypeLine.toLowerCase().includes('creature')) {
-      // Extract creature types from this card
-      const typeMatch = cardTypeLine.match(/creature\s+—\s+(.+)/i);
-      if (typeMatch) {
-        const cardTribes = typeMatch[1].split(' ').map(tribe => 
-          tribe.replace(/[^a-zA-Z]/g, '').toLowerCase()
-        ).filter(tribe => tribe.length > 2);
-        
-        // Check if this card matches any of the deck's tribal themes
-        cardTribes.forEach(cardTribe => {
-          allDeckCards.forEach(deckCard => {
-            const deckTypeLine = (deckCard.type_line || deckCard.type || '').toLowerCase();
-            if (deckTypeLine.includes('creature') && deckTypeLine.includes(cardTribe)) {
-              score += 25; // Strong tribal synergy bonus
-            }
-          });
-        });
-      }
-      
-      // Check for tribal support cards (cards that care about creature types)
-      const cardText = (card.oracle_text || card.text || '').toLowerCase();
-      if (cardText.includes('creature type') || 
-          cardText.includes('choose a creature type') ||
-          cardText.includes('creatures you control') ||
-          cardText.includes('creatures of the chosen type') ||
-          cardText.includes('other') && cardText.includes('creatures')) {
-        score += 20; // Tribal support card bonus
-      }
-    }
-    
-    // Keyword synergy bonuses
-    const keywords = ['flying', 'trample', 'haste', 'vigilance', 'lifelink', 'deathtouch', 'first strike', 'double strike'];
-    keywords.forEach(keyword => {
-      if (cardText.includes(keyword) && deckText.includes(keyword)) {
-        score += 10; // Keyword synergy bonus
-      }
-    });
-    
-    // Format-specific bonuses
-    if (formatName === 'commander') {
-      // Commander format prefers singleton effects and high impact
-      if (cardText.includes('each opponent') || cardText.includes('each player')) {
-        score += 20; // Multiplayer bonus
-      }
-      if (cardText.includes('legendary') && cardTypeLine.toLowerCase().includes('creature')) {
-        score += 10; // Legendary creature bonus
-      }
-    }
-    
-    // Utility and staple bonuses
-    if (cardText.includes('draw') && cardText.includes('card')) {
-      score += 15; // Card draw is always valuable
-    }
-    if (cardText.includes('destroy') || cardText.includes('exile')) {
-      score += 10; // Removal is valuable
-    }
-    if (cardText.includes('search') && cardText.includes('library')) {
-      score += 12; // Tutoring effects
-    }
-    
-    // Round to 2 decimal places for consistency
-    const finalScore = Math.round(score * 100) / 100;
-    
-    return { ...card, synergy_score: finalScore };
-  });
-  
-  // Sort by synergy score (highest first), then by name for consistent tie-breaking
-  return scoredCards.sort((a, b) => {
-    const scoreDiff = b.synergy_score - a.synergy_score;
-    if (Math.abs(scoreDiff) < 0.01) { // Very close scores
-      return a.name.localeCompare(b.name); // Alphabetical tie-breaker
-    }
-    return scoreDiff;
-  });
-};
-
-// Helper function to calculate keyword-based similarity when semantic search isn't available
-const calculateKeywordSimilarity = (card, query) => {
-  if (!card || !query) return 0;
-  
-  const cardText = `${card.name || ''} ${card.type_line || card.type || ''} ${card.oracle_text || card.text || ''} ${card.mana_cost || ''}`.toLowerCase();
-  const queryLower = query.toLowerCase();
-  
-  let score = 0;
-  
-  // Extract key themes from query and score matches
-  const themes = {
-    'token': /token|populate|convoke|create.*creature/g,
-    'counter': /\+1\/\+1|counter|proliferate|evolve|adapt|monstrosity/g,
-    'artifact': /artifact|metalcraft|affinity|improvise/g,
-    'graveyard': /graveyard|flashback|unearth|dredge|delve|escape|disturb/g,
-    'control': /counter.*spell|destroy.*target|exile.*target|draw.*card/g,
-    'aggro': /haste|first strike|double strike|menace|aggressive/g,
-    'lifegain': /gain.*life|lifegain|lifelink/g,
-    'flying': /flying|fly/g,
-    'vigilance': /vigilance/g,
-    'commander': /commander|legendary/g,
-    'white': /white/g,
-    'midrange': /midrange/g
-  };
-  
-  // Score based on theme presence
-  Object.entries(themes).forEach(([theme, pattern]) => {
-    if (queryLower.includes(theme)) {
-      const matches = cardText.match(pattern);
-      if (matches) {
-        score += matches.length * 10; // Base theme match
-      }
-    }
-  });
-  
-  // Score based on card type relevance
-  const cardTypes = ['creature', 'instant', 'sorcery', 'artifact', 'enchantment', 'planeswalker', 'land'];
-  cardTypes.forEach(type => {
-    if (queryLower.includes(type) && cardText.includes(type)) {
-      score += 5;
-    }
-  });
-  
-  // Score based on mana cost (prefer cards that fill curve gaps)
-  const curveMatches = queryLower.match(/needs more (\d+)/);
-  if (curveMatches) {
-    const neededCost = parseInt(curveMatches[1]);
-    const cardCost = card.manaValue || card.cmc || card.mana_value || 0;
-    if (Math.abs(cardCost - neededCost) <= 1) {
-      score += 15; // Bonus for filling curve gaps
-    }
-  }
-  
-  // Score based on keyword abilities mentioned in query
-  const keywords = ['flying', 'vigilance', 'lifelink', 'first strike', 'double strike', 'trample', 'haste', 'deathtouch', 'menace', 'reach'];
-  keywords.forEach(keyword => {
-    if (queryLower.includes(keyword) && cardText.includes(keyword)) {
-      score += 8;
-    }
-  });
-  
-  // Normalize score to 0-1 range similar to semantic search
-  return Math.min(score / 100, 1);
-};
-
-// Helper function to extract key strategic insights from the deck analysis query
-const extractDeckInsights = (query) => {
-  if (!query) return null;
-  
-  const insights = [];
-  
-  // Extract deck archetype
-  const archetypeMatch = query.match(/Suggest cards for a \w+ (\w+) deck/);
-  if (archetypeMatch) {
-    insights.push(`Deck archetype: ${archetypeMatch[1]}`);
-  }
-  
-  // Extract key themes
-  const themesMatch = query.match(/Key themes include ([^.]+)/);
-  if (themesMatch) {
-    insights.push(`Key themes: ${themesMatch[1]}`);
-  }
-  
-  // Extract tribal synergies
-  const tribalMatch = query.match(/focuses on ([^.]+) tribal synergies/);
-  if (tribalMatch) {
-    insights.push(`Tribal synergies: ${tribalMatch[1]}`);
-  }
-  
-  // Extract important abilities
-  const abilitiesMatch = query.match(/Important abilities include ([^.]+)/);
-  if (abilitiesMatch) {
-    insights.push(`Key abilities: ${abilitiesMatch[1]}`);
-  }
-  
-  // Extract win conditions
-  const winConditionsMatch = query.match(/Win conditions focus on ([^.]+)/);
-  if (winConditionsMatch) {
-    insights.push(`Win conditions: ${winConditionsMatch[1]}`);
-  }
-  
-  // Extract mana curve needs
-  const curveMatch = query.match(/needs more ([^.]+) mana cost options/);
-  if (curveMatch) {
-    insights.push(`Mana curve needs: ${curveMatch[1]} cost cards`);
-  }
-  
-  return insights.length > 0 ? insights.join('. ') : null;
-};
-
-// Helper function to analyze the deck and create a rich search query
-const analyzeDeckForQuery = (deck, formatName) => {
-  if (!deck || !deck.mainboard || deck.mainboard.length === 0) {
-    return `Suggest cards for a ${formatName} deck.`;
-  }
-
-  const allCards = [...deck.mainboard, ...(deck.commanders || [])];
-  
-  // Analyze deck composition
-  const cardTypes = { creature: 0, instant: 0, sorcery: 0, enchantment: 0, artifact: 0, land: 0, planeswalker: 0 };
-  const manaCurve = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, '7+': 0 };
-  const colors = new Set();
-  const themes = new Map();
-  const keywords = new Map();
-  const tribes = new Map();
-  
-  // Common MTG themes and synergies
-  const themePatterns = {
-    'graveyard': /graveyard|flashback|unearth|dredge|delve|escape|disturb/i,
-    'counters': /\+1\/\+1|counter|proliferate|evolve|adapt|monstrosity/i,
-    'tokens': /token|populate|convoke|create.*creature/i,
-    'artifacts': /artifact|metalcraft|affinity|improvise/i,
-    'spells': /instant|sorcery|storm|prowess|magecraft/i,
-    'lifegain': /gain.*life|lifegain|lifelink/i,
-    'sacrifice': /sacrifice|devour|exploit|emerge/i,
-    'card_draw': /draw.*card|card.*draw/i,
-    'ramp': /search.*land|ramp|mana.*dork/i,
-    'control': /counter.*spell|destroy.*target|exile.*target/i,
-    'aggro': /haste|first strike|double strike|menace/i,
-    'combo': /tutor|search.*library|infinite|combo/i
-  };
-
-  allCards.forEach(card => {
-    // Analyze card types
-    const typeLine = (card.type_line || card.type || '').toLowerCase();
-    Object.keys(cardTypes).forEach(type => {
-      if (typeLine.includes(type)) cardTypes[type]++;
-    });
-
-    // Analyze mana curve
-    const cmc = card.manaValue || card.cmc || card.mana_value || 0;
-    if (cmc >= 7) manaCurve['7+']++;
-    else manaCurve[cmc]++;
-
-    // Analyze colors
-    (card.color_identity || card.colors || []).forEach(color => colors.add(color));
-
-    // Analyze themes
-    const cardText = `${card.oracle_text || card.text || ''} ${typeLine}`;
-    Object.entries(themePatterns).forEach(([theme, pattern]) => {
-      if (pattern.test(cardText)) {
-        themes.set(theme, (themes.get(theme) || 0) + 1);
-      }
-    });
-
-    // Extract creature types for tribal themes
-    if (typeLine.includes('creature')) {
-      const typeMatch = typeLine.match(/creature\s+—\s+(.+)/);
-      if (typeMatch) {
-        // Split by spaces and clean up each type
-        typeMatch[1].split(' ').forEach(tribe => {
-          // Clean up the tribe name (remove punctuation, make lowercase)
-          const cleanTribe = tribe.replace(/[^a-zA-Z]/g, '').toLowerCase();
-          // Only count meaningful creature types (longer than 2 chars)
-          if (cleanTribe.length > 2) {
-            // Capitalize first letter for consistency
-            const formattedTribe = cleanTribe.charAt(0).toUpperCase() + cleanTribe.slice(1);
-            tribes.set(formattedTribe, (tribes.get(formattedTribe) || 0) + 1);
-          }
-        });
-      }
-    }
-
-    // Extract keywords
-    const keywordPattern = /\b(flying|trample|haste|vigilance|lifelink|deathtouch|first strike|double strike|menace|reach|hexproof|indestructible|flash|defender)\b/gi;
-    const keywordMatches = cardText.match(keywordPattern) || [];
-    keywordMatches.forEach(keyword => {
-      keywords.set(keyword.toLowerCase(), (keywords.get(keyword.toLowerCase()) || 0) + 1);
-    });
-  });
-
-  // Determine deck archetype
-  const totalCards = allCards.length;
-  const creatureRatio = cardTypes.creature / totalCards;
-  const instantSorceryRatio = (cardTypes.instant + cardTypes.sorcery) / totalCards;
-  const lowCMC = (manaCurve[0] + manaCurve[1] + manaCurve[2]) / totalCards;
-  
-  let archetype = 'midrange';
-  if (creatureRatio > 0.6 && lowCMC > 0.5) archetype = 'aggro';
-  else if (instantSorceryRatio > 0.4) archetype = 'control';
-  else if (themes.has('combo') && themes.get('combo') > 2) archetype = 'combo';
-
-  // Get top themes
-  const topThemes = [...themes.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)
-    .map(([theme, count]) => ({ theme, count }));
-
-  // Get top tribes (require at least 4 cards of the same type to be considered tribal)
-  const topTribes = [...tribes.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)
-    .filter(([tribe, count]) => count >= 4) // Increased threshold for tribal significance
-    .map(([tribe, count]) => ({ tribe, count }));
-
-  // Get top keywords
-  const topKeywords = [...keywords.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 4)
-    .map(([keyword]) => keyword);
-
-  // Find mana curve gaps
-  const curveGaps = [];
-  Object.entries(manaCurve).forEach(([cost, count]) => {
-    if (count === 0 && cost !== '7+' && parseInt(cost) <= 4) {
-      curveGaps.push(cost);
-    }
-  });
-
-  // Build sophisticated query
-  let query = `Suggest cards for a ${formatName} ${archetype} deck`;
-  
-  // Add commander context
-  if (formatName === 'commander' && deck.commanders && deck.commanders.length > 0) {
-    const commanderNames = deck.commanders.map(c => c.name).join(' and ');
-    query += ` with ${commanderNames} as commander`;
-  }
-
-  // Add color identity
-  if (colors.size > 0) {
-    const colorNames = Array.from(colors).map(c => {
-      const colorMap = { W: 'white', U: 'blue', B: 'black', R: 'red', G: 'green' };
-      return colorMap[c] || c;
-    });
-    query += ` in ${colorNames.join(' and ')} colors`;
-  }
-
-  // Add tribal themes
-  if (topTribes.length > 0) {
-    const tribalDescriptions = topTribes.map(({ tribe, count }) => {
-      const percentage = Math.round((count / totalCards) * 100);
-      return `${tribe} tribal (${count} cards, ${percentage}%)`;
-    });
-    query += `. The deck focuses on ${tribalDescriptions.join(' and ')} synergies`;
-  }
-
-  // Add primary themes
-  if (topThemes.length > 0) {
-    const themeDescriptions = topThemes.map(({ theme, count }) => {
-      const percentage = Math.round((count / totalCards) * 100);
-      return `${theme} strategy (${percentage}% of deck)`;
-    });
-    query += `. Key themes include ${themeDescriptions.join(', ')}`;
-  }
-
-  // Add keyword focus
-  if (topKeywords.length > 0) {
-    query += `. Important abilities include ${topKeywords.join(', ')}`;
-  }
-
-  // Add mana curve considerations
-  if (curveGaps.length > 0) {
-    query += `. The deck needs more ${curveGaps.join(' and ')} mana cost options`;
-  }
-
-  // Add specific card examples for context
-  const keyCards = allCards
-    .filter(card => {
-      // Prioritize cards that represent the deck's strategy
-      const cardText = (card.oracle_text || card.text || '').toLowerCase();
-      return topThemes.some(({ theme }) => themePatterns[theme]?.test(cardText));
-    })
-    .slice(0, 3)
-    .map(card => card.name);
-
-  if (keyCards.length > 0) {
-    query += `. The deck includes key cards like ${keyCards.join(', ')}`;
-  }
-
-  // Add win condition context
-  const winConditions = [];
-  if (themes.get('aggro') > 2) winConditions.push('aggressive creature beats');
-  if (themes.get('combo') > 2) winConditions.push('combo finish');
-  if (themes.get('control') > 3) winConditions.push('control and card advantage');
-  if (themes.get('tokens') > 2) winConditions.push('token swarm');
-
-  if (winConditions.length > 0) {
-    query += `. Win conditions focus on ${winConditions.join(' and ')}`;
-  }
-
-  query += '. Suggest cards that synergize well with this strategy and fill any gaps in the deck.';
-
-  return query;
-}
 
 // IPC handler for the new auto-build feature
 ipcMain.handle('auto-build-commander-deck', async () => {
@@ -1071,7 +662,7 @@ ipcMain.handle('auto-build-commander-deck', async () => {
     
     // 1. Get the user's full collection to serve as the card pool
     const cardPool = await bulkDataService.getCollectedCards({ limit: 20000 });
-    if (!cardPool || cardPool.length < 100) {
+    if (!cardPool || cardPool.length < 101) {
       throw new Error('Could not load a large enough card pool from the collection.');
     }
     console.log(`🤖 Loaded ${cardPool.length} cards from collection.`);
@@ -1098,7 +689,31 @@ ipcMain.handle('auto-build-commander-deck', async () => {
     
     const semanticScoreMap = new Map();
     allSemanticResults.forEach(result => {
-      semanticScoreMap.set(result.name, 1 - (result._distance || result.distance || 0));
+      const distance = result._distance || result.distance || 1.0;
+      
+      // Use the same configurable distance conversion as main recommendations
+      const settings = settingsManager.getSettings();
+      const conversionType = settings.recommendations?.scoring?.distanceConversion || 'sqrt';
+      
+      let score;
+      switch (conversionType) {
+        case 'linear':
+          score = Math.max(0, 1 - distance);
+          break;
+        case 'sqrt':
+          score = Math.max(0, 1 - Math.sqrt(distance));
+          break;
+        case 'exponential':
+          score = Math.max(0, Math.exp(-distance));
+          break;
+        case 'aggressive_exp':
+          score = Math.max(0, Math.exp(-distance * 2));
+          break;
+        default:
+          score = Math.max(0, 1 - Math.sqrt(distance));
+      }
+      
+      semanticScoreMap.set(result.name, score);
     });
 
     // 4. Enrich the entire card pool with these scores.
@@ -1146,8 +761,9 @@ ipcMain.handle('get-deck-recommendations', async (event, { deck, formatName }) =
   (deck.commanders || []).forEach(c => existingCardNames.add(c.name));
   console.log('Existing card names count:', existingCardNames.size);
 
-  // 3. Generate a rich, descriptive query from the deck's contents
-  const query = analyzeDeckForQuery(deck, formatName);
+  // 3. Generate a search query from the deck's contents (using configurable approach)
+  const settings = settingsManager.getSettings();
+  const query = analyzeDeckForQuery(deck, formatName, settings);
 
   try {
     console.log('🔍 Generated deck analysis query:', query);
@@ -1162,97 +778,302 @@ ipcMain.handle('get-deck-recommendations', async (event, { deck, formatName }) =
       return { archetype: 'No Collection', recommendations: [] };
     }
 
-    // 5. Filter owned cards by commander color identity and exclude cards already in deck
-    console.log('🎯 Pre-filtering owned cards...');
-    const eligibleCards = ownedCards.filter(card => {
+    // 🔧 NEW IMPROVED ALGORITHM - Deduplication and Better Score Preservation
+    
+    // 5A. FIRST: Deduplicate owned cards by name, keeping the most complete version
+    console.log('🔄 Deduplicating owned cards by name...');
+    const ownedCardsByName = new Map();
+    ownedCards.forEach(card => {
+      const name = card.name;
+      if (!ownedCardsByName.has(name)) {
+        ownedCardsByName.set(name, card);
+      } else {
+        // Keep the card with more complete information (prefer non-null oracle_text)
+        const existing = ownedCardsByName.get(name);
+        if ((card.oracle_text && !existing.oracle_text) || 
+            (card.oracle_text && card.oracle_text.length > (existing.oracle_text || '').length)) {
+          ownedCardsByName.set(name, card);
+        }
+      }
+    });
+    console.log(`Deduplicated to ${ownedCardsByName.size} unique owned cards`);
+
+    // 5B. Filter by commander color identity and exclude cards already in deck
+    console.log('🎯 Filtering by color identity and deck exclusions...');
+    const eligibleCardsByName = new Map();
+    ownedCardsByName.forEach((card, name) => {
       const isCommanderFormat = formatName === 'commander';
       const cardIsInIdentity = !isCommanderFormat || isCardInColorIdentity(card, commanderColorIdentity);
-      const cardIsNotInDeck = !existingCardNames.has(card.name);
+      const cardIsNotInDeck = !existingCardNames.has(name);
       
-      return cardIsInIdentity && cardIsNotInDeck;
+      if (cardIsInIdentity && cardIsNotInDeck) {
+        eligibleCardsByName.set(name, card);
+      }
     });
-    console.log('Eligible owned cards:', eligibleCards.length);
+    console.log('Eligible unique owned cards:', eligibleCardsByName.size);
 
-    if (eligibleCards.length === 0) {
+    if (eligibleCardsByName.size === 0) {
       console.log('❌ No eligible owned cards after filtering');
       return { archetype: 'No Eligible Cards', recommendations: [] };
     }
 
-    // 6. Create a text corpus from eligible cards for semantic search
-    console.log('🔍 Creating search corpus from owned cards...');
-    const cardTexts = eligibleCards.map(card => {
-      const name = card.name || '';
-      const type = card.type_line || card.type || '';
-      const text = card.oracle_text || card.text || '';
-      const manaCost = card.mana_cost || '';
-      return `${name} ${type} ${text} ${manaCost}`.toLowerCase();
-    });
+    // Convert back to array for processing
+    const eligibleCards = Array.from(eligibleCardsByName.values());
 
-    // 7. Check if semantic search is available
+    // 6. Use configurable search limits
+    const settings = settingsManager.getSettings();
+    const semanticLimit = settings.recommendations.search.semanticLimit;
+    const resultLimit = settings.recommendations.search.resultLimit;
+    const finalLimit = settings.recommendations.search.finalLimit;
+
+    // 7A. SEMANTIC SEARCH - Get comprehensive results with smart caching
+    let semanticScores = new Map();
     const semanticSearchInitialized = true;
-    console.log('Semantic search initialized:', semanticSearchInitialized);
-
-    let scoredCards = [];
 
     if (semanticSearchInitialized) {
-      // 8. Use semantic search to score the eligible cards
-      console.log('📡 Performing semantic search on owned cards...');
-      
-      // We'll use a different approach: search the full database but then map results to owned cards
-      const allSemanticResults = await bulkDataService.searchCardsSemantic(query, { limit: 90000 });
-      console.log('Full semantic search results:', allSemanticResults.length);
+      try {
+        console.log('📡 Running semantic search with smart caching...');
+        
+        // Check cache first
+        const cacheKey = `semantic_${query.substring(0, 100)}`; // Use first 100 chars as cache key
+        const cached = global.semanticCache?.get(cacheKey);
+        
+        let allSemanticResults;
+        if (cached && (Date.now() - cached.timestamp) < 300000) { // 5 minute cache
+          console.log('💾 Using cached semantic results');
+          allSemanticResults = cached.results;
+        } else {
+          console.log('🔍 Performing fresh semantic search...');
+          allSemanticResults = await bulkDataService.searchCardsSemantic(query, { limit: semanticLimit });
+          
+          // Cache the results
+          if (!global.semanticCache) {
+            global.semanticCache = new Map();
+          }
+          global.semanticCache.set(cacheKey, {
+            results: allSemanticResults,
+            timestamp: Date.now()
+          });
 
-      // Create a map of semantic scores by card name
-      const semanticScores = new Map();
+          // Keep cache size reasonable (max 10 entries)
+          if (global.semanticCache.size > 10) {
+            const oldestKey = global.semanticCache.keys().next().value;
+            global.semanticCache.delete(oldestKey);
+          }
+        }
+        
+        console.log('Semantic search results:', allSemanticResults.length);
+
+        // 🔧 IMPROVED: Better distance-to-score conversion and deduplication
+        const semanticResultsByName = new Map();
       allSemanticResults.forEach(result => {
-        const score = 1 - (result._distance || result.distance || 0);
-        semanticScores.set(result.name, score);
-      });
+          const name = result.name;
+          // Improved distance-to-score conversion: use configurable approach for better scores
+          const distance = result._distance || result.distance || 1.0;
+          
+          // Multiple conversion options - use square root for better separation while keeping higher scores
+          const settings = settingsManager.getSettings();
+          const conversionType = settings.recommendations?.scoring?.distanceConversion || 'sqrt';
+          
+          let score;
+          switch (conversionType) {
+            case 'linear':
+              score = Math.max(0, 1 - distance);
+              break;
+            case 'sqrt':
+              score = Math.max(0, 1 - Math.sqrt(distance));
+              break;
+            case 'exponential':
+              score = Math.max(0, Math.exp(-distance));
+              break;
+            case 'aggressive_exp':
+              score = Math.max(0, Math.exp(-distance * 2));
+              break;
+            default:
+              score = Math.max(0, 1 - Math.sqrt(distance)); // Default to sqrt
+          }
+          
+          // Keep the best score for each card name (in case of duplicates)
+          if (!semanticResultsByName.has(name) || score > semanticResultsByName.get(name)) {
+            semanticResultsByName.set(name, score);
+          }
+        });
+        
+        semanticScores = semanticResultsByName;
+        console.log('Cards with semantic scores (deduplicated):', semanticScores.size);
 
-      // Score eligible cards based on semantic similarity
-      scoredCards = eligibleCards.map(card => ({
-        ...card,
-        semantic_score: semanticScores.get(card.name) || 0
-      }));
-
-      // Sort by semantic score (highest first)
-      scoredCards.sort((a, b) => b.semantic_score - a.semantic_score);
-      
-      console.log('Cards with semantic scores:', scoredCards.filter(c => c.semantic_score > 0).length);
-    } else {
-      console.log('⚠️ Semantic search not available, using keyword-based scoring');
-      // Use deterministic keyword-based scoring instead of random
-      scoredCards = eligibleCards.map(card => ({
-        ...card,
-        semantic_score: calculateKeywordSimilarity(card, query)
-      }));
-      scoredCards.sort((a, b) => b.semantic_score - a.semantic_score);
+        // Show some sample semantic scores for debugging
+        const topSemanticScores = Array.from(semanticScores.entries())
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5);
+        console.log('Top 5 semantic scores:', topSemanticScores.map(([name, score]) => 
+          `${name}: ${score.toFixed(3)}`).join(', '));
+          
+      } catch (error) {
+        console.error('❌ Semantic search failed:', error);
+        semanticScores = new Map();
+      }
     }
 
-    // 9. Apply MTG-specific reranking based on deck synergy
+    // 7B. KEYWORD-BASED SCORING - Only for eligible cards
+    console.log('🔤 Running keyword-based scoring approach...');
+    const keywordScores = new Map();
+    eligibleCards.forEach(card => {
+      const keywordScore = calculateKeywordSimilarity(card, query);
+      keywordScores.set(card.name, keywordScore);
+    });
+    console.log('Cards with keyword scores:', keywordScores.size);
+
+    // 8. SCORING STRATEGY CALCULATION - Apply all strategies with improved scores
+    console.log('🧮 Calculating all scoring strategies...');
+    const scoredCards = eligibleCards.map(card => {
+      const semanticScore = semanticScores.get(card.name) || 0;
+      const keywordScore = keywordScores.get(card.name) || 0;
+      
+      // Calculate ALL strategies simultaneously for comparison
+      const strategies = {
+        primary_fallback: semanticScore > 0.01 ? semanticScore : keywordScore, // Increased threshold
+        weighted_70_30: (semanticScore * 0.7) + (keywordScore * 0.3),
+        weighted_50_50: (semanticScore * 0.5) + (keywordScore * 0.5),
+        weighted_30_70: (semanticScore * 0.3) + (keywordScore * 0.7),
+        max_score: Math.max(semanticScore, keywordScore),
+        average: (semanticScore + keywordScore) / 2,
+        multiplicative: semanticScore * keywordScore,
+        additive: semanticScore + keywordScore,
+        semantic_only: semanticScore,
+        keyword_only: keywordScore,
+        // New intelligent hybrid approach
+        smart_hybrid: calculateSmartHybridScore(semanticScore, keywordScore, card, query)
+      };
+
+      // Use the configurable active strategy (default to primary_fallback)
+      const activeStrategy = settings.recommendations?.activeStrategy || 'primary_fallback';
+      const combinedScore = strategies[activeStrategy];
+
+      return {
+        ...card,
+        semantic_score: semanticScore,
+        keyword_score: keywordScore,
+        combined_score: combinedScore,
+        // Store ALL strategy scores for comparison
+        strategy_scores: strategies,
+        active_strategy: activeStrategy,
+        score_source: semanticScore > 0.01 ? 'semantic' : 'keyword' // Increased threshold
+      };
+    });
+
+    // Apply score normalization for better strategy comparison
+    const normalizedCards = normalizeStrategyScores(scoredCards);
+    
+    // Sort by combined score (highest first)
+    normalizedCards.sort((a, b) => b.combined_score - a.combined_score);
+      
+    console.log('📊 Improved scoring comparison:');
+    console.log(`  - Cards with semantic scores > 0.01: ${normalizedCards.filter(c => c.semantic_score > 0.01).length}`);
+    console.log(`  - Cards with keyword scores > 0: ${normalizedCards.filter(c => c.keyword_score > 0).length}`);
+    console.log(`  - Using semantic as primary: ${normalizedCards.filter(c => c.score_source === 'semantic').length}`);
+    console.log(`  - Using keyword as fallback: ${normalizedCards.filter(c => c.score_source === 'keyword').length}`);
+    console.log(`  - Active strategy: ${settings.recommendations.activeStrategy}`);
+    
+    // 🧪 STRATEGY COMPARISON - Show top 3 cards from each strategy
+    const strategies = ['primary_fallback', 'weighted_70_30', 'weighted_50_50', 'max_score', 'average', 'multiplicative', 'semantic_only', 'keyword_only', 'smart_hybrid'];
+    console.log('\n🧪 Strategy Comparison (Top 3 cards each):');
+    
+    strategies.forEach(strategy => {
+      const strategySorted = [...normalizedCards].sort((a, b) => 
+        (b.strategy_scores[strategy] || 0) - (a.strategy_scores[strategy] || 0)
+      );
+      const top3 = strategySorted.slice(0, 3);
+      console.log(`\n  ${strategy}:`);
+      top3.forEach((card, i) => {
+        const score = (card.strategy_scores[strategy] || 0).toFixed(3);
+        const normalizedScore = (card.strategy_scores_normalized?.[strategy] || 0).toFixed(3);
+        const sem = card.semantic_score.toFixed(3);
+        const key = card.keyword_score.toFixed(3);
+        console.log(`    ${i + 1}. ${card.name} (${score}|norm:${normalizedScore}) [sem:${sem}, key:${key}]`);
+      });
+    });
+
+    // 9. Apply MTG-specific reranking based on deck synergy with configurable settings
     console.log('🎯 Applying MTG-specific reranking...');
-    const rerankedResults = rerankCardsByDeckSynergy(scoredCards.slice(0, 200), deck, formatName);
+    const rerankedResults = rerankCardsByDeckSynergy(normalizedCards.slice(0, resultLimit), deck, formatName, settings);
     console.log('Reranked results count:', rerankedResults.length);
     
-    if (rerankedResults.length > 0) {
-      console.log('Top 3 reranked results:', rerankedResults.slice(0, 3).map(r => ({ 
+    // 🔧 FINAL DEDUPLICATION: Ensure no duplicate card names in final results
+    console.log('🔄 Final deduplication check...');
+    const finalResultsByName = new Map();
+    rerankedResults.forEach(card => {
+      const name = card.name;
+      if (!finalResultsByName.has(name)) {
+        finalResultsByName.set(name, card);
+      } else {
+        // Keep the card with higher synergy score
+        const existing = finalResultsByName.get(name);
+        if (card.synergy_score > existing.synergy_score) {
+          finalResultsByName.set(name, card);
+        }
+      }
+    });
+    const deduplicatedResults = Array.from(finalResultsByName.values())
+      .sort((a, b) => b.synergy_score - a.synergy_score);
+    
+    console.log(`Final deduplication: ${rerankedResults.length} → ${deduplicatedResults.length} unique cards`);
+    
+    // Show scoring method distribution after reranking
+    if (deduplicatedResults.length > 0) {
+      const methodCounts = {};
+      deduplicatedResults.forEach(card => {
+        const method = card._scoring_method || 'unknown';
+        methodCounts[method] = (methodCounts[method] || 0) + 1;
+      });
+      console.log('📊 Reranked results by scoring method:', methodCounts);
+    }
+    
+    // 10. Filter recommendations based on format legality using the rules engine
+    const legalRecommendations = deduplicatedResults.filter(card => {
+      const legality = rulesEngine.isCardLegal(card, formatName);
+      return legality.legal;
+    });
+    console.log(`⚖️ Filtered for legality. Kept ${legalRecommendations.length} of ${deduplicatedResults.length} recommendations.`);
+
+    if (legalRecommendations.length > 0) {
+      console.log('Top 3 final results:', legalRecommendations.slice(0, 3).map(r => ({ 
         name: r.name, 
         synergy_score: r.synergy_score,
         semantic_score: r.semantic_score 
       })));
     }
 
-    // 10. Get final recommendations
-    const finalRecommendations = rerankedResults.slice(0, 50);
-    console.log('Final recommendations count:', finalRecommendations.length);
+    // Extract deck analysis insights to send back to the UI
+    const deckAnalysis = extractDeckInsights(query);
 
-    const archetype = 'Collection-Based Recommendations v4';
-    console.log('✅ Recommendations complete:', { archetype, count: finalRecommendations.length });
+    // 🧪 STRATEGY TESTING - Return comparison data for all strategies (using deduplicated results)
+    const strategyComparison = {};
+    strategies.forEach(strategy => {
+      const strategySorted = [...legalRecommendations].sort((a, b) => {
+        const aScore = a.strategy_scores?.[strategy] || 0;
+        const bScore = b.strategy_scores?.[strategy] || 0;
+        return bScore - aScore;
+      });
+      strategyComparison[strategy] = strategySorted.slice(0, 10).map(card => ({
+        name: card.name,
+        score: (card.strategy_scores?.[strategy] || 0).toFixed(3),
+        normalizedScore: (card.strategy_scores_normalized?.[strategy] || 0).toFixed(3),
+        semantic: card.semantic_score?.toFixed(3) || '0.000',
+        keyword: card.keyword_score?.toFixed(3) || '0.000'
+      }));
+    });
 
-    // Extract key strategic insights from the query
-    const deckInsights = extractDeckInsights(query);
-    
-    return { archetype, recommendations: finalRecommendations, deckAnalysis: deckInsights };
+    return {
+      archetype: 'Analysis Complete',
+      recommendations: legalRecommendations.slice(0, finalLimit), // Use configurable final limit
+      deckAnalysis,
+      settings: settings.recommendations, // Include current settings in response
+      // 🧪 NEW: Include strategy comparison data for testing
+      strategyComparison,
+      availableStrategies: strategies,
+      activeStrategy: settings.recommendations.activeStrategy
+    };
   } catch (error) {
     console.error('❌ Error getting deck recommendations:', error);
     console.error('Error stack:', error.stack);
@@ -1322,7 +1143,69 @@ ipcMain.handle('list-sets', async () => {
 });
 
 ipcMain.handle('get-cards-by-set', async (event, setCode, options) => {
-  return await bulkDataService.getCardsBySet(setCode, options);
+  try {
+    const cards = await bulkDataService.getCardsBySet(setCode, options);
+    
+    // Ensure all cards are serializable by doing a test JSON serialization
+    try {
+      const testSerialization = JSON.stringify(cards);
+    } catch (serializationError) {
+      console.error('Serialization test failed:', serializationError);
+      throw new Error('An object could not be cloned.');
+    }
+    
+    return cards;
+  } catch (error) {
+    console.error('Error in get-cards-by-set:', error);
+    
+    // If it's a serialization error, try to return a simplified version
+    if (error.message && (error.message.includes('could not be cloned') || error.message.includes('circular'))) {
+      console.warn('Serialization error detected, attempting to return basic card data');
+      try {
+        const basicCards = await bulkDataService.getCardsBySet(setCode, options);
+        // Return only essential properties to avoid serialization issues
+        const sanitizedCards = basicCards.map(card => {
+          try {
+            return {
+              id: card.id,
+              uuid: card.uuid,
+              name: card.name,
+              mana_cost: card.mana_cost,
+              cmc: card.cmc,
+              type_line: card.type_line,
+              oracle_text: card.oracle_text,
+              power: card.power,
+              toughness: card.toughness,
+              colors: card.colors,
+              color_identity: card.color_identity,
+              rarity: card.rarity,
+              set: card.set,
+              collector_number: card.collector_number,
+              image_uris: card.image_uris,
+              legalities: card.legalities,
+              card_faces: card.card_faces
+            };
+          } catch (cardError) {
+            console.error(`Error sanitizing card ${card.name}:`, cardError);
+            return {
+              id: card.id || 'unknown',
+              name: card.name || 'Unknown Card',
+              error: 'Serialization failed'
+            };
+          }
+        });
+        
+        // Test serialization of sanitized cards
+        JSON.stringify(sanitizedCards);
+        return sanitizedCards;
+      } catch (fallbackError) {
+        console.error('Fallback serialization also failed:', fallbackError);
+        return [];
+      }
+    }
+    
+    return [];
+  }
 });
 
 // File Dialog
@@ -1530,93 +1413,92 @@ const broadcast = (payload) => {
   } catch (e) { }
 };
 
-app.on('ready', async () => {
-  console.log('App is ready. Starting initialization...');
-
-  const mainWindow = createWindow();
-
+app.whenReady().then(async () => {
+  await createWindow();
+  
+  // Initialize settings
+  await settingsManager.initialize();
+  
+  // 🤖 Load @electron/llm for AI features
   try {
-    // ---------------------------------------------------------------
-    // STEP 1: Make sure the SQLite database is built via Python first
-    // ---------------------------------------------------------------
-    // COMMENTED OUT: We already have the database file in Database/database.sqlite
-    // broadcast({ task: 'python-db', state: 'start' });
-    // try {
-    //   await ensurePythonDatabase();
-    //   broadcast({ task: 'python-db', state: 'done' });
-    // } catch (err) {
-    //   broadcast({ task: 'python-db', state: 'fail' });
-    //   // Re-throw to be caught by the outer block
-    //   throw err;
-    // }
-
-    // Initialize bulk data service
-    if (process.env.SKIP_BULK_DATA !== 'true') {
-      console.log('Initializing bulk data service...');
-      await bulkDataService.initialize();
-      console.log('Bulk data service initialized successfully.');
-    } else {
-      console.log('Skipping bulk data initialization (SKIP_BULK_DATA=true)');
-    }
-
-    // Initialize semantic search service during startup
-    console.log('Initializing semantic search service...');
-    try {
-      await bulkDataService.ensureSemanticSearchInitialized();
-      console.log('Semantic search service initialized successfully.');
-    } catch (error) {
-      console.error('Semantic search initialization failed:', error);
-      // Continue without semantic search - don't fail the entire app
-    }
-
-    // Initialize collection importer
-    console.log('Initializing collection importer...');
-    await collectionImporter.initialize();
-
-    // Connect bulk data service to collection importer for card lookups
-    collectionImporter.bulkDataService = bulkDataService;
-
-    console.log('Collection importer initialized successfully.');
-
-    // Auto-import text file collections (DISABLED to prevent undefined name errors)
-    // console.log('Starting auto-import of .txt collections...');
-    // await autoImportTxtCollections();
-    // console.log('Auto-import finished.');
-
-    console.log('All initializations complete.');
-
-    // -------------------------------------------
-    // Trigger auto-update after startup activities
-    // -------------------------------------------
-    if (app.isPackaged && !process.argv.includes('--squirrel-firstrun')) {
-      // Delay check a bit so first-run tasks (DB build) don't block
-      setTimeout(() => {
-        try {
-          // Only check for updates if running from a published distribution
-          const fs = require('fs');
-          const updateConfigPath = path.join(process.resourcesPath, 'app-update.yml');
-
-          if (fs.existsSync(updateConfigPath)) {
-            log.info('🔄 Starting update check...');
-            autoUpdater.checkForUpdatesAndNotify();
-          } else {
-            log.info('ℹ️  Update config not found, skipping update check (development/local build)');
-          }
-        } catch (e) {
-          log.error('Failed to start update check:', e);
-        }
-      }, 30000); // 30 seconds after launch
-    }
+    console.log('🤖 Loading @electron/llm...');
+    await loadElectronLlm({
+      // Map the model alias used in renderers to the actual GGUF file we
+      // ship inside the electron/AI folder. Returning `null` will make
+      // @electron/llm fall back to its default logic, so we only override
+      // when the file exists.
+      getModelPath: (modelAlias) => {
+        const resolved = path.resolve(__dirname, 'AI', modelAlias);
+        return fsSync.existsSync(resolved) ? resolved : null;
+      }
+    });
+    console.log('✅ @electron/llm loaded successfully');
   } catch (error) {
-    console.error('💥 A critical error occurred during application startup:', error);
-    log.error('💥 A critical error occurred during application startup:', error);
-    const { dialog } = require('electron');
-    dialog.showErrorBox(
-      'Application Startup Error',
-      'A critical error occurred while starting the application. Please check the logs for more details.'
-    );
-    app.quit();
+    console.error('❌ Failed to load @electron/llm:', error);
   }
+
+  // Auto-updater setup
+  if (process.env.NODE_ENV === 'production') {
+    // Only check for updates if running from a published distribution
+    const fs = require('fs');
+    const updateConfigPath = path.join(process.resourcesPath, 'app-update.yml');
+
+    if (fs.existsSync(updateConfigPath)) {
+      log.info('🔄 Starting update check...');
+      autoUpdater.checkForUpdatesAndNotify();
+    } else {
+      log.info('ℹ️  Update config not found, skipping update check (development/local build)');
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // STEP 1: Make sure the SQLite database is built via Python first
+  // ---------------------------------------------------------------
+  // COMMENTED OUT: We already have the database file in Database/database.sqlite
+  // broadcast({ task: 'python-db', state: 'start' });
+  // try {
+  //   await ensurePythonDatabase();
+  //   broadcast({ task: 'python-db', state: 'done' });
+  // } catch (err) {
+  //   broadcast({ task: 'python-db', state: 'fail' });
+  //   // Re-throw to be caught by the outer block
+  //   throw err;
+  // }
+
+  // Initialize bulk data service
+  if (process.env.SKIP_BULK_DATA !== 'true') {
+    console.log('Initializing bulk data service...');
+    await bulkDataService.initialize();
+    console.log('Bulk data service initialized successfully.');
+  } else {
+    console.log('Skipping bulk data initialization (SKIP_BULK_DATA=true)');
+  }
+
+  // Initialize semantic search service during startup
+  console.log('Initializing semantic search service...');
+  try {
+    await bulkDataService.ensureSemanticSearchInitialized();
+    console.log('Semantic search service initialized successfully.');
+  } catch (error) {
+    console.error('Semantic search initialization failed:', error);
+    // Continue without semantic search - don't fail the entire app
+  }
+
+  // Initialize collection importer
+  console.log('Initializing collection importer...');
+  await collectionImporter.initialize();
+
+  // Connect bulk data service to collection importer for card lookups
+  collectionImporter.bulkDataService = bulkDataService;
+
+  console.log('Collection importer initialized successfully.');
+
+  // Auto-import text file collections (DISABLED to prevent undefined name errors)
+  // console.log('Starting auto-import of .txt collections...');
+  // await autoImportTxtCollections();
+  // console.log('Auto-import finished.');
+
+  console.log('All initializations complete.');
 });
 
 app.on('window-all-closed', () => {
@@ -1795,4 +1677,77 @@ ipcMain.handle('rules-analyze-mana-curve', (event, cards) => {
 // Analyze color balance
 ipcMain.handle('rules-analyze-color-balance', (event, cards) => {
   return rulesEngine.analyzeColorBalance(cards);
+}); 
+
+// 🔧 NEW: Test Oracle Text Pattern Analysis
+ipcMain.handle('test-oracle-pattern-analysis', async (event, cardName) => {
+  try {
+    console.log(`🧪 Testing oracle text pattern analysis for: ${cardName}`);
+    
+    // Find the card in the database
+    const card = await bulkDataService.findCardByName(cardName);
+    if (!card) {
+      return { error: `Card "${cardName}" not found` };
+    }
+    
+    console.log(`📜 Oracle text: ${card.oracle_text || card.text || 'No oracle text'}`);
+    
+    // Parse the oracle text patterns
+    const patterns = parseOracleTextPatterns(card.oracle_text || card.text || '');
+    
+    console.log('🔍 Parsed patterns:', JSON.stringify(patterns, null, 2));
+    
+    // Test with some other cards for synergy calculation
+    const testCards = ['Skullclamp', 'Puresteel Paladin', 'Stoneforge Mystic'];
+    const synergyTests = [];
+    
+    for (const testCardName of testCards) {
+      const testCard = await bulkDataService.findCardByName(testCardName);
+      if (testCard) {
+        const testPatterns = parseOracleTextPatterns(testCard.oracle_text || testCard.text || '');
+        const synergy = calculateMechanicalSynergy(patterns, testPatterns);
+        synergyTests.push({
+          cardName: testCardName,
+          synergy,
+          patterns: testPatterns
+        });
+        console.log(`🤝 Synergy with ${testCardName}: ${synergy}`);
+      }
+    }
+    
+    return {
+      cardName,
+      oracleText: card.oracle_text || card.text || '',
+      patterns,
+      synergyTests,
+      success: true
+    };
+    
+  } catch (error) {
+    console.error('❌ Oracle pattern analysis error:', error);
+    return { error: error.message, success: false };
+  }
+}); 
+
+// 🤖 LLM availability check
+// Note: @electron/llm automatically injects window.electronAi into renderer
+// These handlers are kept for backwards compatibility but could be removed
+ipcMain.handle('llm-initialize', async () => {
+  // @electron/llm is already loaded in app.ready
+  return { success: true };
+});
+
+// Simple handler to check if LLM is available
+ipcMain.handle('llm-check-availability', async () => {
+  return { 
+    success: true, 
+    available: true,
+    modelPath: path.join(__dirname, 'AI', 'Meta-Llama-3-8B-Instruct.Q4_K_M.gguf')
+  };
+});
+
+app.on('before-quit', async () => {
+  // Clean up resources
+  // Note: @electron/llm cleanup is handled automatically
+  console.log('🔄 App shutting down...');
 }); 

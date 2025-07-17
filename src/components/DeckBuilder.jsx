@@ -1,15 +1,87 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import './DeckBuilder.css';
 import useImageCache from '../hooks/useImageCache';
+import Card from '../Card';
 import CardDetailModal from './CardDetailModal';
 import DeckStatistics from './DeckStatistics';
 import SearchControls from './SearchControls';
 import SearchFunctions from './search';
-import GridLayout from "react-grid-layout";
+import { WidthProvider, Responsive } from "react-grid-layout";
+
+const ResponsiveGridLayout = WidthProvider(Responsive);
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import SpellbookExport from './SpellbookExport';
+import RecommendationSettings from './RecommendationSettings';
+import StrategyTester from './StrategyTester';
+import PatternAnalysis from './PatternAnalysis';
 import useCardNavigation from '../hooks/useCardNavigation';
+import { Plus, Save, Trash2, X, AlertTriangle, CheckCircle, Settings, Brain } from 'lucide-react';
+import AIPanel from './AIPanel';
+
+// ===================================================================================
+// New: Centralized configuration for all available panels in the Deck Builder.
+// This makes it easy to add new panels or modify existing ones in the future.
+// ===================================================================================
+const ALL_PANELS_CONFIG = {
+  collectionSearch: { id: 'collectionSearch', title: 'Collection & Search' },
+  deckView: { id: 'deckView', title: 'Deck Builder' },
+  deckInfo: { id: 'deckInfo', title: 'Deck Info & Tools' },
+  recommendations: { id: 'recommendations', title: 'Recommendations' },
+  tokenSuggestions: { id: 'tokenSuggestions', title: 'Token Suggestions' },
+  autoBuild: { id: 'autoBuild', title: 'Auto-Build Commander' },
+  deckStats: { id: 'deckStats', title: 'Deck Statistics' },
+  spellbookExport: { id: 'spellbookExport', title: 'Spellbook Export' },
+  aiPanel: { id: 'aiPanel', title: 'AI Assistant' },
+};
+
+// ===================================================================================
+// Bootstrap-style responsive layout generation (following react-grid-layout example)
+// ===================================================================================
+const generateResponsiveLayouts = (panels) => {
+  // Define responsive widths - wider on smaller screens (bootstrap style)
+  const widths = { lg: 3, md: 4, sm: 6, xs: 12, xxs: 12 };
+  const heights = { 
+    collectionSearch: 20, 
+    deckView: 20, 
+    deckInfo: 8, 
+    recommendations: 12,
+    tokenSuggestions: 12,
+    autoBuild: 10,
+    deckStats: 12,
+    spellbookExport: 8,
+    aiPanel: 14
+  };
+  const cols = 12; // Use 12 columns for all breakpoints like bootstrap
+
+  const layouts = Object.keys(widths).reduce((memo, breakpoint) => {
+    const width = widths[breakpoint];
+    memo[breakpoint] = panels.map((panel, i) => {
+      const layout = {
+        x: (i * width) % cols, // Auto-calculate x position
+        y: 0, // Let collision algorithm figure out y - CRITICAL for auto-positioning
+        w: width,
+        h: heights[panel.id] || 12,
+        i: panel.id,
+        minW: 2,
+        minH: 8
+      };
+      return layout;
+    });
+    return memo;
+  }, {});
+  
+  console.log('🎯 Generated bootstrap layouts:', layouts);
+  return layouts;
+};
+
+const getDefaultPanels = () => [
+  ALL_PANELS_CONFIG.collectionSearch,
+  ALL_PANELS_CONFIG.deckView,
+  ALL_PANELS_CONFIG.deckInfo,
+  ALL_PANELS_CONFIG.deckStats,
+  ALL_PANELS_CONFIG.aiPanel,
+];
 
 
 // Helper functions for synergy score interpretation
@@ -37,47 +109,7 @@ const getSynergyScoreLabel = (score) => {
   return 'Fair Synergy';
 };
 
-// --- Placeholder: Card Component ---
-// In a real app, this would be in its own file (e.g., '../Card.js')
-const Card = ({ card, quantity, onCardClick, showSynergyScore = false }) => {
-  // CORRECTED LOGIC: Handle single-faced and double-faced cards
-  const getImageUrl = (cardData) => {
-    if (!cardData) return null;
-    // Check for double-faced cards, which have a `card_faces` array
-    if (cardData.card_faces && cardData.card_faces.length > 0 && cardData.card_faces[0].image_uris) {
-      return cardData.card_faces[0].image_uris.normal;
-    }
-    // Fallback for single-faced cards
-    if (cardData.image_uris) {
-      return cardData.image_uris.normal;
-    }
-    // Final fallback if no image is found
-    return null;
-  };
 
-  const rawImageUrl = getImageUrl(card);
-  const { imageUrl, isLoading } = useImageCache(rawImageUrl);
-
-  return (
-    <div className="card-component" onClick={() => onCardClick(card)}>
-      <img 
-        src={imageUrl} 
-        alt={card?.name || 'Card Image'} 
-        loading="lazy"
-        className={isLoading ? 'loading' : ''}
-      />
-      {quantity && <div className="card-quantity-badge">{quantity}</div>}
-      {showSynergyScore && card.synergy_score !== undefined && (
-        <div 
-          className={`card-synergy-badge ${getSynergyScoreClass(card.synergy_score)}`}
-          title={getSynergyScoreLabel(card.synergy_score)}
-        >
-          {getSynergyScoreDisplay(card.synergy_score)}
-        </div>
-      )}
-    </div>
-  );
-};
 
 // --- DeckManager Component ---
 const DeckManager = ({ deck, format, currentDeckName, onSave, onLoad, onDelete, onNew }) => {
@@ -157,6 +189,105 @@ const DeckManager = ({ deck, format, currentDeckName, onSave, onLoad, onDelete, 
   );
 };
 
+// ===================================================================================
+// New: LayoutControls component
+// This component provides the UI for adding, removing, and managing layouts.
+// ===================================================================================
+const LayoutControls = ({ panels, onAddPanel, onRemovePanel, onSaveLayout, onResetLayout, layouts }) => {
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+  const availablePanelsToAdd = Object.values(ALL_PANELS_CONFIG).filter(
+    p => !panels.some(panelOnScreen => panelOnScreen.id === p.id)
+  );
+
+  const handleDebugLayouts = () => {
+    console.group('🔍 Layout Debug Information');
+    console.log('Current layouts:', layouts);
+    console.log('Current panels:', panels);
+    console.log('LocalStorage layouts:', localStorage.getItem('deckBuilderLayouts'));
+    console.log('LocalStorage panels:', localStorage.getItem('deckBuilderPanels'));
+    
+    // Check for layout issues (using 12-column bootstrap grid)
+    Object.keys(layouts).forEach(breakpoint => {
+      const layout = layouts[breakpoint];
+      const cols = 12; // Bootstrap-style: 12 columns for all breakpoints
+      
+      console.group(`📊 ${breakpoint.toUpperCase()} Layout (${cols} cols)`);
+      
+      layout.forEach(item => {
+        const issues = [];
+        if (item.x + item.w > cols) issues.push(`width overflow (x:${item.x} + w:${item.w} > ${cols})`);
+        if (item.x < 0) issues.push('negative x');
+        if (item.y < 0) issues.push('negative y');
+        if (item.w <= 0) issues.push('invalid width');
+        if (item.h <= 0) issues.push('invalid height');
+        
+        console.log(`${item.i}:`, {
+          x: item.x, y: item.y, w: item.w, h: item.h,
+          issues: issues.length > 0 ? issues : 'OK'
+        });
+      });
+      
+      console.groupEnd();
+    });
+    
+    console.groupEnd();
+  };
+
+  return (
+    <div className="layout-controls">
+      <div className="relative">
+        <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="control-button add-panel-button">
+          <Plus size={16} /> Add Panel
+        </button>
+        {isMenuOpen && (
+          <div className="add-panel-menu">
+            {availablePanelsToAdd.length > 0 ? (
+              availablePanelsToAdd.map(panel => (
+                <button
+                  key={panel.id}
+                  onClick={() => {
+                    onAddPanel(panel);
+                    setIsMenuOpen(false);
+                  }}
+                >
+                  {panel.title}
+                </button>
+              ))
+            ) : (
+              <div className="no-panels-message">All panels are on screen.</div>
+            )}
+          </div>
+        )}
+      </div>
+      <button onClick={onSaveLayout} className="control-button">
+        <Save size={16} /> Save Layout
+      </button>
+      <button onClick={onResetLayout} className="control-button">
+        <Trash2 size={16} /> Reset Layout
+      </button>
+      <button onClick={handleDebugLayouts} className="control-button">
+        Debug Layouts
+      </button>
+      <button onClick={() => {
+        // Clear localStorage
+        localStorage.removeItem('deckBuilderLayouts');
+        localStorage.removeItem('deckBuilderPanels');
+        
+        // Force reinitialize with bootstrap layout
+        const defaultPanels = getDefaultPanels();
+        const defaultLayouts = generateResponsiveLayouts(defaultPanels);
+        setPanels(defaultPanels);
+        setLayouts(defaultLayouts);
+        
+        console.log('🔄 Force refreshed with bootstrap layouts:', defaultLayouts);
+      }} className="control-button">
+        Force Refresh
+      </button>
+    </div>
+  );
+};
+
 
 // --- Main DeckBuilder Component ---
 const DeckBuilder = () => {
@@ -167,17 +298,29 @@ const DeckBuilder = () => {
   const [collectionCounts, setCollectionCounts] = useState(new Map());
   const [ownedCards, setOwnedCards] = useState([]);
   const [ownedLoading, setOwnedLoading] = useState(false);
-  const [leftPanelView, setLeftPanelView] = useState('collection'); // 'collection' | 'search'
-  const [rightPanelView, setRightPanelView] = useState('deck'); // 'deck' | 'recommendations' | 'tokens'
+  
+  // REMOVED: `leftPanelView` and `rightPanelView` states are now obsolete.
+  // The presence of a panel in the `panels` state determines its visibility.
 
   // New state for recommendations
   const [recommendations, setRecommendations] = useState([]);
   const [deckArchetype, setDeckArchetype] = useState(null);
   const [deckAnalysis, setDeckAnalysis] = useState(null);
   const [recoLoading, setRecoLoading] = useState(false);
+  
+  // 🧪 Strategy Testing State
+  const [strategyComparison, setStrategyComparison] = useState(null);
+  const [availableStrategies, setAvailableStrategies] = useState([]);
+  const [activeStrategy, setActiveStrategy] = useState('primary_fallback');
   const [format, setFormat] = useState('commander'); // 'commander' | 'standard'
   const [selectedCard, setSelectedCard] = useState(null); // For modal
   const [currentDeckName, setCurrentDeckName] = useState('');
+
+  // ===================================================================================
+  // New: State for deck validation results
+  // ===================================================================================
+  const [validationResults, setValidationResults] = useState({ valid: true, errors: [], warnings: [] });
+
 
   // Navigation state - tracks which card list context we're navigating
   const [navigationContext, setNavigationContext] = useState('collection'); // 'collection' | 'search' | 'recommendations' | 'tokens'
@@ -195,18 +338,42 @@ const DeckBuilder = () => {
   // NEW: state for tracking which card type categories are expanded
   const [expandedCategories, setExpandedCategories] = useState(new Set(['Creatures', 'Lands'])); // Start with creatures and lands expanded
 
+  // NEW: state for recommendation settings modal
+  const [showSettings, setShowSettings] = useState(false);
+
+  // 🔧 NEW: state for pattern analysis in recommendations
+  const [showPatternAnalysis, setShowPatternAnalysis] = useState(null); // cardId of card being analyzed
+
   // Hold results returned by advanced search controls
   const [collectionSearchResults, setCollectionSearchResults] = useState(null); // null means no search yet
+  
+  // Search term state for AI suggestions
+  const [searchTerm, setSearchTerm] = useState('');
 
-  // Window width for responsive GridLayout
-  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+  // ===================================================================================
+  // New: State management for dynamic layouts and panels
+  // ===================================================================================
+  const [layouts, setLayouts] = useState({});
+  const [panels, setPanels] = useState([]);
 
-  // Handle window resize for responsive GridLayout
+  // ===================================================================================
+  // New: useEffect for Deck Validation
+  // This hook runs whenever the deck or format changes, providing real-time feedback.
+  // ===================================================================================
   useEffect(() => {
-    const handleResize = () => setWindowWidth(window.innerWidth);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+    // Debounce validation to avoid excessive calls during rapid changes
+    const validationHandle = setTimeout(async () => {
+      if (deck.mainboard.length > 0 || deck.commanders.length > 0) {
+        const results = await window.electronAPI.deckValidate(deck, format);
+        setValidationResults(results);
+      } else {
+        // Reset to valid state if the deck is empty
+        setValidationResults({ valid: true, errors: [], warnings: [] });
+      }
+    }, 500); // 500ms debounce
+
+    return () => clearTimeout(validationHandle);
+  }, [deck, format]);
 
   // --- Auto-save draft deck to localStorage ---
   // 1) Restore any previous draft on first mount
@@ -229,6 +396,38 @@ const DeckBuilder = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ===================================================================================
+  // Bootstrap-style layout initialization
+  // ===================================================================================
+  useEffect(() => {
+    try {
+      const savedLayouts = localStorage.getItem('deckBuilderLayouts');
+      const savedPanels = localStorage.getItem('deckBuilderPanels');
+
+      // CORRECTED: Add check for 'undefined' string to prevent JSON parsing errors.
+      if (savedLayouts && savedLayouts !== 'undefined' && savedPanels && savedPanels !== 'undefined') {
+        const parsedLayouts = JSON.parse(savedLayouts);
+        const parsedPanels = JSON.parse(savedPanels);
+        setLayouts(parsedLayouts);
+        setPanels(parsedPanels);
+        console.log('✅ Loaded saved layouts from localStorage:', parsedLayouts);
+      } else {
+        const defaultPanels = getDefaultPanels();
+        const defaultLayouts = generateResponsiveLayouts(defaultPanels);
+        setLayouts(defaultLayouts);
+        setPanels(defaultPanels);
+        console.log('ℹ️ No saved layouts found, using bootstrap-style default:', defaultLayouts);
+      }
+    } catch (err) {
+      console.error('Failed to load layouts from localStorage, using defaults.', err);
+      const defaultPanels = getDefaultPanels();
+      const defaultLayouts = generateResponsiveLayouts(defaultPanels);
+      setLayouts(defaultLayouts);
+      setPanels(defaultPanels);
+    }
+  }, []);
+
 
   // 2) Persist changes (debounced) whenever the deck, format, or name changes
   useEffect(() => {
@@ -905,21 +1104,45 @@ const DeckBuilder = () => {
         setRecommendations(result.recommendations);
         setDeckArchetype(result.archetype || null);
         setDeckAnalysis(result.deckAnalysis || null);
+        
+        // 🧪 Update strategy testing data
+        setStrategyComparison(result.strategyComparison || null);
+        setAvailableStrategies(result.availableStrategies || []);
+        setActiveStrategy(result.activeStrategy || 'primary_fallback');
       } else {
         console.warn('Unexpected recommendations response:', result);
         setRecommendations([]);
         setDeckArchetype(null);
         setDeckAnalysis(null);
+        setStrategyComparison(null);
+        setAvailableStrategies([]);
       }
     } catch (error) {
       console.error('Failed to fetch recommendations:', error);
       setRecommendations([]);
       setDeckArchetype(null);
       setDeckAnalysis(null);
+      setStrategyComparison(null);
+      setAvailableStrategies([]);
     } finally {
       setRecoLoading(false);
     }
   }, [deck.mainboard, deck.commanders, format, recoLoading]);
+
+  // 🧪 Strategy Testing Handler
+  const handleStrategyChange = useCallback(async (strategy) => {
+    try {
+      await window.electronAPI.setActiveStrategy(strategy);
+      setActiveStrategy(strategy);
+      
+      // Regenerate recommendations with the new strategy
+      if (deck.mainboard.length > 0) {
+        await handleGetRecommendations();
+      }
+    } catch (error) {
+      console.error('Failed to change strategy:', error);
+    }
+  }, [deck.mainboard, handleGetRecommendations]);
 
   // NEW: Token analysis and suggestions
   const [tokenSuggestions, setTokenSuggestions] = useState([]);
@@ -1074,14 +1297,12 @@ const DeckBuilder = () => {
     !!selectedCard // Modal is open when selectedCard exists
   );
 
-  // Grid layout positions
-  const layoutConfig = [
-    { i: 'left', x: 0, y: 0, w: 4, h: 22, minW: 3, minH: 8 },
-    { i: 'main', x: 4, y: 0, w: 8, h: 22, minW: 4, minH: 10 },
-    { i: 'right', x: 12, y: 0, w: 4, h: 22, minW: 2, minH: 8 }
-  ];
+  // REMOVED: `layoutConfig` is no longer static. It's managed by the `layouts` state.
 
   const [autoBuildLoading, setAutoBuildLoading] = useState(false);
+
+  // NEW: state for auto-build synergy score
+  const [autoBuildSynergy, setAutoBuildSynergy] = useState(null);
 
   const handleAutoBuildCommander = useCallback(async () => {
     if (autoBuildLoading) return;
@@ -1101,15 +1322,123 @@ const DeckBuilder = () => {
       // Transform into DeckBuilder state shape
       const transformedMainboard = (generated.mainboard || []).map(card => ({ card, quantity: 1 }));
       setDeck({ commanders: generated.commanders || [], mainboard: transformedMainboard, sideboard: [] });
-      setRightPanelView('deck');
+      
+      // Store the synergy score
+      setAutoBuildSynergy(synergy);
+      
       console.log('🛠️ Auto-built deck synergy score:', synergy?.toFixed?.(0));
     } catch (err) {
       console.error('Auto build error:', err);
       alert('Auto build failed: ' + err.message);
+      setAutoBuildSynergy(null);
     } finally {
       setAutoBuildLoading(false);
     }
   }, [autoBuildLoading, format]);
+
+  // ===================================================================================
+  // New: Layout and Panel Management Functions
+  // ===================================================================================
+  const handleLayoutChange = (currentLayout, allLayouts) => {
+    // This function is called by react-grid-layout.
+    // We update our state which will be persisted on drag/resize stop.
+    // Only update if the layouts have actually changed to prevent unnecessary re-renders
+    const layoutsStringified = JSON.stringify(allLayouts);
+    const currentLayoutsStringified = JSON.stringify(layouts);
+    
+    if (layoutsStringified !== currentLayoutsStringified) {
+      setLayouts(allLayouts);
+    }
+  };
+
+  const persistLayoutToLocalStorage = () => {
+    try {
+      localStorage.setItem('deckBuilderLayouts', JSON.stringify(layouts));
+      localStorage.setItem('deckBuilderPanels', JSON.stringify(panels));
+    } catch (err) {
+      console.error('Failed to persist layouts:', err);
+    }
+  };
+
+  const handleSaveLayout = () => {
+    persistLayoutToLocalStorage();
+    alert('✅ Layout saved!');
+  };
+
+  const handleResetLayout = () => {
+    if (window.confirm('Are you sure you want to reset the layout to default?')) {
+      const defaultPanels = getDefaultPanels();
+      const defaultLayouts = generateResponsiveLayouts(defaultPanels);
+      
+      setLayouts(defaultLayouts);
+      setPanels(defaultPanels);
+      
+      // Clear localStorage
+      localStorage.removeItem('deckBuilderLayouts');
+      localStorage.removeItem('deckBuilderPanels');
+      
+      // Force immediate persistence of the new layout
+      try {
+        localStorage.setItem('deckBuilderLayouts', JSON.stringify(defaultLayouts));
+        localStorage.setItem('deckBuilderPanels', JSON.stringify(defaultPanels));
+      } catch (err) {
+        console.error('Failed to persist reset layouts:', err);
+      }
+      
+      alert('Layout has been reset to bootstrap-style default.');
+    }
+  };
+  
+  const handleAddPanel = (panelConfig) => {
+    // Add to panels list
+    const newPanels = [...panels, panelConfig];
+    setPanels(newPanels);
+    
+    // Regenerate layouts using bootstrap-style algorithm
+    const newLayouts = generateResponsiveLayouts(newPanels);
+    setLayouts(newLayouts);
+  };
+  
+  const handleRemovePanel = (panelId) => {
+    // Remove from panels list
+    const newPanels = panels.filter(p => p.id !== panelId);
+    setPanels(newPanels);
+    
+    // Regenerate layouts using bootstrap-style algorithm
+    const newLayouts = generateResponsiveLayouts(newPanels);
+    setLayouts(newLayouts);
+  };
+
+  // ===================================================================================
+  // New: Panel Content Rendering
+  // These functions encapsulate the JSX for each panel, keeping the main return clean.
+  // They receive all necessary state and handlers as props.
+  // ===================================================================================
+
+  const renderPanelContent = (panel) => {
+    const panelProps = {
+      // Pass all state and handlers needed by the panels here
+      deck, format, setFormat, bulkDataStats, searchResults, searchLoading, deckBulkSearch, cardTypeFilter, setCardTypeFilter, collectionSort, setCollectionSort, sortDirection, setSortDirection, addCardToDeck, removeCardFromDeck, handleCardClick, ownedLoading, displayCollectionCards, searchHelperRef, currentDeckName, handleSaveDeck, handleLoadDeck, handleDeleteDeck, handleNewDeck, autoBuildLoading, handleAutoBuildCommander, memoizedDeckStats, groupedMainboard, expandedCategories, toggleCategory, expandAllCategories, collapseAllCategories, mainboardCount, incrementQty, decrementQty, setCommander, removeCommander, isBasicLand, isCardCommander, recoLoading, handleGetRecommendations, displayRecommendations, recommendationsSort, setRecommendationsSort, recommendationsSortDirection, setRecommendationsSortDirection, tokenLoading, handleGetTokenSuggestions, tokenSuggestions, validationResults, autoBuildSynergy, showSettings, setShowSettings, searchTerm, setSearchTerm,
+      // 🧪 Strategy Testing Props
+      strategyComparison, availableStrategies, activeStrategy, handleStrategyChange,
+      // 🔧 Pattern Analysis Props
+      showPatternAnalysis, setShowPatternAnalysis
+    };
+    
+    switch (panel.id) {
+      case 'collectionSearch': return <CollectionSearchPanel {...panelProps} />;
+      case 'deckView': return <DeckViewPanel {...panelProps} />;
+      case 'deckInfo': return <DeckInfoPanel {...panelProps} />;
+      case 'recommendations': return <RecommendationsPanel {...panelProps} />;
+      case 'tokenSuggestions': return <TokenSuggestionsPanel {...panelProps} />;
+      case 'autoBuild': return <AutoBuildPanel {...panelProps} />;
+      case 'deckStats': return <DeckStatsPanel {...panelProps} />;
+      case 'spellbookExport': return <SpellbookExportPanel {...panelProps} />;
+      case 'aiPanel': return <AIPanelComponent {...panelProps} />;
+      default: return <div>Unknown Panel</div>;
+    }
+  };
+
 
   return (
     <div className="deck-builder-container">
@@ -1125,478 +1454,522 @@ const DeckBuilder = () => {
           totalCards={navigation.totalCards}
         />
       )}
-      <GridLayout
+      
+      {/* ============================================================== */}
+      {/* New: Layout Controls are placed at the top of the component     */}
+      {/* ============================================================== */}
+      <LayoutControls 
+        panels={panels}
+        onAddPanel={handleAddPanel}
+        onRemovePanel={handleRemovePanel}
+        onSaveLayout={handleSaveLayout}
+        onResetLayout={handleResetLayout}
+        layouts={layouts}
+      />
+      
+      {/* Only render the grid when we have both layouts and panels properly initialized */}
+      {Object.keys(layouts).length > 0 && panels.length > 0 && 
+       Object.keys(layouts).every(bp => Array.isArray(layouts[bp])) && (
+      <ResponsiveGridLayout
         className="deck-builder-grid"
-        layout={layoutConfig}
-        cols={16}
+        layouts={layouts}
+        breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
+        cols={{ lg: 12, md: 12, sm: 12, xs: 12, xxs: 12 }}
         rowHeight={30}
-        width={windowWidth}
+        onLayoutChange={handleLayoutChange}
+        onDragStop={persistLayoutToLocalStorage}
+        onResizeStop={persistLayoutToLocalStorage}
         draggableHandle=".drag-handle"
-        isResizable={true}
-        isDraggable={true}
-        resizeHandles={['se', 'sw', 'ne', 'nw']}
+        resizeHandles={["s", "w", "e", "n", "sw", "nw", "se", "ne"]}
         margin={[10, 10]}
         containerPadding={[10, 10]}
         compactType="vertical"
         preventCollision={false}
-        autoSize={true}
-        useCSSTransforms={true}
-        onLayoutChange={(layout) => {
-          // Optional: Save layout changes to localStorage or state
-          console.log('Layout changed:', layout);
-        }}
       >
-        {/* Left Panel */}
-        <div key="left" className="deck-builder-left-panel panel">
-          <div className="drag-handle panel-drag-bar">⋮⋮ Collection & Search</div>
-          <div className="panel-toggle">
-            <button onClick={() => setLeftPanelView('collection')} className={leftPanelView === 'collection' ? 'active' : ''}>My Collection</button>
-            <button onClick={() => setLeftPanelView('search')} className={leftPanelView === 'search' ? 'active' : ''}>Card Search</button>
+        {panels.map(panel => (
+          <div key={panel.id} className="panel">
+            <div className="drag-handle panel-drag-bar">
+              <span>⋮⋮ {ALL_PANELS_CONFIG[panel.id]?.title || 'Panel'}</span>
+              <button onClick={() => handleRemovePanel(panel.id)} className="remove-panel-button" title="Remove Panel">
+                <X size={16} />
+              </button>
+            </div>
+            {renderPanelContent(panel)}
           </div>
+        ))}
+      </ResponsiveGridLayout>
+      )}
+      
+      {/* Recommendation Settings Modal */}
+      <RecommendationSettings 
+        isOpen={showSettings} 
+        onClose={() => setShowSettings(false)} 
+      />
+    </div>
+  );
+};
 
-          {leftPanelView === 'search' && (
-            <div className="search-view">
-              <SearchControls
-                onSearch={deckBulkSearch}
-                bulkDataStats={bulkDataStats}
-              />
-              <div className="collection-controls">
-                <select
-                  value={cardTypeFilter}
-                  onChange={(e) => setCardTypeFilter(e.target.value)}
-                  title="Filter by card type"
-                >
-                  <option value="all">All Types</option>
-                  <option value="creature">Creatures</option>
-                  <option value="land">Lands</option>
-                  <option value="instant">Instants</option>
-                  <option value="sorcery">Sorceries</option>
-                  <option value="enchantment">Enchantments</option>
-                  <option value="artifact">Artifacts</option>
-                  <option value="planeswalker">Planeswalkers</option>
-                  <option value="battle">Battles</option>
-                </select>
-                <select
-                  value={collectionSort}
-                  onChange={(e) => setCollectionSort(e.target.value)}
-                  title="Sort cards by"
-                >
-                  <option value="name">Name</option>
-                  <option value="cmc">Mana Cost</option>
-                  <option value="power">Power</option>
-                  <option value="toughness">Toughness</option>
-                  <option value="rarity">Rarity</option>
-                </select>
-                <button
-                  className="sort-direction-toggle"
-                  onClick={() => setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')}
-                  title={`Sort ${sortDirection === 'asc' ? 'ascending' : 'descending'} - click to toggle`}
-                >
-                  {sortDirection === 'asc' ? '↑' : '↓'}
-                </button>
-              </div>
-              <div className="search-results-grid">
-                {searchLoading && <p>Searching...</p>}
-                {!searchLoading && filteredSearchResults.map(card => {
-                  const isInDeck = deck.mainboard.some(entry => entry.card.id === card.id);
+// ===================================================================================
+// New: Individual Panel Components
+// These functional components render the content for each specific panel.
+// ===================================================================================
 
-                  return (
-                    <div key={card.id} className="card-grid-item">
-                      <Card card={card} onCardClick={(card) => handleCardClick(card, 'search')} />
-                      <button
-                        className={isInDeck ? 'remove-from-deck' : ''}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (isInDeck) {
-                            removeCardFromDeck(card.id);
-                          } else {
-                            addCardToDeck(card);
-                          }
-                        }}
-                      >
-                        {isInDeck ? 'Remove from Deck' : 'Add to Deck'}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+const CollectionSearchPanel = (props) => {
+  const { deck, filteredSearchResults, bulkDataStats, searchResults, searchLoading, deckBulkSearch, cardTypeFilter, setCardTypeFilter, collectionSort, setCollectionSort, sortDirection, setSortDirection, addCardToDeck, removeCardFromDeck, handleCardClick, ownedLoading, displayCollectionCards, searchHelperRef } = props;
+  const [activeView, setActiveView] = useState('collection'); // 'collection' | 'search'
 
-          {leftPanelView === 'collection' && (
-            <div className="collection-view">
-              <h3>My Collection ({displayCollectionCards.length} unique)</h3>
-              {/* NEW: inline search & sort controls */}
-              <div className="collection-controls">
-                <SearchControls
-                  onSearch={(params) => searchHelperRef.current?.handleCollectionSearch(params)}
-                  bulkDataStats={bulkDataStats}
-                />
-                <select
-                  value={cardTypeFilter}
-                  onChange={(e) => setCardTypeFilter(e.target.value)}
-                  title="Filter by card type"
-                >
-                  <option value="all">All Types</option>
-                  <option value="creature">Creatures</option>
-                  <option value="land">Lands</option>
-                  <option value="instant">Instants</option>
-                  <option value="sorcery">Sorceries</option>
-                  <option value="enchantment">Enchantments</option>
-                  <option value="artifact">Artifacts</option>
-                  <option value="planeswalker">Planeswalkers</option>
-                  <option value="battle">Battles</option>
-                </select>
-                <select
-                  value={collectionSort}
-                  onChange={(e) => setCollectionSort(e.target.value)}
-                  title="Sort cards by"
-                >
-                  <option value="name">Name</option>
-                  <option value="cmc">Mana Cost</option>
-                  <option value="power">Power</option>
-                  <option value="toughness">Toughness</option>
-                  <option value="rarity">Rarity</option>
-                  <option value="quantity">Quantity</option>
-                </select>
-                <button
-                  className="sort-direction-toggle"
-                  onClick={() => setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')}
-                  title={`Sort ${sortDirection === 'asc' ? 'ascending' : 'descending'} - click to toggle`}
-                >
-                  {sortDirection === 'asc' ? '↑' : '↓'}
-                </button>
-              </div>
-              <div className="owned-cards-grid">
-                {ownedLoading && <p>Loading collection...</p>}
-                {!ownedLoading && displayCollectionCards.map(entry => {
-                  const isInDeck = deck.mainboard.some(deckEntry => deckEntry.card.id === entry.card.id);
+  return (
+    <>
+      <div className="panel-toggle">
+        <button onClick={() => setActiveView('collection')} className={activeView === 'collection' ? 'active' : ''}>My Collection</button>
+        <button onClick={() => setActiveView('search')} className={activeView === 'search' ? 'active' : ''}>Card Search</button>
+      </div>
 
-                  return (
-                    <div key={entry.card.id} className="card-grid-item">
-                      <Card card={entry.card} quantity={entry.quantity} onCardClick={(card) => handleCardClick(card, 'collection')} />
-                      <button
-                        className={isInDeck ? 'remove-from-deck' : ''}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (isInDeck) {
-                            removeCardFromDeck(entry.card.id);
-                          } else {
-                            addCardToDeck(entry.card);
-                          }
-                        }}
-                      >
-                        {isInDeck ? 'Remove from Deck' : 'Add to Deck'}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-        {/* Main Panel */}
-        <div key="main" className="deck-builder-main-panel panel">
-          <div className="drag-handle panel-drag-bar">⋮⋮ Deck Builder</div>
-          <div className="deck-stats-and-actions">
-            <h2>{currentDeckName ? `Deck: ${currentDeckName}` : 'Untitled Deck'}</h2>
-            <div className="format-selector">
-              <label>Format: </label>
-              <select value={format} onChange={e => setFormat(e.target.value)}>
-                <option value="commander">Commander</option>
-                <option value="standard">Standard</option>
-                <option value="modern">Modern</option>
-                <option value="legacy">Legacy</option>
-                <option value="vintage">Vintage</option>
-                <option value="pauper">Pauper</option>
-              </select>
-            </div>
+      {activeView === 'search' && (
+        <div className="search-view">
+          <SearchControls
+            onSearch={deckBulkSearch}
+            bulkDataStats={bulkDataStats}
+          />
+          <div className="collection-controls">
+            <select value={cardTypeFilter} onChange={(e) => setCardTypeFilter(e.target.value)} title="Filter by card type">
+              <option value="all">All Types</option>
+              <option value="creature">Creatures</option><option value="land">Lands</option><option value="instant">Instants</option><option value="sorcery">Sorceries</option><option value="enchantment">Enchantments</option><option value="artifact">Artifacts</option><option value="planeswalker">Planeswalkers</option><option value="battle">Battles</option>
+            </select>
+            <select value={collectionSort} onChange={(e) => setCollectionSort(e.target.value)} title="Sort cards by">
+              <option value="name">Name</option><option value="cmc">Mana Cost</option><option value="power">Power</option><option value="toughness">Toughness</option><option value="rarity">Rarity</option>
+            </select>
+            <button className="sort-direction-toggle" onClick={() => setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')} title={`Sort ${sortDirection === 'asc' ? 'ascending' : 'descending'} - click to toggle`}>
+              {sortDirection === 'asc' ? '↑' : '↓'}
+            </button>
           </div>
-
-          {format === 'commander' && (
-            <div className="command-zone-container">
-              <h3>Commander(s)</h3>
-              <div className="command-zone">
-                {/* Left: Commander card(s) */}
-                <div className="commander-cards">
-                  {deck.commanders.length > 0 ? (
-                    deck.commanders.map(c => (
-                      <div key={c.id} className="card-grid-item-deck">
-                        <Card card={c} onCardClick={handleCardClick} />
-                        <div className="deck-card-actions">
-                          <button className="remove-button" onClick={() => removeCommander(c.id)}>Remove</button>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="empty-slot">Drop a legendary creature here to set as commander.</div>
-                  )}
+          <div className="search-results-grid">
+            {searchLoading && <p>Searching...</p>}
+            {!searchLoading && filteredSearchResults.map(card => {
+              const isInDeck = deck.mainboard.some(entry => entry.card.id === card.id);
+              return (
+                <div key={card.id} className="card-grid-item">
+                  <Card card={card} onCardClick={(card) => handleCardClick(card, 'search')} />
+                  <button className={isInDeck ? 'remove-from-deck' : ''} onClick={(e) => { e.stopPropagation(); if (isInDeck) { removeCardFromDeck(card.id); } else { addCardToDeck(card); } }}>
+                    {isInDeck ? 'Remove from Deck' : 'Add to Deck'}
+                  </button>
                 </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
-                {/* Right: Commander details (showing first commander for now) */}
-                {deck.commanders.length > 0 && (
-                  <div className="commander-details">
-                    {(() => {
-                      const cmd = deck.commanders[0];
-                      return (
-                        <>
-                          <h4 className="details-name">{cmd.name}</h4>
-                          {(cmd.manaCost || cmd.mana_cost) && (
-                            <p className="details-line"><strong>Mana Cost:</strong> {cmd.manaCost || cmd.mana_cost}</p>
-                          )}
-                          {(cmd.type || cmd.type_line) && (
-                            <p className="details-line"><strong>Type:</strong> {cmd.type.replace(/\?\?\?/g, '—') || cmd.type_line.replace(/\?\?\?/g, '—')}</p>
-                          )}
-                          {(cmd.text || cmd.oracle_text) && (
-                            <p className="details-line" style={{ whiteSpace: 'pre-line' }}><strong>Oracle Text:</strong> {(cmd.text || cmd.oracle_text).replace(/\\n/g, '\n').replace(/\?\?\?/g, '—')}</p>
-                          )}
-                          {cmd.power && cmd.toughness && (
-                            <p className="details-line"><strong>P/T:</strong> {cmd.power}/{cmd.toughness}</p>
-                          )}
-                          {cmd.color_identity && cmd.color_identity.length > 0 && (
-                            <p className="details-line"><strong>Color Identity:</strong> {cmd.color_identity.join(', ')}</p>
-                          )}
-                        </>
-                      );
-                    })()}
+      {activeView === 'collection' && (
+        <div className="collection-view">
+          <h3>My Collection ({displayCollectionCards.length} unique)</h3>
+          <div className="collection-controls">
+            <SearchControls onSearch={(params) => searchHelperRef.current?.handleCollectionSearch(params)} bulkDataStats={bulkDataStats} />
+            <select value={cardTypeFilter} onChange={(e) => setCardTypeFilter(e.target.value)} title="Filter by card type">
+              <option value="all">All Types</option><option value="creature">Creatures</option><option value="land">Lands</option><option value="instant">Instants</option><option value="sorcery">Sorceries</option><option value="enchantment">Enchantments</option><option value="artifact">Artifacts</option><option value="planeswalker">Planeswalkers</option><option value="battle">Battles</option>
+            </select>
+            <select value={collectionSort} onChange={(e) => setCollectionSort(e.target.value)} title="Sort cards by">
+              <option value="name">Name</option><option value="cmc">Mana Cost</option><option value="power">Power</option><option value="toughness">Toughness</option><option value="rarity">Rarity</option><option value="quantity">Quantity</option>
+            </select>
+            <button className="sort-direction-toggle" onClick={() => setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')} title={`Sort ${sortDirection === 'asc' ? 'ascending' : 'descending'} - click to toggle`}>
+              {sortDirection === 'asc' ? '↑' : '↓'}
+            </button>
+          </div>
+          <div className="owned-cards-grid">
+            {ownedLoading && <p>Loading collection...</p>}
+            {!ownedLoading && displayCollectionCards.map(entry => {
+              const isInDeck = deck.mainboard.some(deckEntry => deckEntry.card.id === entry.card.id);
+              return (
+                <div key={entry.card.id} className="card-grid-item">
+                  <Card card={entry.card} quantity={entry.quantity} onCardClick={(card) => handleCardClick(card, 'collection')} />
+                  <button className={isInDeck ? 'remove-from-deck' : ''} onClick={(e) => { e.stopPropagation(); if (isInDeck) { removeCardFromDeck(entry.card.id); } else { addCardToDeck(entry.card); } }}>
+                    {isInDeck ? 'Remove from Deck' : 'Add to Deck'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
+const DeckViewPanel = (props) => {
+  const { deck, format, setFormat, currentDeckName, handleCardClick, removeCommander, mainboardCount, groupedMainboard, expandedCategories, toggleCategory, expandAllCategories, collapseAllCategories, incrementQty, decrementQty, removeCardFromDeck, setCommander, isCardCommander, isBasicLand } = props;
+  
+  return (
+    <>
+      <div className="deck-stats-and-actions">
+        <h2>{currentDeckName ? `Deck: ${currentDeckName}` : 'Untitled Deck'}</h2>
+        <div className="format-selector">
+          <label>Format: </label>
+          <select value={format} onChange={e => setFormat(e.target.value)}>
+            <option value="commander">Commander</option><option value="standard">Standard</option><option value="modern">Modern</option><option value="legacy">Legacy</option><option value="vintage">Vintage</option><option value="pauper">Pauper</option>
+          </select>
+        </div>
+      </div>
+
+      {format === 'commander' && (
+        <div className="command-zone-container">
+          <h3>Commander(s)</h3>
+          <div className="command-zone">
+            <div className="commander-cards">
+              {deck.commanders.length > 0 ? (
+                deck.commanders.map(c => (
+                  <div key={c.id} className="card-grid-item-deck">
+                    <Card card={c} onCardClick={handleCardClick} />
+                    <div className="deck-card-actions"><button className="remove-button" onClick={() => removeCommander(c.id)}>Remove</button></div>
                   </div>
-                )}
-              </div>
+                ))
+              ) : <div className="empty-slot">Drop a legendary creature here.</div>}
             </div>
-          )}
-
-          <div className="mainboard-container">
-            <h3>Mainboard ({mainboardCount} cards)</h3>
-            
-            {/* Category management controls */}
-            {Object.keys(groupedMainboard).length > 1 && (
-              <div className="category-controls">
-                <button onClick={expandAllCategories}>Expand All</button>
-                <button onClick={collapseAllCategories}>Collapse All</button>
+            {deck.commanders.length > 0 && (
+              <div className="commander-details">
+                {(() => { const cmd = deck.commanders[0]; return (<> <h4 className="details-name">{cmd.name}</h4> {(cmd.manaCost || cmd.mana_cost) && (<p className="details-line"><strong>Mana Cost:</strong> {cmd.manaCost || cmd.mana_cost}</p>)} {(cmd.type || cmd.type_line) && (<p className="details-line"><strong>Type:</strong> {cmd.type.replace(/\?\?\?/g, '—') || cmd.type_line.replace(/\?\?\?/g, '—')}</p>)} {(cmd.text || cmd.oracle_text) && (<p className="details-line" style={{ whiteSpace: 'pre-line' }}><strong>Oracle Text:</strong> {(cmd.text || cmd.oracle_text).replace(/\\n/g, '\n').replace(/\?\?\?/g, '—')}</p>)} {cmd.power && cmd.toughness && (<p className="details-line"><strong>P/T:</strong> {cmd.power}/{cmd.toughness}</p>)} {cmd.color_identity && cmd.color_identity.length > 0 && (<p className="details-line"><strong>Color Identity:</strong> {cmd.color_identity.join(', ')}</p>)} </>); })()}
               </div>
             )}
+          </div>
+        </div>
+      )}
 
-            {/* Scrollable categories container */}
-            <div className="categories-container">
-              {/* Grouped cards by type */}
-              {Object.entries(groupedMainboard).map(([categoryName, cards]) => {
-                const isExpanded = expandedCategories.has(categoryName);
-                const totalCards = cards.reduce((sum, entry) => sum + entry.quantity, 0);
-                
-                return (
-                  <div key={categoryName} className="card-type-category">
-                    <div 
-                      className={`category-header ${isExpanded ? 'expanded' : ''}`}
-                      onClick={() => toggleCategory(categoryName)}
-                    >
-                      <div className="category-title">
-                        <span>{categoryName}</span>
-                        <span className="category-count">{totalCards}</span>
+      <div className="mainboard-container">
+        <h3>Mainboard ({mainboardCount} cards)</h3>
+        {Object.keys(groupedMainboard).length > 1 && (
+          <div className="category-controls"><button onClick={expandAllCategories}>Expand All</button><button onClick={collapseAllCategories}>Collapse All</button></div>
+        )}
+        <div className="categories-container">
+          {Object.entries(groupedMainboard).map(([categoryName, cards]) => {
+            const isExpanded = expandedCategories.has(categoryName);
+            const totalCards = cards.reduce((sum, entry) => sum + entry.quantity, 0);
+            return (
+              <div key={categoryName} className="card-type-category">
+                <div className={`category-header ${isExpanded ? 'expanded' : ''}`} onClick={() => toggleCategory(categoryName)}>
+                  <div className="category-title"><span>{categoryName}</span><span className="category-count">{totalCards}</span></div>
+                  <span className={`category-toggle ${isExpanded ? 'expanded' : ''}`}>▶</span>
+                </div>
+                <div className={`category-content ${!isExpanded ? 'collapsed' : ''}`}>
+                  {cards.map(entry => (
+                    <div key={entry.card.id} className="card-grid-item-deck">
+                      <Card card={entry.card} quantity={entry.quantity} onCardClick={handleCardClick} />
+                      <div className="deck-card-actions">
+                        <button onClick={() => incrementQty(entry.card.id)} disabled={format === 'commander' && !isBasicLand(entry.card)} title={format === 'commander' && !isBasicLand(entry.card) ? 'Commander format allows only one copy' : ''}>+</button>
+                        <button onClick={() => decrementQty(entry.card.id)}>-</button>
+                        <button className="remove-button" onClick={() => removeCardFromDeck(entry.card.id)}>Remove</button>
+                        {format === 'commander' && isCardCommander(entry.card) && (<button className="set-commander-button" onClick={() => setCommander(entry.card)}>Set Cmdr</button>)}
                       </div>
-                      <span className={`category-toggle ${isExpanded ? 'expanded' : ''}`}>
-                        ▶
-                      </span>
                     </div>
-                    
-                    <div className={`category-content ${!isExpanded ? 'collapsed' : ''}`}>
-                      {cards.map(entry => (
-                        <div key={entry.card.id} className="card-grid-item-deck">
-                          <Card card={entry.card} quantity={entry.quantity} onCardClick={handleCardClick} />
-                          <div className="deck-card-actions">
-                            <button
-                              onClick={() => incrementQty(entry.card.id)}
-                              disabled={format === 'commander' && !isBasicLand(entry.card)}
-                              title={format === 'commander' && !isBasicLand(entry.card) ? 'Commander format allows only one copy of non-basic cards' : ''}
-                            >
-                              +
-                            </button>
-                            <button onClick={() => decrementQty(entry.card.id)}>-</button>
-                            <button className="remove-button" onClick={() => removeCardFromDeck(entry.card.id)}>Remove</button>
-                            {format === 'commander' && isCardCommander(entry.card) && (
-                              <button className="set-commander-button" onClick={() => setCommander(entry.card)}>Set Commander</button>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+          {Object.keys(groupedMainboard).length === 0 && (<div style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '40px 20px', fontStyle: 'italic' }}>No cards in mainboard.</div>)}
+        </div>
+      </div>
+    </>
+  );
+};
 
-              {/* Empty state */}
-              {Object.keys(groupedMainboard).length === 0 && (
-                <div style={{ 
-                  textAlign: 'center', 
-                  color: 'var(--text-secondary)', 
-                  padding: '40px 20px',
-                  fontStyle: 'italic'
-                }}>
-                  No cards in mainboard. Add cards from your collection or search results.
+const DeckInfoPanel = (props) => {
+  const { deck, format, currentDeckName, handleSaveDeck, handleLoadDeck, handleDeleteDeck, handleNewDeck, validationResults } = props;
+  return (
+    <div className="deck-info-view">
+      <DeckValidation results={validationResults} />
+      <DeckManager deck={deck} format={format} currentDeckName={currentDeckName} onSave={handleSaveDeck} onLoad={handleLoadDeck} onDelete={handleDeleteDeck} onNew={handleNewDeck} />
+    </div>
+  );
+};
+
+const RecommendationsPanel = (props) => {
+  const { deck, recoLoading, handleGetRecommendations, displayRecommendations, deckArchetype, cardTypeFilter, setCardTypeFilter, recommendationsSort, setRecommendationsSort, recommendationsSortDirection, setRecommendationsSortDirection, handleCardClick, addCardToDeck, removeCardFromDeck, showSettings, setShowSettings, strategyComparison, availableStrategies, activeStrategy, handleStrategyChange, showPatternAnalysis, setShowPatternAnalysis } = props;
+  return (
+    <div className="recommendations-view">
+      <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+        <button onClick={handleGetRecommendations} disabled={recoLoading}>
+          {recoLoading ? 'Getting Suggestions...' : 'Suggest Cards'}
+        </button>
+        <button 
+          onClick={() => setShowSettings(true)} 
+          title="Recommendation Engine Settings"
+          style={{ 
+            background: '#666', 
+            border: 'none', 
+            color: 'white', 
+            padding: '8px 12px', 
+            borderRadius: '4px', 
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px'
+          }}
+        >
+          <Settings size={16} />
+          Settings
+        </button>
+      </div>
+      {deckArchetype && <h4>Suggestions for: {deckArchetype}</h4>}
+      <div className="synergy-legend" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '8px 0', padding: '8px', backgroundColor: 'var(--bg-tertiary)', borderRadius: '4px' }}>
+        <strong>Synergy:</strong>
+        <span className="synergy-legend-item"><span className="synergy-badge-mini synergy-excellent">★★★</span> 300+</span>
+        <span className="synergy-legend-item"><span className="synergy-badge-mini synergy-great">★★☆</span> 250+</span>
+        <span className="synergy-legend-item"><span className="synergy-badge-mini synergy-good">★☆☆</span> 200+</span>
+        <span className="synergy-legend-item"><span className="synergy-badge-mini synergy-decent">◆</span> 150+</span>
+      </div>
+      <div className="collection-controls">
+        <select value={cardTypeFilter} onChange={(e) => setCardTypeFilter(e.target.value)} title="Filter by card type">
+          <option value="all">All Types</option><option value="creature">Creatures</option><option value="land">Lands</option><option value="instant">Instants</option><option value="sorcery">Sorceries</option><option value="enchantment">Enchantments</option><option value="artifact">Artifacts</option><option value="planeswalker">Planeswalkers</option><option value="battle">Battles</option>
+        </select>
+        <select value={recommendationsSort} onChange={(e) => setRecommendationsSort(e.target.value)} title="Sort cards by">
+          <option value="synergy">Synergy</option><option value="name">Name</option><option value="cmc">Cost</option><option value="power">Power</option><option value="toughness">Toughness</option><option value="rarity">Rarity</option>
+        </select>
+        <button className="sort-direction-toggle" onClick={() => setRecommendationsSortDirection(recommendationsSortDirection === 'asc' ? 'desc' : 'asc')} title={`Sort ${recommendationsSortDirection === 'asc' ? 'ascending' : 'descending'}`}>
+          {recommendationsSortDirection === 'asc' ? '↑' : '↓'}
+        </button>
+      </div>
+      
+      {/* 🧪 Strategy Testing Component */}
+      {strategyComparison && availableStrategies && (
+        <StrategyTester 
+          strategyComparison={strategyComparison}
+          availableStrategies={availableStrategies}
+          activeStrategy={activeStrategy}
+          onStrategyChange={handleStrategyChange}
+        />
+      )}
+      
+      <div className="search-results-grid">
+        {recoLoading && <p>Analyzing deck...</p>}
+        {!recoLoading && displayRecommendations.map(card => {
+          const isInDeck = deck.mainboard.some(entry => entry.card.id === card.id);
+          const showingPatterns = showPatternAnalysis === card.id;
+          return (
+            <div key={card.id} className="card-grid-item">
+              <Card card={card} onCardClick={(card) => handleCardClick(card, 'recommendations')} showSynergyScore={true} />
+              <div className="card-actions">
+                <button className={isInDeck ? 'remove-from-deck' : ''} onClick={(e) => { e.stopPropagation(); if (isInDeck) { removeCardFromDeck(card.id); } else { addCardToDeck(card); } }}>
+                  {isInDeck ? 'Remove' : 'Add'}
+                </button>
+                <button 
+                  className="pattern-analysis-btn" 
+                  onClick={(e) => { 
+                    e.stopPropagation(); 
+                    setShowPatternAnalysis(showingPatterns ? null : card.id); 
+                  }}
+                  title="Show pattern analysis"
+                >
+                  ⚙️ {showingPatterns ? 'Hide' : 'Patterns'}
+                </button>
+              </div>
+              {showingPatterns && (
+                <div className="inline-pattern-analysis">
+                  <PatternAnalysis card={card} />
                 </div>
               )}
             </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+// ===================================================================================
+// New: DeckValidation Component
+// Displays legality errors and warnings for the current deck.
+// ===================================================================================
+const DeckValidation = ({ results }) => {
+  if (!results || (results.errors.length === 0 && results.warnings.length === 0)) {
+    return (
+      <div className="deck-validation-widget valid">
+        <CheckCircle size={18} />
+        <span>Deck is valid for {results.format || 'the selected format'}.</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="deck-validation-widget">
+      <div className="validation-header">
+        <AlertTriangle size={18} />
+        <span>Deck Legality Issues</span>
+      </div>
+      <ul className="validation-list">
+        {results.errors.map((error, index) => (
+          <li key={`error-${index}`} className="error">
+            {error}
+          </li>
+        ))}
+        {results.warnings.map((warning, index) => (
+          <li key={`warning-${index}`} className="warning">
+            {warning}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+};
+
+
+const TokenSuggestionsPanel = (props) => {
+  const { deck, tokenLoading, handleGetTokenSuggestions, tokenSuggestions, handleCardClick, addCardToDeck, removeCardFromDeck } = props;
+  return (
+    <div className="recommendations-view">
+      <button onClick={handleGetTokenSuggestions} disabled={tokenLoading}>{tokenLoading ? 'Analyzing...' : 'Find Tokens'}</button>
+      <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', margin: '8px 0' }}>Suggestions based on cards in your deck.</p>
+      <div className="search-results-grid">
+        {tokenLoading && <p>Analyzing deck for token patterns...</p>}
+        {!tokenLoading && tokenSuggestions.length === 0 && <p>No token suggestions found.</p>}
+        {!tokenLoading && tokenSuggestions.map(token => {
+          const isInDeck = deck.mainboard.some(entry => entry.card.id === token.id);
+          return (
+            <div key={token.id} className="card-grid-item">
+              <Card card={token} onCardClick={(card) => handleCardClick(card, 'tokens')} />
+              <button className={isInDeck ? 'remove-from-deck' : ''} onClick={(e) => { e.stopPropagation(); if (isInDeck) { removeCardFromDeck(token.id); } else { addCardToDeck(token); } }}>
+                {isInDeck ? 'Remove' : 'Add'}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+const AutoBuildPanel = (props) => {
+  const { format, autoBuildLoading, handleAutoBuildCommander, autoBuildSynergy, deck } = props;
+  
+  const canAutoBuild = format === 'commander';
+  const hasGeneratedDeck = autoBuildSynergy !== null;
+  
+  return (
+    <div className="auto-build-view">
+      <div className="auto-build-header">
+        <h3>Auto-Build Commander</h3>
+        <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', margin: '8px 0' }}>
+          Generate a complete Commander deck automatically
+        </p>
+      </div>
+      
+      <button 
+        className="auto-build-button" 
+        onClick={handleAutoBuildCommander} 
+        disabled={autoBuildLoading || !canAutoBuild}
+        style={{ width: '100%', marginBottom: '16px' }}
+      >
+        {autoBuildLoading ? 'Building Deck…' : 'Auto Build Commander Deck'}
+      </button>
+      
+      {!canAutoBuild && (
+        <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', fontStyle: 'italic' }}>
+          Auto-build is only available for Commander format
+        </p>
+      )}
+      
+      {hasGeneratedDeck && (
+        <div className="auto-build-results">
+          <div className="synergy-score-display">
+            <h4>Last Generated Deck</h4>
+            <div className="synergy-score-container">
+              <div className="synergy-score-value">
+                <span className="synergy-score-number">{autoBuildSynergy?.toFixed?.(0) || 'N/A'}</span>
+                <span className="synergy-score-label">Synergy Score</span>
+              </div>
+              <div className="synergy-score-description">
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                  Higher scores indicate better card synergies and coherent strategy
+                </p>
+              </div>
+            </div>
+          </div>
+          
+          <div className="deck-composition">
+            <h5>Deck Composition</h5>
+            <div className="composition-stats">
+              <div className="stat">
+                <span className="stat-label">Commanders:</span>
+                <span className="stat-value">{deck.commanders.length}</span>
+              </div>
+              <div className="stat">
+                <span className="stat-label">Mainboard:</span>
+                <span className="stat-value">{deck.mainboard.length} unique cards</span>
+              </div>
+              <div className="stat">
+                <span className="stat-label">Total Cards:</span>
+                <span className="stat-value">{deck.commanders.length + deck.mainboard.reduce((sum, entry) => sum + entry.quantity, 0)}</span>
+              </div>
+            </div>
           </div>
         </div>
-        {/* Right Panel */}
-        <div key="right" className="deck-builder-right-panel panel">
-          <div className="drag-handle panel-drag-bar">⋮⋮ Deck Tools</div>
-          <div className="panel-toggle">
-            <button onClick={() => setRightPanelView('deck')} className={rightPanelView === 'deck' ? 'active' : ''}>Deck Info</button>
-            <button onClick={() => setRightPanelView('recommendations')} className={rightPanelView === 'recommendations' ? 'active' : ''}>Recommendations</button>
-            <button onClick={() => setRightPanelView('tokens')} className={rightPanelView === 'tokens' ? 'active' : ''}>Token Suggestions</button>
-          </div>
+      )}
+    </div>
+  );
+};
 
-          {rightPanelView === 'deck' && (
-            <div className="deck-info-view">
-              <DeckManager
-                deck={deck}
-                format={format}
-                currentDeckName={currentDeckName}
-                onSave={handleSaveDeck}
-                onLoad={handleLoadDeck}
-                onDelete={handleDeleteDeck}
-                onNew={handleNewDeck}
-              />
-              <button className="auto-build-button" onClick={handleAutoBuildCommander} disabled={autoBuildLoading || ownedLoading}>
-                {autoBuildLoading ? 'Building Deck…' : 'Auto Build Commander Deck'}
-              </button>
-              {memoizedDeckStats}
-              <SpellbookExport deck={deck} />
-            </div>
-          )}
+const DeckStatsPanel = (props) => {
+  const { deck, format, deckAnalysis } = props;
+  
+  return (
+    <div className="deck-stats-view">
+      <div className="deck-stats-content">
+        <DeckStatistics deck={deck} format={format} deckAnalysis={deckAnalysis} />
+      </div>
+    </div>
+  );
+};
 
-          {rightPanelView === 'recommendations' && (
-            <div className="recommendations-view">
-              <button onClick={handleGetRecommendations} disabled={recoLoading}>
-                {recoLoading ? 'Getting Suggestions...' : 'Suggest Cards'}
-              </button>
-              {deckArchetype && <h4>Suggestions for: {deckArchetype}</h4>}
-              
-              {/* Synergy Score Legend */}
-              <div className="synergy-legend" style={{ 
-                fontSize: '0.8rem', 
-                color: 'var(--text-secondary)', 
-                margin: '8px 0',
-                padding: '8px',
-                backgroundColor: 'var(--bg-tertiary)',
-                borderRadius: '4px'
-              }}>
-                <strong>Synergy Scores:</strong> 
-                <span className="synergy-legend-item">
-                  <span className="synergy-badge-mini synergy-excellent">★★★</span> 300+ Excellent
-                </span>
-                <span className="synergy-legend-item">
-                  <span className="synergy-badge-mini synergy-great">★★☆</span> 250+ Great
-                </span>
-                <span className="synergy-legend-item">
-                  <span className="synergy-badge-mini synergy-good">★☆☆</span> 200+ Good
-                </span>
-                <span className="synergy-legend-item">
-                  <span className="synergy-badge-mini synergy-decent">◆</span> 150+ Decent
-                </span>
-              </div>
-              <div className="collection-controls">
-                <select
-                  value={cardTypeFilter}
-                  onChange={(e) => setCardTypeFilter(e.target.value)}
-                  title="Filter by card type"
-                >
-                  <option value="all">All Types</option>
-                  <option value="creature">Creatures</option>
-                  <option value="land">Lands</option>
-                  <option value="instant">Instants</option>
-                  <option value="sorcery">Sorceries</option>
-                  <option value="enchantment">Enchantments</option>
-                  <option value="artifact">Artifacts</option>
-                  <option value="planeswalker">Planeswalkers</option>
-                  <option value="battle">Battles</option>
-                </select>
-                <select
-                  value={recommendationsSort}
-                  onChange={(e) => setRecommendationsSort(e.target.value)}
-                  title="Sort cards by"
-                >
-                  <option value="synergy">Synergy Score</option>
-                  <option value="name">Name</option>
-                  <option value="cmc">Mana Cost</option>
-                  <option value="power">Power</option>
-                  <option value="toughness">Toughness</option>
-                  <option value="rarity">Rarity</option>
-                </select>
-                <button
-                  className="sort-direction-toggle"
-                  onClick={() => setRecommendationsSortDirection(recommendationsSortDirection === 'asc' ? 'desc' : 'asc')}
-                  title={`Sort ${recommendationsSortDirection === 'asc' ? 'ascending' : 'descending'} - click to toggle`}
-                >
-                  {recommendationsSortDirection === 'asc' ? '↑' : '↓'}
-                </button>
-              </div>
-              <div className="search-results-grid">
-                {recoLoading && <p>Analyzing deck...</p>}
-                {!recoLoading && displayRecommendations.map(card => {
-                  const isInDeck = deck.mainboard.some(entry => entry.card.id === card.id);
+const SpellbookExportPanel = (props) => {
+  const { deck } = props;
+  
+  return (
+    <div className="spellbook-export-view">
+      <h3>Spellbook Export</h3>
+      <SpellbookExport deck={deck} />
+    </div>
+  );
+};
 
-                  return (
-                    <div key={card.id} className="card-grid-item">
-                      <Card card={card} onCardClick={(card) => handleCardClick(card, 'recommendations')} showSynergyScore={true} />
-                      <button
-                        className={isInDeck ? 'remove-from-deck' : ''}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (isInDeck) {
-                            removeCardFromDeck(card.id);
-                          } else {
-                            addCardToDeck(card);
-                          }
-                        }}
-                      >
-                        {isInDeck ? 'Remove from Deck' : 'Add to Deck'}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {rightPanelView === 'tokens' && (
-            <div className="recommendations-view">
-              <button onClick={handleGetTokenSuggestions} disabled={tokenLoading}>
-                {tokenLoading ? 'Analyzing Tokens...' : 'Find Token Suggestions'}
-              </button>
-              <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', margin: '8px 0' }}>
-                Based on your deck's cards that create tokens
-              </p>
-              <div className="search-results-grid">
-                {tokenLoading && <p>Analyzing deck for token patterns...</p>}
-                {!tokenLoading && tokenSuggestions.length === 0 && <p>No token suggestions found. Make sure your deck has cards that create tokens!</p>}
-                {!tokenLoading && tokenSuggestions.map(token => {
-                  const isInDeck = deck.mainboard.some(entry => entry.card.id === token.id);
-
-                  return (
-                    <div key={token.id} className="card-grid-item">
-                      <Card card={token} onCardClick={(card) => handleCardClick(card, 'tokens')} />
-                      <button
-                        className={isInDeck ? 'remove-from-deck' : ''}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (isInDeck) {
-                            removeCardFromDeck(token.id);
-                          } else {
-                            addCardToDeck(token);
-                          }
-                        }}
-                      >
-                        {isInDeck ? 'Remove from Deck' : 'Add to Deck'}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-      </GridLayout>
+const AIPanelComponent = (props) => {
+  const { 
+    deck, 
+    searchTerm, 
+    setSearchTerm, 
+    handleCardClick, 
+    recommendations, 
+    deckArchetype,
+    deckAnalysis,
+    format 
+  } = props;
+  
+  const handleCardSuggestion = (cardName) => {
+    // Set the search term to the suggested card name
+    setSearchTerm(cardName);
+    
+    // Optionally trigger a search or other action
+    console.log('AI suggested card:', cardName);
+  };
+  
+  // Get the current commander from the deck
+  const commander = deck.commanders.length > 0 ? deck.commanders[0].card : null;
+  
+  // Convert deck format for AI analysis
+  const deckForAI = deck.mainboard.map(entry => ({
+    name: entry.card.name,
+    quantity: entry.quantity,
+    ...entry.card
+  }));
+  
+  return (
+    <div className="ai-panel-view">
+      <AIPanel 
+        deck={deckForAI}
+        commander={commander}
+        onCardSuggestion={handleCardSuggestion}
+        recommendations={recommendations}
+        deckArchetype={deckArchetype}
+        deckAnalysis={deckAnalysis}
+        format={format}
+      />
     </div>
   );
 };

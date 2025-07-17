@@ -9,7 +9,7 @@ import torch  # GPU detection
 
 class MagicCard(LanceModel):
     name: str
-    mana_cost: str
+    mana_cost: str | None = None
     mana_value: float
     type_line: str
     oracle_text: str | None = None
@@ -23,18 +23,18 @@ class MagicCard(LanceModel):
     rarity: str
     legalities: str  # store JSON text
     set_name: str
-    vector: Vector(768)  # type: ignore
+    vector: Vector(384)  # Changed to match all-MiniLM-L6-v2 dimensions
 
 
 def create_card_document(card: dict) -> str:
     payload = {
         "name": card.get("name", ""),
-        "mana_value": card.get("convertedManaCost") or card.get("cmc") or 0,
+        "mana_value": card.get("manaValue") or 0,
         "colors": card.get("colors") or [],
         "color_identity": card.get("colorIdentity") or [],
-        "type_line": card.get("type_line") or card.get("type") or "",
+        "type_line": card.get("type") or "",
         "keywords": card.get("keywords") or [],
-        "oracle_text": card.get("oracle_text") or card.get("text") or "",
+        "oracle_text": card.get("text") or "",
     }
     doc = json.dumps(payload, separators=(",", ":"))
     if card.get("power") is not None and card.get("toughness") is not None:
@@ -56,7 +56,7 @@ def main():
     else:
         print("CUDA is not available")
     print(f"Using device: {device}")
-    model = SentenceTransformer("all-mpnet-base-v2", device=device)
+    model = SentenceTransformer("all-MiniLM-L6-v2", device=device)
 
     from pathlib import Path
     DB_PATH = Path(__file__).resolve().parent.parent / "Database" / "database.sqlite"
@@ -73,44 +73,33 @@ def main():
     for row in rows:
         card = dict(row)
 
-        # Parse JSON-encoded fields
-        for field in ["keywords", "colors", "colorIdentity", "legalities"]:
-            val = card.get(field)
-            if isinstance(val, str):
-                try:
-                    card[field] = json.loads(val)
-                except json.JSONDecodeError:
-                    card[field] = [] if field != "legalities" else {}
+        # Parse string fields that might contain multiple values
+        if isinstance(card.get("keywords"), str):
+            card["keywords"] = [k.strip() for k in card["keywords"].split(",") if k.strip()] if card["keywords"] else []
+        
+        if isinstance(card.get("colors"), str):
+            card["colors"] = list(card["colors"]) if card["colors"] else []
+            
+        if isinstance(card.get("colorIdentity"), str):
+            card["colorIdentity"] = list(card["colorIdentity"]) if card["colorIdentity"] else []
 
         # Skip non-English or incomplete entries
-        if not card.get("name") or not isinstance(card.get("oracle_text"), (str, type(None))):
+        if not card.get("name") or not isinstance(card.get("text"), (str, type(None))):
             continue
 
         # Create document for embedding
         docs.append(create_card_document(card))
 
-        # Extract image_uri (normal size) if available
+        # For now, set empty image_uri since the database doesn't seem to have image_uris field
         image_uri = ""
-        img_uris_field = card.get("image_uris")
-        if img_uris_field:
-            if isinstance(img_uris_field, str):
-                try:
-                    img_uris = json.loads(img_uris_field)
-                except json.JSONDecodeError:
-                    img_uris = {}
-            elif isinstance(img_uris_field, dict):
-                img_uris = img_uris_field
-            else:
-                img_uris = {}
-            image_uri = img_uris.get("normal") or img_uris.get("large") or img_uris.get("small") or ""
 
         # Build record for LanceDB
         records.append({
             "name": card.get("name", ""),
-            "mana_cost": card.get("mana_cost", ""),
-            "mana_value": card.get("convertedManaCost") or card.get("cmc") or 0,
-            "type_line": card.get("type_line") or card.get("type") or "",
-            "oracle_text": card.get("oracle_text"),
+            "mana_cost": card.get("manaCost") or "",
+            "mana_value": card.get("manaValue") or 0,
+            "type_line": card.get("type", ""),
+            "oracle_text": card.get("text"),
             "image_uri": image_uri,
             "keywords": card.get("keywords") or [],
             "colors": card.get("colors") or [],
@@ -119,15 +108,31 @@ def main():
             "toughness": card.get("toughness"),
             "loyalty": card.get("loyalty"),
             "rarity": card.get("rarity", ""),
-            "legalities": json.dumps(card.get("legalities", {})),
-            "set_name": card.get("set_name", ""),
+            "legalities": "{}",  # No legalities field in the database
+            "set_name": card.get("setCode", ""),
         })
 
     print(f"Encoding {len(docs)} card documents...")
     embeddings = model.encode(docs, show_progress_bar=True, device=device)
+    
+    # Verify embedding dimensions
+    if len(embeddings) > 0:
+        first_embedding = embeddings[0]
+        embedding_dim = len(first_embedding) if hasattr(first_embedding, '__len__') else first_embedding.shape[0]
+        print(f"Embedding dimensions: {embedding_dim}")
+        
+        # Ensure all embeddings have consistent dimensions
+        for i, embedding in enumerate(embeddings):
+            current_dim = len(embedding) if hasattr(embedding, '__len__') else embedding.shape[0]
+            if current_dim != embedding_dim:
+                print(f"Warning: Inconsistent embedding dimension at index {i}: {current_dim} vs expected {embedding_dim}")
 
     for rec, vec in zip(records, embeddings):
-        rec["vector"] = vec.tolist() if isinstance(vec, np.ndarray) else vec
+        # Ensure vector is properly formatted as a list
+        if isinstance(vec, np.ndarray):
+            rec["vector"] = vec.tolist()
+        else:
+            rec["vector"] = list(vec) if hasattr(vec, '__iter__') else [vec]
 
     db = lancedb.connect("C:/Users/csdj9/AppData/Roaming/desktopmtg/vectordb")
     table = db.create_table(
@@ -143,8 +148,8 @@ def main():
     table.create_index(
         metric="cosine",
         vector_column_name="vector",
-        m=32,
-        ef_construction=200,
+        m=96,
+        ef_construction=1000,
         accelerator="cuda" if torch.cuda.is_available() else None,
     )
 

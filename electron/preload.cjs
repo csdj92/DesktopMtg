@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deckLoad: (filename) => ipcRenderer.invoke('deck-load', filename),
   deckDelete: (filename) => ipcRenderer.invoke('deck-delete', filename),
   deckImport: (filePath, deckName, format) => ipcRenderer.invoke('deck-import', filePath, deckName, format),
+  deckValidate: (deck, format) => ipcRenderer.invoke('deck-validate', deck, format),
 
   // File dialogs
   showOpenDialog: (options) => ipcRenderer.invoke('show-open-dialog', options),
@@ -68,8 +69,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   removeImportProgressListener: (callback) => ipcRenderer.removeListener('import-progress', callback),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
+  resetSettings: () => ipcRenderer.invoke('reset-settings'),
   getDeckRecommendations: (deck) => ipcRenderer.invoke('get-deck-recommendations', deck),
   autoBuildCommanderDeck: () => ipcRenderer.invoke('auto-build-commander-deck'),
+
+  // 🧪 Strategy Testing
+  setActiveStrategy: (strategy) => ipcRenderer.invoke('set-active-strategy', strategy),
+  getAvailableStrategies: () => ipcRenderer.invoke('get-available-strategies'),
+
+  // 🔧 NEW: Oracle Text Pattern Analysis
+  testOraclePatternAnalysis: (cardName) => ipcRenderer.invoke('test-oracle-pattern-analysis', cardName),
 
   // Set browsing
   listSets: () => ipcRenderer.invoke('list-sets'),

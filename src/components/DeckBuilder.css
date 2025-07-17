@@ -15,6 +15,81 @@
   --card-border-radius: 4.75% / 3.5%;
 }
 
+/* NEW: Layout Controls */
+.layout-controls {
+  display: flex;
+  gap: 12px;
+  padding: 8px 16px;
+  background-color: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+  flex-wrap: wrap;
+  align-items: center;
+  position: relative;
+  z-index: 20; /* Ensure controls are on top */
+}
+
+.control-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background-color: var(--bg-widget);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.control-button:hover {
+  background-color: var(--bg-primary);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.add-panel-button {
+  position: relative;
+}
+
+.add-panel-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  background-color: var(--bg-widget);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  margin-top: 4px;
+  z-index: 100;
+  min-width: 200px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.add-panel-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.add-panel-menu button:hover {
+  background-color: var(--accent-primary);
+  color: white;
+}
+
+.no-panels-message {
+  padding: 8px 12px;
+  color: var(--text-secondary);
+  font-style: italic;
+  font-size: 0.9rem;
+}
+
+
 /* Main Layout & Theme */
 .deck-builder-container {
   width: 100%;
@@ -29,24 +104,19 @@
 
 /* GridLayout specific styles */
 .deck-builder-grid {
-  width: 100% !important;
-  min-height: 100% !important;
-  height: auto !important;
-  max-width: 100% !important;
-  overflow-x: hidden !important;
-  overflow-y: visible !important;
+  position: relative;
 }
 
 .panel {
   background-color: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  overflow: visible;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  min-height: 200px;
+  width: 100%;
+  height: 100%;
   position: relative;
-  will-change: transform, width, height;
 }
 
 .drag-handle {
@@ -57,17 +127,12 @@
 /* React Grid Layout overrides for better responsiveness */
 .react-grid-layout {
   position: relative;
-  width: 100% !important;
-  max-width: 100% !important;
-  min-width: 0 !important;
-  transition: height 200ms ease;
-  overflow-x: hidden;
-  overflow-y: visible;
 }
 
 .react-grid-item {
-  transition: all 300ms ease;
+  transition: all 200ms ease;
   transition-property: left, top, width, height;
+  box-sizing: border-box;
 }
 
 .react-grid-item.cssTransforms {
@@ -163,6 +228,7 @@
   gap: 8px;
   position: relative;
   z-index: 1;
+  justify-content: space-between; /* Make space for remove button */
 }
 
 .panel-drag-bar:hover {
@@ -187,6 +253,26 @@
       var(--border-color) 80%,
       transparent 100%);
   opacity: 0.7;
+}
+
+.panel-drag-bar .remove-panel-button {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  z-index: 2; /* Ensure it's clickable */
+}
+
+.panel-drag-bar .remove-panel-button:hover {
+  background-color: var(--danger-color);
+  color: white;
+  transform: scale(1.1);
 }
 
 .deck-builder-left-panel,
@@ -239,8 +325,8 @@
   display: flex;
   flex-direction: column;
   flex: 1;
-
-  overflow: auto;
+  height: 100%;
+  overflow: hidden; /* Let child elements handle their own overflow */
 }
 
 /* Custom Scrollbar */
@@ -251,6 +337,7 @@
   overflow-y: auto;
   padding: 16px;
   flex-grow: 1;
+  min-height: 0; /* Allow flexbox to shrink below content size */
 }
 
 .search-results-grid::-webkit-scrollbar,
@@ -286,6 +373,42 @@
   max-width: 100%;
   overflow-x: hidden;
   overflow-y: auto;
+}
+
+/* Specific styling for recommendations view layout */
+.recommendations-view {
+  /* Override the general view styling for better layout control */
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  height: 100%;
+  overflow: hidden;
+}
+
+.recommendations-view > .search-results-grid {
+  /* Ensure the search results grid takes remaining space and scrolls */
+  flex: 1;
+  min-height: 200px; /* Minimum height to ensure cards are always visible */
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Recommendations controls should not shrink */
+.recommendations-view > div:not(.search-results-grid) {
+  flex-shrink: 0;
+}
+
+/* Compact synergy legend in recommendations */
+.recommendations-view .synergy-legend {
+  margin: 6px 0;
+  padding: 6px;
+  font-size: 0.75rem;
+}
+
+/* Compact collection controls in recommendations */
+.recommendations-view .collection-controls {
+  margin-bottom: 8px;
+  gap: 8px;
 }
 
 .deck-card-grid {
@@ -994,4 +1117,378 @@
 .deck-info-view {
   overflow-y: auto;
   padding: 16px;
+}
+
+/* NEW: Deck Validation Widget Styles */
+.deck-validation-widget {
+  background-color: var(--danger-color);
+  color: white;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.deck-validation-widget.valid {
+  background-color: var(--success-color);
+}
+
+.deck-validation-widget .validation-header,
+.deck-validation-widget.valid {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.deck-validation-widget .validation-list {
+  list-style-type: none;
+  padding: 8px 0 0 8px;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.deck-validation-widget .validation-list li {
+  margin-bottom: 4px;
+  padding-left: 16px;
+  position: relative;
+}
+
+.deck-validation-widget .validation-list li::before {
+  content: '■';
+  position: absolute;
+  left: 0;
+  top: 1px;
+  font-size: 0.8rem;
+}
+
+.deck-validation-widget .validation-list li.warning {
+  color: #ffdddd;
+}
+
+/* Auto-Build Panel Styles */
+.auto-build-view {
+  padding: 16px;
+}
+
+.auto-build-header h3 {
+  margin: 0 0 8px 0;
+  color: var(--text-primary);
+}
+
+.auto-build-button {
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 20px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.auto-build-button:hover:not(:disabled) {
+  background: linear-gradient(135deg, #4338ca, #6d28d9);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+}
+
+.auto-build-button:disabled {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.auto-build-results {
+  margin-top: 16px;
+  padding: 16px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+}
+
+.synergy-score-display h4 {
+  margin: 0 0 12px 0;
+  color: var(--text-primary);
+  font-size: 1.1rem;
+}
+
+.synergy-score-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.synergy-score-value {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px;
+  background: var(--bg-primary);
+  border-radius: 8px;
+  border: 2px solid var(--accent-color);
+}
+
+.synergy-score-number {
+  font-size: 2rem;
+  font-weight: bold;
+  color: var(--accent-color);
+  line-height: 1;
+}
+
+.synergy-score-label {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.synergy-score-description {
+  text-align: center;
+}
+
+.deck-composition {
+  margin-top: 16px;
+}
+
+.deck-composition h5 {
+  margin: 0 0 8px 0;
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
+.composition-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stat {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--bg-primary);
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+}
+
+.stat-label {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.stat-value {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .auto-build-view {
+    padding: 12px;
+  }
+  
+  .synergy-score-number {
+    font-size: 1.5rem;
+  }
+  
+  .composition-stats {
+    gap: 6px;
+  }
+}
+
+/* Deck Stats Panel Styles */
+.deck-stats-view {
+  padding: 16px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.deck-stats-view h3 {
+  margin: 0 0 16px 0;
+  color: var(--text-primary);
+  font-size: 1.2rem;
+  flex-shrink: 0; /* Prevent title from shrinking */
+}
+
+/* Make the stats content scrollable */
+.deck-stats-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px; /* Space for scrollbar */
+  min-height: 0; /* Important for flex items to shrink properly */
+}
+
+/* Custom scrollbar styling for deck stats */
+.deck-stats-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.deck-stats-content::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+  border-radius: 3px;
+}
+
+.deck-stats-content::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+.deck-stats-content::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+/* Spellbook Export Panel Styles */
+.spellbook-export-view {
+  padding: 16px;
+}
+
+.spellbook-export-view h3 {
+  margin: 0 0 16px 0;
+  color: var(--text-primary);
+  font-size: 1.2rem;
+}
+
+/* Responsive adjustments for new panels */
+@media (max-width: 768px) {
+  .deck-stats-view,
+  .spellbook-export-view {
+    padding: 12px;
+  }
+  
+  .deck-stats-view h3,
+  .spellbook-export-view h3 {
+    font-size: 1.1rem;
+    margin-bottom: 12px;
+  }
+}
+
+.card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.pattern-analysis-btn {
+  background: #666;
+  color: white;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.pattern-analysis-btn:hover {
+  background: #777;
+  transform: translateY(-1px);
+}
+
+.pattern-analysis-btn:active {
+  transform: translateY(0);
+}
+
+.inline-pattern-analysis {
+  margin-top: 8px;
+  padding: 8px;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+}
+
+.inline-pattern-analysis .pattern-analysis {
+  margin: 0;
+  background: transparent;
+  border: none;
+}
+
+.inline-pattern-analysis .pattern-header {
+  background: var(--bg-secondary);
+  padding: 8px 12px;
+  border-radius: 4px;
+}
+
+.inline-pattern-analysis .pattern-content {
+  padding: 12px;
+  max-height: 300px;
+}
+
+/* Adjust card grid item for pattern analysis */
+.card-grid-item:has(.inline-pattern-analysis) {
+  grid-column: span 2; /* Take up more space when showing patterns */
+}
+
+@media (max-width: 768px) {
+  .card-grid-item:has(.inline-pattern-analysis) {
+    grid-column: span 1; /* Reset on mobile */
+  }
+  
+  .card-actions {
+    flex-direction: row;
+  }
+  
+  .pattern-analysis-btn {
+    font-size: 0.65rem;
+    padding: 3px 6px;
+  }
+}
+
+/* AI Panel */
+.ai-panel-view {
+  padding: 12px;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.ai-panel-view .ai-panel {
+  flex: 1;
+  height: 100%;
+}
+
+.ai-panel-view .ai-panel .card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.ai-panel-view .ai-panel .card-content {
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Ensure AI panel integrates well with the deck builder theme */
+.ai-panel-view .ai-panel .card-header {
+  background: linear-gradient(135deg, var(--accent-primary) 0%, #1d4ed8 100%);
+}
+
+.ai-panel-view .ai-panel .tabs-list {
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.ai-panel-view .ai-panel .tabs-trigger[data-state="active"] {
+  background: var(--accent-primary);
+  color: white;
+}
+
+@media (max-width: 768px) {
+  .ai-panel-view {
+    padding: 8px;
+  }
 }

@@ -859,8 +859,6 @@ function App() {
                             key={`${card.cardKey}-${index}`}
                             card={card.scryfallData}
                             quantity={card.quantity}
-                            isFoil={card.isFoil}
-                            sourceFiles={card.sourceFiles}
                           />
                         ))
                       ) : (
@@ -869,8 +867,6 @@ function App() {
                             key={`${card.cardKey}-${index}`}
                             card={card.scryfallData}
                             quantity={card.quantity}
-                            isFoil={card.isFoil}
-                            sourceFiles={card.sourceFiles}
                           />
                         ))
                       )}
@@ -893,7 +889,6 @@ function App() {
                         key={`${card.name}-${index}`}
                         card={card.scryfallData}
                         quantity={card.quantity}
-                        isFoil={card.isFoil}
                       />
                     ))}
                   </div>

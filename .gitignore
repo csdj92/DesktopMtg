@@ -37,3 +37,7 @@ mock-userdata/
 
 dist-electron/*
 markdown/*
+electron/AI/Meta-Llama-3-8B-Instruct.Q4_K_M.gguf
+debug-card-data.js
+example-integration.js
+test-recommendations.js

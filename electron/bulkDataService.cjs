@@ -1124,6 +1124,8 @@ class BulkDataService {
         art_crop: `https://cards.scryfall.io/art_crop/front/${id.charAt(0)}/${id.charAt(1)}/${id}.jpg`,
         border_crop: `https://cards.scryfall.io/border_crop/front/${id.charAt(0)}/${id.charAt(1)}/${id}.jpg`
       };
+    } else {
+      console.warn(`No scryfallId found for card "${row.name}" - no image URLs will be generated`);
     }
 
     // Process purchase URLs
@@ -1202,8 +1204,48 @@ class BulkDataService {
       artist: row.artist,
       layout: row.layout,
 
-      // Include original row data for compatibility
-      ...row
+      // Additional properties that are safe to serialize
+      keywords: this.parseJsonSafely(row.keywords) || [],
+      produced_mana: this.parseJsonSafely(row.producedMana) || [],
+      color_indicator: this.parseJsonSafely(row.colorIndicator) || [],
+      frame: row.frame,
+      frame_effects: this.parseJsonSafely(row.frameEffects) || [],
+      border_color: row.borderColor,
+      promo_types: this.parseJsonSafely(row.promoTypes) || [],
+      watermark: row.watermark,
+      story_spotlight: row.storySpotlight,
+      textless: row.textless,
+      booster: row.booster,
+      loyalty: row.loyalty,
+      hand_modifier: row.handModifier,
+      life_modifier: row.lifeModifier,
+      reserved: row.reserved,
+      foil: row.foil,
+      nonfoil: row.nonfoil,
+      oversized: row.oversized,
+      promo: row.promo,
+      reprint: row.reprint,
+      variation: row.variation,
+      set_id: row.setId,
+      set_uri: row.setUri,
+      set_search_uri: row.setSearchUri,
+      scryfall_uri: row.scryfallUri,
+      uri: row.uri,
+      scryfall_id: row.scryfallId,
+      mtgo_id: row.mtgoId,
+      mtgo_foil_id: row.mtgoFoilId,
+      tcgplayer_id: row.tcgplayerId,
+      cardmarket_id: row.cardmarketId,
+      object: 'card',
+      
+      // Collection-related fields
+      collected: row.collected || 0,
+      
+      // Ensure numeric fields are properly typed
+      cmc: parseFloat(row.manaValue || row.cmc || 0),
+      mana_value: parseFloat(row.manaValue || row.cmc || 0),
+      edhrec_rank: row.edhrecRank ? parseInt(row.edhrecRank) : null,
+      penny_rank: row.pennyRank ? parseInt(row.pennyRank) : null
     };
   }
 
@@ -1595,7 +1637,7 @@ class BulkDataService {
     
     // Add context for better semantic understanding
     if (!enhanced.includes('magic') && !enhanced.includes('mtg')) {
-      enhanced = `magic the gathering ${enhanced}`;
+      enhanced = `${enhanced}`;
     }
     
     return enhanced.trim();
@@ -1676,10 +1718,27 @@ class BulkDataService {
 
     try {
       const rows = await this.db.all(
-        `SELECT * FROM cards WHERE lower(setCode) = lower(?) ORDER BY CAST(number AS INTEGER) ASC LIMIT ?`,
+        `SELECT c.*, 
+               ci.scryfallId,
+               cl.alchemy, cl.brawl, cl.commander, cl.duel, cl.explorer, cl.future, cl.gladiator,
+               cl.historic, cl.legacy, cl.modern, cl.oathbreaker, cl.oldschool, cl.pauper,
+               cl.paupercommander, cl.penny, cl.pioneer, cl.predh, cl.premodern, cl.standard,
+               cl.standardbrawl, cl.timeless, cl.vintage,
+               s.name as setName,
+               cpu.cardKingdom, cpu.cardmarket, cpu.tcgplayer,
+               crl.gatherer, crl.edhrec
+        FROM cards c
+        LEFT JOIN cardIdentifiers ci ON c.uuid = ci.uuid
+        LEFT JOIN cardLegalities cl ON c.uuid = cl.uuid
+        LEFT JOIN sets s ON c.setCode = s.code
+        LEFT JOIN cardPurchaseUrls cpu ON c.uuid = cpu.uuid
+        LEFT JOIN cardRelatedLinks crl ON c.uuid = crl.uuid
+        WHERE lower(c.setCode) = lower(?) 
+        ORDER BY CAST(c.number AS INTEGER) ASC 
+        LIMIT ?`,
         [setCode, limit]
       );
-      return rows.map(row => this.convertDbRowToCard(row));
+      return Promise.all(rows.map(row => this.convertDbRowToCard(row)));
     } catch (error) {
       console.error(`Error fetching cards for set ${setCode}:`, error);
       return [];

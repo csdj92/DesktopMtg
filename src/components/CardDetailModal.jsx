@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './CardDetailModal.css';
 import useImageCache from '../hooks/useImageCache';
+import PatternAnalysis from './PatternAnalysis';
 
 const CardDetailModal = ({
   card,
@@ -11,7 +12,13 @@ const CardDetailModal = ({
   hasPrevious = false,
   hasNext = false,
   currentIndex = -1,
-  totalCards = 0
+  totalCards = 0,
+  // Deck management props
+  isInDeck = false,
+  onAddToDeck,
+  onRemoveFromDeck,
+  deckFormat = 'commander',
+  commanderColorIdentity = null
 }) => {
   if (!card) return null;
 
@@ -221,6 +228,9 @@ const CardDetailModal = ({
                 )}
               </div>
             )}
+
+            {/* 🔧 NEW: Advanced Pattern Analysis */}
+            <PatternAnalysis card={card} />
 
             <div className="external-links">
               {card.related_uris?.gatherer && <a href={card.related_uris.gatherer} target="_blank" rel="noopener noreferrer">Gatherer</a>}

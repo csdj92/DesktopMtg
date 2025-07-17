@@ -73,6 +73,14 @@ class SearchWorkerService {
       this.table = await this.db.openTable(TABLE_NAME);
       const rowCount = await this.table.countRows();
       
+      // Ensure FTS index exists for hybrid search
+      try {
+        await this.table.createIndex('oracle_text', { replace: true });
+        console.log('[Worker] FTS index created/updated for oracle_text');
+      } catch (ftsError) {
+        console.warn('[Worker] Could not create FTS index:', ftsError.message);
+      }
+      
       this.isInitialized = true;
       console.log(`[Worker] Semantic Search Service Initialized. Connected to table: '${TABLE_NAME}' with ${rowCount} rows`);
 
@@ -106,7 +114,7 @@ class SearchWorkerService {
         
         return await pipeline(
           'feature-extraction',
-          'Xenova/all-mpnet-base-v2',
+          'xenova/all-MiniLM-L6-v2',
           {
             progress_callback: ({ progress }) => {
               // progress is 0-1 float; convert to percentage for convenience
@@ -146,35 +154,15 @@ class SearchWorkerService {
   }
 
   /**
-   * Performs a semantic search with unique name filtering and proper ranking.
+   * Traditional text-based search fallback
    */
-  async search(query, options = {}) {
-    const { limit = 200, offset = 0 } = options;
-
-    if (!this.isInitialized || !this.embedder || !this.table) {
-      console.error('[Worker] Search service is not ready.');
-      return [];
-    }
-    if (!query || query.trim().length === 0) {
-      return [];
-    }
-
+  async traditionalSearch(query, limit = 50, offset = 0) {
     try {
-      console.log(`[Worker] Performing semantic search for: "${query}"`);
-
-      // Search through a large number of cards to get comprehensive results
-      // Using a high limit to ensure we have enough candidates for unique filtering
-      const searchLimit = Math.max(limit * 50, 10000);
-
-      // 1. Generate an embedding for the user's query
-      console.log('[Worker] Generating embedding for query...');
-      const queryEmbedding = await this.embedder(query, { pooling: 'mean', normalize: true });
-      console.log('[Worker] Embedding generated successfully.');
-
-      // 2. Perform the similarity search in LanceDB with comprehensive limit
-      console.log('[Worker] Starting LanceDB search...');
-      const rawResults = await this.table
-        .search(Array.from(queryEmbedding.data))
+      console.log('[Worker] Performing traditional text search...');
+      
+      // Simple text matching fallback
+      const results = await this.table
+        .search(query)
         .select([
           'name',
           'mana_cost',
@@ -189,45 +177,19 @@ class SearchWorkerService {
           'loyalty',
           'rarity',
           'legalities',
-          'set_name',
-          '_distance'
+          'set_name'
         ])
-        .limit(searchLimit)
+        .limit(limit)
         .offset(offset)
         .toArray();
-      console.log('[Worker] LanceDB search completed.');
 
-      // 3. Ensure results are sorted by distance (best matches first)
-      const sortedResults = rawResults.sort((a, b) => a._distance - b._distance);
-        
-      // Helper function to safely convert arrays
-      const arr = v =>
-        v == null                       ? []  :
-        Array.isArray(v)                ? v   :
-        typeof v.toArray === 'function' ? v.toArray() : v;
-
-      // Create plain serializable objects with proper score mapping
-      const plainResults = sortedResults.map(card => ({
-        name: card.name,
-        mana_cost: card.mana_cost,
-        mana_value: card.mana_value,
-        type_line: card.type_line,
-        oracle_text: card.oracle_text,
-        keywords: arr(card.keywords),
-        colors: arr(card.colors),
-        color_identity: arr(card.color_identity),
-        power: card.power,
-        toughness: card.toughness,
-        loyalty: card.loyalty,
-        rarity: card.rarity,
-        legalities: card.legalities,
-        set_name: card.set_name,
-        distance: card._distance
+      const plainResults = results.map(card => ({
+        ...card,
+        hybrid_score: 0.5, // Default score for traditional search
+        distance: null
       }));
-      
-      console.log(`[Worker] Search successful. Found ${rawResults.length} raw results before unique filtering.`);
 
-      // 4. Filter for unique card names, keeping the best match for each name
+      // Remove duplicates by card name for traditional search too
       const uniqueResults = [];
       const seenNames = new Set();
       
@@ -243,13 +205,225 @@ class SearchWorkerService {
           }
         }
       }
+      
+      console.log(`[Worker] Traditional search completed. Found ${plainResults.length} total results, ${uniqueResults.length} unique cards.`);
+      return uniqueResults;
+    } catch (error) {
+      console.error('[Worker] Error during traditional search:', error);
+      return [];
+    }
+  }
 
-      console.log(`[Worker] Found ${uniqueResults.length} unique cards ranked by relevance.`);
+  /**
+   * Performs a semantic search with unique name filtering and proper ranking.
+   */
+  async search(query, options = {}) {
+    try {
+      console.log('[Worker] Starting search with query:', query);
+      const { 
+        limit = 50, 
+        offset = 0, 
+        useSemanticSearch = true, 
+        useHybridSearch = false,
+        semanticWeight = 0.7
+      } = options;
+
+      if (!this.isInitialized || !this.embedder || !this.table) {
+        console.error('[Worker] Search service is not ready.');
+        return [];
+      }
+      
+      if (!query || query.trim().length === 0) {
+        return [];
+      }
+
+      if (!useSemanticSearch) {
+        // Traditional text-based search fallback
+        console.log('[Worker] Using traditional search (semantic disabled)');
+        const results = await this.traditionalSearch(query, limit, offset);
+        return results;
+      }
+
+      console.log('[Worker] Generating embedding for query...');
+      const queryEmbedding = await this.embedder(query, { pooling: 'mean', normalize: true });
+      console.log('[Worker] Embedding generated successfully.');
+
+      const searchLimit = Math.min(limit, 1000);
+      let searchResults;
+
+             if (useHybridSearch) {
+         console.log('[Worker] Starting LanceDB HYBRID search...');
+         try {
+           // Try modern LanceDB hybrid search - different approaches
+           try {
+             // Method 1: Try with query_type parameter
+             searchResults = await this.table
+               .search(query, { query_type: "hybrid" })
+               .select([
+                 'name',
+                 'mana_cost', 
+                 'mana_value',
+                 'type_line',
+                 'oracle_text',
+                 'keywords',
+                 'colors',
+                 'color_identity',
+                 'power',
+                 'toughness',
+                 'loyalty',
+                 'rarity',
+                 'legalities',
+                 'set_name'
+               ])
+               .limit(searchLimit)
+               .offset(offset)
+               .toArray();
+           } catch (method1Error) {
+             console.warn('[Worker] Method 1 failed, trying method 2:', method1Error.message);
+             // Method 2: Try with vector search + FTS combination
+             searchResults = await this.table
+               .search(Array.from(queryEmbedding.data))
+               .select([
+                 'name',
+                 'mana_cost', 
+                 'mana_value',
+                 'type_line',
+                 'oracle_text',
+                 'keywords',
+                 'colors',
+                 'color_identity',
+                 'power',
+                 'toughness',
+                 'loyalty',
+                 'rarity',
+                 'legalities',
+                 'set_name',
+                 '_distance'
+               ])
+               .limit(searchLimit)
+               .offset(offset)
+               .toArray();
+           }
+           
+           console.log('[Worker] Hybrid search completed.');
+         } catch (hybridErr) {
+           console.warn('[Worker] Hybrid search failed, falling back to vector search:', hybridErr?.message || hybridErr);
+           // Fallback to vector search if hybrid fails
+           searchResults = await this.table
+             .search(Array.from(queryEmbedding.data))
+             .select([
+               'name',
+               'mana_cost',
+               'mana_value', 
+               'type_line',
+               'oracle_text',
+               'keywords',
+               'colors',
+               'color_identity',
+               'power',
+               'toughness',
+               'loyalty',
+               'rarity',
+               'legalities',
+               'set_name',
+               '_distance'
+             ])
+             .limit(searchLimit)
+             .offset(offset)
+             .toArray();
+         }
+      } else {
+        console.log('[Worker] Starting LanceDB VECTOR search...');
+        searchResults = await this.table
+          .search(Array.from(queryEmbedding.data))
+          .select([
+            'name',
+            'mana_cost',
+            'mana_value',
+            'type_line',
+            'oracle_text',
+            'keywords',
+            'colors',
+            'color_identity',
+            'power',
+            'toughness',
+            'loyalty',
+            'rarity',
+            'legalities',
+            'set_name',
+            '_distance'
+          ])
+          .limit(searchLimit)
+          .offset(offset)
+          .toArray();
+        console.log('[Worker] Vector search completed.');
+      }
+
+      // Helper function to safely convert arrays
+      const arr = v =>
+        v == null                       ? []  :
+        Array.isArray(v)                ? v   :
+        typeof v.toArray === 'function' ? v.toArray() : v;
+
+      // Create plain serializable objects - don't try to modify the original objects
+      const plainResults = searchResults.map(card => {
+        // Calculate score based on available data
+        let score = 0.5; // Default score
+        
+        if (card._distance !== undefined) {
+          // For vector search, convert distance to score (higher score = better)
+          score = Math.max(0, 1 - card._distance);
+        } else if (card._score !== undefined) {
+          // For hybrid search, use the provided score
+          score = card._score;
+        }
+
+        return {
+          name: card.name,
+          mana_cost: card.mana_cost,
+          mana_value: card.mana_value,
+          type_line: card.type_line,
+          oracle_text: card.oracle_text,
+          keywords: arr(card.keywords),
+          colors: arr(card.colors),
+          color_identity: arr(card.color_identity),
+          power: card.power,
+          toughness: card.toughness,
+          loyalty: card.loyalty,
+          rarity: card.rarity,
+          legalities: card.legalities,
+          set_name: card.set_name,
+          distance: card._distance,
+          hybrid_score: score
+        };
+      });
+
+      // Sort by score (higher is better)
+      const sortedResults = plainResults.sort((a, b) => b.hybrid_score - a.hybrid_score);
+      
+      // Remove duplicates by card name, keeping the highest scoring version of each card
+      const uniqueResults = [];
+      const seenNames = new Set();
+      
+      for (const card of sortedResults) {
+        const cardName = card.name;
+        if (!seenNames.has(cardName)) {
+          seenNames.add(cardName);
+          uniqueResults.push(card);
+          
+          // Stop once we have enough unique results
+          if (uniqueResults.length >= limit) {
+            break;
+          }
+        }
+      }
+      
+      console.log(`[Worker] Search completed. Found ${sortedResults.length} total results, ${uniqueResults.length} unique cards.`);
       return uniqueResults;
 
     } catch (error) {
       console.error('[Worker] Error during semantic search:', error);
-      return [];
+      throw error;
     }
   }
 }
