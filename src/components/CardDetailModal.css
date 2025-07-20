@@ -305,3 +305,82 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* Deck Management Styles */
+.deck-actions {
+  margin-top: 20px;
+  padding-top: 15px;
+  border-top: 1px solid #444;
+}
+
+.deck-actions h4 {
+  margin: 0 0 12px 0;
+  color: #e0e0e0;
+  font-size: 1.1em;
+}
+
+.deck-action-buttons {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.deck-action-btn {
+  flex: 1;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.deck-action-btn.add-to-deck {
+  background-color: #10b981;
+  /* green-500 */
+  color: white;
+}
+
+.deck-action-btn.add-to-deck:hover:not(:disabled) {
+  background-color: #059669;
+  /* green-600 */
+  transform: translateY(-1px);
+}
+
+.deck-action-btn.remove-from-deck {
+  background-color: #ef4444;
+  /* red-500 */
+  color: white;
+}
+
+.deck-action-btn.remove-from-deck:hover:not(:disabled) {
+  background-color: #dc2626;
+  /* red-600 */
+  transform: translateY(-1px);
+}
+
+.deck-action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.deck-action-btn.loading {
+  opacity: 0.8;
+  cursor: wait;
+}
+
+.deck-action-error {
+  background-color: rgba(239, 68, 68, 0.1);
+  border: 1px solid #ef4444;
+  border-radius: 4px;
+  padding: 8px 12px;
+  color: #fca5a5;
+  font-size: 0.9em;
+  text-align: center;
+}

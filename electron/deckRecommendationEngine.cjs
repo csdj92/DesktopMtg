@@ -431,7 +431,6 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
     }
 
     // DEBUG: log format bonus calculation details
-    console.log(`[FORMAT DEBUG] ${card.name}: formatBonus=${formatBonus}, multiplayerWeight=${weights.commander.multiplayer}, legendaryWeight=${weights.commander.legendary}`);
 
     score += formatBonus;
     // Ensure formatBonus is a finite number to avoid NaN in breakdown logs

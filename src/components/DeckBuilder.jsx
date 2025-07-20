@@ -41,10 +41,10 @@ const ALL_PANELS_CONFIG = {
 const generateResponsiveLayouts = (panels) => {
   // Define responsive widths - wider on smaller screens (bootstrap style)
   const widths = { lg: 3, md: 4, sm: 6, xs: 12, xxs: 12 };
-  const heights = { 
-    collectionSearch: 20, 
-    deckView: 20, 
-    deckInfo: 8, 
+  const heights = {
+    collectionSearch: 20,
+    deckView: 20,
+    deckInfo: 8,
     recommendations: 12,
     tokenSuggestions: 12,
     autoBuild: 10,
@@ -70,7 +70,7 @@ const generateResponsiveLayouts = (panels) => {
     });
     return memo;
   }, {});
-  
+
   console.log('🎯 Generated bootstrap layouts:', layouts);
   return layouts;
 };
@@ -206,14 +206,14 @@ const LayoutControls = ({ panels, onAddPanel, onRemovePanel, onSaveLayout, onRes
     console.log('Current panels:', panels);
     console.log('LocalStorage layouts:', localStorage.getItem('deckBuilderLayouts'));
     console.log('LocalStorage panels:', localStorage.getItem('deckBuilderPanels'));
-    
+
     // Check for layout issues (using 12-column bootstrap grid)
     Object.keys(layouts).forEach(breakpoint => {
       const layout = layouts[breakpoint];
       const cols = 12; // Bootstrap-style: 12 columns for all breakpoints
-      
+
       console.group(`📊 ${breakpoint.toUpperCase()} Layout (${cols} cols)`);
-      
+
       layout.forEach(item => {
         const issues = [];
         if (item.x + item.w > cols) issues.push(`width overflow (x:${item.x} + w:${item.w} > ${cols})`);
@@ -221,16 +221,16 @@ const LayoutControls = ({ panels, onAddPanel, onRemovePanel, onSaveLayout, onRes
         if (item.y < 0) issues.push('negative y');
         if (item.w <= 0) issues.push('invalid width');
         if (item.h <= 0) issues.push('invalid height');
-        
+
         console.log(`${item.i}:`, {
           x: item.x, y: item.y, w: item.w, h: item.h,
           issues: issues.length > 0 ? issues : 'OK'
         });
       });
-      
+
       console.groupEnd();
     });
-    
+
     console.groupEnd();
   };
 
@@ -273,13 +273,13 @@ const LayoutControls = ({ panels, onAddPanel, onRemovePanel, onSaveLayout, onRes
         // Clear localStorage
         localStorage.removeItem('deckBuilderLayouts');
         localStorage.removeItem('deckBuilderPanels');
-        
+
         // Force reinitialize with bootstrap layout
         const defaultPanels = getDefaultPanels();
         const defaultLayouts = generateResponsiveLayouts(defaultPanels);
         setPanels(defaultPanels);
         setLayouts(defaultLayouts);
-        
+
         console.log('🔄 Force refreshed with bootstrap layouts:', defaultLayouts);
       }} className="control-button">
         Force Refresh
@@ -298,7 +298,7 @@ const DeckBuilder = () => {
   const [collectionCounts, setCollectionCounts] = useState(new Map());
   const [ownedCards, setOwnedCards] = useState([]);
   const [ownedLoading, setOwnedLoading] = useState(false);
-  
+
   // REMOVED: `leftPanelView` and `rightPanelView` states are now obsolete.
   // The presence of a panel in the `panels` state determines its visibility.
 
@@ -307,7 +307,7 @@ const DeckBuilder = () => {
   const [deckArchetype, setDeckArchetype] = useState(null);
   const [deckAnalysis, setDeckAnalysis] = useState(null);
   const [recoLoading, setRecoLoading] = useState(false);
-  
+
   // 🧪 Strategy Testing State
   const [strategyComparison, setStrategyComparison] = useState(null);
   const [availableStrategies, setAvailableStrategies] = useState([]);
@@ -346,7 +346,7 @@ const DeckBuilder = () => {
 
   // Hold results returned by advanced search controls
   const [collectionSearchResults, setCollectionSearchResults] = useState(null); // null means no search yet
-  
+
   // Search term state for AI suggestions
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -528,7 +528,7 @@ const DeckBuilder = () => {
   const getPrimaryCardType = (card) => {
     if (!card) return 'Other';
     const types = getCardTypes(card);
-    
+
     // Return the first type found, or 'Other' if none
     if (types.length > 0) {
       return types[0].charAt(0).toUpperCase() + types[0].slice(1) + 's'; // Pluralize
@@ -539,7 +539,7 @@ const DeckBuilder = () => {
   // Helper to group deck cards by type
   const groupCardsByType = (mainboard) => {
     const groups = {};
-    
+
     mainboard.forEach(entry => {
       const type = getPrimaryCardType(entry.card);
       if (!groups[type]) {
@@ -555,7 +555,7 @@ const DeckBuilder = () => {
 
     // Define preferred order for card types
     const typeOrder = ['Creatures', 'Lands', 'Instants', 'Sorceries', 'Enchantments', 'Artifacts', 'Planeswalkers', 'Battles', 'Other'];
-    
+
     // Return groups in preferred order
     const orderedGroups = {};
     typeOrder.forEach(type => {
@@ -1104,7 +1104,7 @@ const DeckBuilder = () => {
         setRecommendations(result.recommendations);
         setDeckArchetype(result.archetype || null);
         setDeckAnalysis(result.deckAnalysis || null);
-        
+
         // 🧪 Update strategy testing data
         setStrategyComparison(result.strategyComparison || null);
         setAvailableStrategies(result.availableStrategies || []);
@@ -1134,7 +1134,7 @@ const DeckBuilder = () => {
     try {
       await window.electronAPI.setActiveStrategy(strategy);
       setActiveStrategy(strategy);
-      
+
       // Regenerate recommendations with the new strategy
       if (deck.mainboard.length > 0) {
         await handleGetRecommendations();
@@ -1322,10 +1322,10 @@ const DeckBuilder = () => {
       // Transform into DeckBuilder state shape
       const transformedMainboard = (generated.mainboard || []).map(card => ({ card, quantity: 1 }));
       setDeck({ commanders: generated.commanders || [], mainboard: transformedMainboard, sideboard: [] });
-      
+
       // Store the synergy score
       setAutoBuildSynergy(synergy);
-      
+
       console.log('🛠️ Auto-built deck synergy score:', synergy?.toFixed?.(0));
     } catch (err) {
       console.error('Auto build error:', err);
@@ -1345,7 +1345,7 @@ const DeckBuilder = () => {
     // Only update if the layouts have actually changed to prevent unnecessary re-renders
     const layoutsStringified = JSON.stringify(allLayouts);
     const currentLayoutsStringified = JSON.stringify(layouts);
-    
+
     if (layoutsStringified !== currentLayoutsStringified) {
       setLayouts(allLayouts);
     }
@@ -1369,14 +1369,14 @@ const DeckBuilder = () => {
     if (window.confirm('Are you sure you want to reset the layout to default?')) {
       const defaultPanels = getDefaultPanels();
       const defaultLayouts = generateResponsiveLayouts(defaultPanels);
-      
+
       setLayouts(defaultLayouts);
       setPanels(defaultPanels);
-      
+
       // Clear localStorage
       localStorage.removeItem('deckBuilderLayouts');
       localStorage.removeItem('deckBuilderPanels');
-      
+
       // Force immediate persistence of the new layout
       try {
         localStorage.setItem('deckBuilderLayouts', JSON.stringify(defaultLayouts));
@@ -1384,26 +1384,26 @@ const DeckBuilder = () => {
       } catch (err) {
         console.error('Failed to persist reset layouts:', err);
       }
-      
+
       alert('Layout has been reset to bootstrap-style default.');
     }
   };
-  
+
   const handleAddPanel = (panelConfig) => {
     // Add to panels list
     const newPanels = [...panels, panelConfig];
     setPanels(newPanels);
-    
+
     // Regenerate layouts using bootstrap-style algorithm
     const newLayouts = generateResponsiveLayouts(newPanels);
     setLayouts(newLayouts);
   };
-  
+
   const handleRemovePanel = (panelId) => {
     // Remove from panels list
     const newPanels = panels.filter(p => p.id !== panelId);
     setPanels(newPanels);
-    
+
     // Regenerate layouts using bootstrap-style algorithm
     const newLayouts = generateResponsiveLayouts(newPanels);
     setLayouts(newLayouts);
@@ -1424,7 +1424,7 @@ const DeckBuilder = () => {
       // 🔧 Pattern Analysis Props
       showPatternAnalysis, setShowPatternAnalysis
     };
-    
+
     switch (panel.id) {
       case 'collectionSearch': return <CollectionSearchPanel {...panelProps} />;
       case 'deckView': return <DeckViewPanel {...panelProps} />;
@@ -1452,13 +1452,18 @@ const DeckBuilder = () => {
           hasNext={navigation.hasNext}
           currentIndex={navigation.currentIndex}
           totalCards={navigation.totalCards}
+          isInDeck={deck.mainboard.some(entry => entry.card.id === selectedCard.id)}
+          onAddToDeck={addCardToDeck}
+          onRemoveFromDeck={removeCardFromDeck}
+          deckFormat={format}
+          commanderColorIdentity={commanderColorIdentity}
         />
       )}
-      
+
       {/* ============================================================== */}
       {/* New: Layout Controls are placed at the top of the component     */}
       {/* ============================================================== */}
-      <LayoutControls 
+      <LayoutControls
         panels={panels}
         onAddPanel={handleAddPanel}
         onRemovePanel={handleRemovePanel}
@@ -1466,44 +1471,44 @@ const DeckBuilder = () => {
         onResetLayout={handleResetLayout}
         layouts={layouts}
       />
-      
+
       {/* Only render the grid when we have both layouts and panels properly initialized */}
-      {Object.keys(layouts).length > 0 && panels.length > 0 && 
-       Object.keys(layouts).every(bp => Array.isArray(layouts[bp])) && (
-      <ResponsiveGridLayout
-        className="deck-builder-grid"
-        layouts={layouts}
-        breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
-        cols={{ lg: 12, md: 12, sm: 12, xs: 12, xxs: 12 }}
-        rowHeight={30}
-        onLayoutChange={handleLayoutChange}
-        onDragStop={persistLayoutToLocalStorage}
-        onResizeStop={persistLayoutToLocalStorage}
-        draggableHandle=".drag-handle"
-        resizeHandles={["s", "w", "e", "n", "sw", "nw", "se", "ne"]}
-        margin={[10, 10]}
-        containerPadding={[10, 10]}
-        compactType="vertical"
-        preventCollision={false}
-      >
-        {panels.map(panel => (
-          <div key={panel.id} className="panel">
-            <div className="drag-handle panel-drag-bar">
-              <span>⋮⋮ {ALL_PANELS_CONFIG[panel.id]?.title || 'Panel'}</span>
-              <button onClick={() => handleRemovePanel(panel.id)} className="remove-panel-button" title="Remove Panel">
-                <X size={16} />
-              </button>
-            </div>
-            {renderPanelContent(panel)}
-          </div>
-        ))}
-      </ResponsiveGridLayout>
-      )}
-      
+      {Object.keys(layouts).length > 0 && panels.length > 0 &&
+        Object.keys(layouts).every(bp => Array.isArray(layouts[bp])) && (
+          <ResponsiveGridLayout
+            className="deck-builder-grid"
+            layouts={layouts}
+            breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
+            cols={{ lg: 12, md: 12, sm: 12, xs: 12, xxs: 12 }}
+            rowHeight={30}
+            onLayoutChange={handleLayoutChange}
+            onDragStop={persistLayoutToLocalStorage}
+            onResizeStop={persistLayoutToLocalStorage}
+            draggableHandle=".drag-handle"
+            resizeHandles={["s", "w", "e", "n", "sw", "nw", "se", "ne"]}
+            margin={[10, 10]}
+            containerPadding={[10, 10]}
+            compactType="vertical"
+            preventCollision={false}
+          >
+            {panels.map(panel => (
+              <div key={panel.id} className="panel">
+                <div className="drag-handle panel-drag-bar">
+                  <span>⋮⋮ {ALL_PANELS_CONFIG[panel.id]?.title || 'Panel'}</span>
+                  <button onClick={() => handleRemovePanel(panel.id)} className="remove-panel-button" title="Remove Panel">
+                    <X size={16} />
+                  </button>
+                </div>
+                {renderPanelContent(panel)}
+              </div>
+            ))}
+          </ResponsiveGridLayout>
+        )}
+
       {/* Recommendation Settings Modal */}
-      <RecommendationSettings 
-        isOpen={showSettings} 
-        onClose={() => setShowSettings(false)} 
+      <RecommendationSettings
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
       />
     </div>
   );
@@ -1597,7 +1602,7 @@ const CollectionSearchPanel = (props) => {
 
 const DeckViewPanel = (props) => {
   const { deck, format, setFormat, currentDeckName, handleCardClick, removeCommander, mainboardCount, groupedMainboard, expandedCategories, toggleCategory, expandAllCategories, collapseAllCategories, incrementQty, decrementQty, removeCardFromDeck, setCommander, isCardCommander, isBasicLand } = props;
-  
+
   return (
     <>
       <div className="deck-stats-and-actions">
@@ -1689,15 +1694,15 @@ const RecommendationsPanel = (props) => {
         <button onClick={handleGetRecommendations} disabled={recoLoading}>
           {recoLoading ? 'Getting Suggestions...' : 'Suggest Cards'}
         </button>
-        <button 
-          onClick={() => setShowSettings(true)} 
+        <button
+          onClick={() => setShowSettings(true)}
           title="Recommendation Engine Settings"
-          style={{ 
-            background: '#666', 
-            border: 'none', 
-            color: 'white', 
-            padding: '8px 12px', 
-            borderRadius: '4px', 
+          style={{
+            background: '#666',
+            border: 'none',
+            color: 'white',
+            padding: '8px 12px',
+            borderRadius: '4px',
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
@@ -1727,17 +1732,17 @@ const RecommendationsPanel = (props) => {
           {recommendationsSortDirection === 'asc' ? '↑' : '↓'}
         </button>
       </div>
-      
+
       {/* 🧪 Strategy Testing Component */}
       {strategyComparison && availableStrategies && (
-        <StrategyTester 
+        <StrategyTester
           strategyComparison={strategyComparison}
           availableStrategies={availableStrategies}
           activeStrategy={activeStrategy}
           onStrategyChange={handleStrategyChange}
         />
       )}
-      
+
       <div className="search-results-grid">
         {recoLoading && <p>Analyzing deck...</p>}
         {!recoLoading && displayRecommendations.map(card => {
@@ -1750,11 +1755,11 @@ const RecommendationsPanel = (props) => {
                 <button className={isInDeck ? 'remove-from-deck' : ''} onClick={(e) => { e.stopPropagation(); if (isInDeck) { removeCardFromDeck(card.id); } else { addCardToDeck(card); } }}>
                   {isInDeck ? 'Remove' : 'Add'}
                 </button>
-                <button 
-                  className="pattern-analysis-btn" 
-                  onClick={(e) => { 
-                    e.stopPropagation(); 
-                    setShowPatternAnalysis(showingPatterns ? null : card.id); 
+                <button
+                  className="pattern-analysis-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowPatternAnalysis(showingPatterns ? null : card.id);
                   }}
                   title="Show pattern analysis"
                 >
@@ -1838,10 +1843,10 @@ const TokenSuggestionsPanel = (props) => {
 
 const AutoBuildPanel = (props) => {
   const { format, autoBuildLoading, handleAutoBuildCommander, autoBuildSynergy, deck } = props;
-  
+
   const canAutoBuild = format === 'commander';
   const hasGeneratedDeck = autoBuildSynergy !== null;
-  
+
   return (
     <div className="auto-build-view">
       <div className="auto-build-header">
@@ -1850,22 +1855,22 @@ const AutoBuildPanel = (props) => {
           Generate a complete Commander deck automatically
         </p>
       </div>
-      
-      <button 
-        className="auto-build-button" 
-        onClick={handleAutoBuildCommander} 
+
+      <button
+        className="auto-build-button"
+        onClick={handleAutoBuildCommander}
         disabled={autoBuildLoading || !canAutoBuild}
         style={{ width: '100%', marginBottom: '16px' }}
       >
         {autoBuildLoading ? 'Building Deck…' : 'Auto Build Commander Deck'}
       </button>
-      
+
       {!canAutoBuild && (
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', fontStyle: 'italic' }}>
           Auto-build is only available for Commander format
         </p>
       )}
-      
+
       {hasGeneratedDeck && (
         <div className="auto-build-results">
           <div className="synergy-score-display">
@@ -1882,7 +1887,7 @@ const AutoBuildPanel = (props) => {
               </div>
             </div>
           </div>
-          
+
           <div className="deck-composition">
             <h5>Deck Composition</h5>
             <div className="composition-stats">
@@ -1908,7 +1913,7 @@ const AutoBuildPanel = (props) => {
 
 const DeckStatsPanel = (props) => {
   const { deck, format, deckAnalysis } = props;
-  
+
   return (
     <div className="deck-stats-view">
       <div className="deck-stats-content">
@@ -1920,7 +1925,7 @@ const DeckStatsPanel = (props) => {
 
 const SpellbookExportPanel = (props) => {
   const { deck } = props;
-  
+
   return (
     <div className="spellbook-export-view">
       <h3>Spellbook Export</h3>
@@ -1930,38 +1935,38 @@ const SpellbookExportPanel = (props) => {
 };
 
 const AIPanelComponent = (props) => {
-  const { 
-    deck, 
-    searchTerm, 
-    setSearchTerm, 
-    handleCardClick, 
-    recommendations, 
+  const {
+    deck,
+    searchTerm,
+    setSearchTerm,
+    handleCardClick,
+    recommendations,
     deckArchetype,
     deckAnalysis,
-    format 
+    format
   } = props;
-  
+
   const handleCardSuggestion = (cardName) => {
     // Set the search term to the suggested card name
     setSearchTerm(cardName);
-    
+
     // Optionally trigger a search or other action
     console.log('AI suggested card:', cardName);
   };
-  
+
   // Get the current commander from the deck
   const commander = deck.commanders.length > 0 ? deck.commanders[0].card : null;
-  
+
   // Convert deck format for AI analysis
   const deckForAI = deck.mainboard.map(entry => ({
     name: entry.card.name,
     quantity: entry.quantity,
     ...entry.card
   }));
-  
+
   return (
     <div className="ai-panel-view">
-      <AIPanel 
+      <AIPanel
         deck={deckForAI}
         commander={commander}
         onCardSuggestion={handleCardSuggestion}

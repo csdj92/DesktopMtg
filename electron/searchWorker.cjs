@@ -1,88 +1,100 @@
 const { parentPort } = require('worker_threads');
-const path = require('path');
-const os = require('os');
 const fs = require('fs');
+const path = require('path');
 
-// Set environment variables for stability
+// --- Runtime tuning --------------------------------------------------------
 process.env.TRANSFORMERS_VERBOSITY = 'error';
-process.env.TOKENIZERS_PARALLELISM = 'false';
-process.env.OMP_NUM_THREADS = '1';
-process.env.OPENBLAS_NUM_THREADS = '1';
-process.env.MKL_NUM_THREADS = '1';
+process.env.TOKENIZERS_PARALLELISM  = 'false';
+process.env.OMP_NUM_THREADS         = '1';
+process.env.OPENBLAS_NUM_THREADS    = '1';
+process.env.MKL_NUM_THREADS         = '1';
 
-// We will use dynamic imports for the ES Modules
-let pipeline;
-let connect;
+// Dynamically‑loaded ESM deps
+let pipeline;   // @xenova/transformers
+let connect;    // @lancedb/lancedb
 
-// A standalone class to handle search operations inside the worker
+// ---------------------------------------------------------------------------
+//  SearchWorkerService – focuses on the single vector column `keyword_vector`
+// ---------------------------------------------------------------------------
 class SearchWorkerService {
-  constructor() {
-    this.db = null;
-    this.table = null;
-    this.embedder = null;
-    this.isInitialized = false;
-    this.modelLoadAttempts = 0; // Track retry attempts
-    this.maxRetries = 3;
-  }
+  db          = null;
+  table       = null;
+  embedder    = null;
+  isInitialized = false;
+  maxRetries  = 3;
 
-  /**
-   * Initializes the embedding model and connects to the existing LanceDB database.
-   */
+  // ----------------------- init -------------------------------------------
   async initialize({ dbDirPath, cachePath }) {
     if (this.isInitialized) return;
 
     try {
-      console.log('[Worker] Initializing Semantic Search Service...');
-
-      // Set up the model cache directory in a writable location
-      console.log(`[Worker] Setting model cache directory to: ${cachePath}`);
-      console.log(`[Worker] Cache directory exists: ${fs.existsSync(cachePath)}`);
+      console.log('[Worker] Starting initialization...');
+      
+      // Ensure cache dir for HuggingFace files is writable
       fs.mkdirSync(cachePath, { recursive: true });
-      console.log(`[Worker] Cache directory created/verified: ${fs.existsSync(cachePath)}`);
       process.env.TRANSFORMERS_CACHE = cachePath;
 
-      // Absolute path to the LanceDB directory provided by the main thread
-      const LANCE_DB_DIR = dbDirPath;
-      const TABLE_NAME = 'magic_cards';
-      console.log(`[Worker] Vector DB directory: ${LANCE_DB_DIR}`);
-      console.log(`[Worker] Vector DB directory exists: ${fs.existsSync(LANCE_DB_DIR)}`);
-      if (fs.existsSync(LANCE_DB_DIR)) {
-        const dbContents = fs.readdirSync(LANCE_DB_DIR);
-        console.log(`[Worker] Vector DB contents: ${dbContents.join(', ')}`);
-      }
-      
-      // Dynamically import ES modules required for the service
-      const transformers = await import('@xenova/transformers');
-      pipeline = transformers.pipeline;
-      
-      const lancedbModule = await import('@lancedb/lancedb');
-      connect = lancedbModule.connect;
+      // Lazy‑load heavy deps
+      ({ pipeline } = await import('@xenova/transformers'));
+      ({ connect  } = await import('@lancedb/lancedb'));
 
-      // Load the model for generating query embeddings with retry logic
+      // Load model with retry logic
       this.embedder = await this.loadModelWithRetry();
 
-      // Connect to the LanceDB database directory
-      console.log(`[Worker] Attempting to connect to LanceDB at: ${LANCE_DB_DIR}`);
-      this.db = await connect(LANCE_DB_DIR);
+      // Connect to LanceDB
+      console.log('[Worker] Attempting to connect to LanceDB at:', dbDirPath);
+      console.log('[Worker] About to call connect()...');
+      this.db = await connect(dbDirPath);
+      console.log('[Worker] LanceDB connection successful');
 
-      const tableNames = await this.db.tableNames();
-      if (!tableNames.includes(TABLE_NAME)) {
-        throw new Error(`Table '${TABLE_NAME}' not found in database at ${LANCE_DB_DIR}`);
-      }
-      
-      this.table = await this.db.openTable(TABLE_NAME);
+      // Open the table
+      console.log('[Worker] About to open table: magic_cards');
+      this.table = await this.db.openTable('magic_cards');
+      console.log('[Worker] Table opened successfully');
+
+      // Get row count
+      console.log('[Worker] About to count rows...');
       const rowCount = await this.table.countRows();
+      console.log('[Worker] Row count:', rowCount);
+
+      // Get schema info
+      console.log('[Worker] About to get schema...');
+      const schema = await this.table.schema();
+      console.log('[Worker] Table schema fields:', schema.fields.map(f => f.name));
       
-      // Ensure FTS index exists for hybrid search
-      try {
-        await this.table.createIndex('oracle_text', { replace: true });
-        console.log('[Worker] FTS index created/updated for oracle_text');
-      } catch (ftsError) {
-        console.warn('[Worker] Could not create FTS index:', ftsError.message);
-      }
+      // Detect vector columns
+      const vectorColumns = schema.fields
+        .filter(f => f.type.toString().includes('FixedSizeList'))
+        .map(f => f.name);
+      console.log('[Worker] Detected vector columns:', vectorColumns);
+
+      // // Create FTS index for oracle_text
+      // try {
+      //   await this.table.createIndex('oracle_text', { replace: false });
+      //   console.log('[Worker] FTS index created/updated for oracle_text');
+      // } catch (ftsError) {
+      //   console.warn('[Worker] Could not create FTS index:', ftsError.message);
+      // }
+      
+      // // Ensure vector index exists for keyword_vector - handle gracefully if already exists
+      // try {
+      //   // Try to create index with replace: false to avoid overwriting existing
+      //   await this.table.createIndex('keyword_vector', { 
+      //     metric: 'cosine', 
+      //     replace: false,
+      //     vector_column_name: 'keyword_vector' // Explicitly specify which column
+      //   });
+      //   console.log('[Worker] Vector index created for keyword_vector');
+      // } catch (vectorErr) {
+      //   if (vectorErr.message.includes('already exists')) {
+      //     console.log('[Worker] Vector index already exists for keyword_vector, using existing index');
+      //   } else {
+      //     console.warn('[Worker] Could not create vector index for keyword_vector:', vectorErr.message);
+      //   }
+      // }
       
       this.isInitialized = true;
-      console.log(`[Worker] Semantic Search Service Initialized. Connected to table: '${TABLE_NAME}' with ${rowCount} rows`);
+      console.log(`[Worker] Semantic Search Service Initialized. Connected to table: 'magic_cards' with ${rowCount} rows`);
 
     } catch (error) {
       console.error('[Worker] Error initializing Semantic Search Service:', error);
@@ -105,23 +117,122 @@ class SearchWorkerService {
   }
 
   /**
+   * Check if model is already cached locally
+   */
+  async isModelCached() {
+    try {
+      // Check if the model files exist in the cache directory
+      const modelName = 'xenova/all-MiniLM-L6-v2';
+      const cacheDir = process.env.TRANSFORMERS_CACHE;
+      
+      if (!cacheDir) {
+        console.log('[Worker] No cache directory set, assuming model not cached');
+        return false;
+      }
+      
+      // The model files are typically stored in a subdirectory structure
+      // Check for the main model file (config.json and model files)
+      const modelDir = path.join(cacheDir, 'hub', 'models--xenova--all-MiniLM-L6-v2');
+      const configFile = path.join(modelDir, 'config.json');
+      const modelFiles = [
+        path.join(modelDir, 'snapshots', 'main', 'config.json'),
+        path.join(modelDir, 'snapshots', 'main', 'tokenizer.json'),
+        path.join(modelDir, 'snapshots', 'main', 'model.safetensors')
+      ];
+      
+      // Check if config file exists
+      if (!fs.existsSync(configFile)) {
+        console.log('[Worker] Model config not found in cache');
+        return false;
+      }
+      
+      // Check if main model files exist
+      const missingFiles = modelFiles.filter(file => !fs.existsSync(file));
+      if (missingFiles.length > 0) {
+        console.log('[Worker] Some model files missing:', missingFiles);
+        return false;
+      }
+      
+      console.log('[Worker] Model found in cache, skipping download');
+      return true;
+    } catch (error) {
+      console.error('[Worker] Error checking model cache:', error);
+      return false;
+    }
+  }
+
+  /**
    * Load model with retry logic for better reliability
    */
   async loadModelWithRetry() {
+    // First check if model is already cached
+    const isCached = await this.isModelCached();
+    
+    if (isCached) {
+      console.log('[Worker] Model is already cached, loading from cache...');
+      // Send progress update to indicate we're loading from cache
+      parentPort.postMessage({ type: 'model-progress', payload: { progress: 0.1, message: 'Loading model from cache...' } });
+      
+      try {
+        const model = await pipeline(
+          'feature-extraction',
+          'xenova/all-MiniLM-L6-v2',
+          {
+            progress_callback: ({ progress }) => {
+              // For cached models, progress should be much faster
+              const adjustedProgress = 0.1 + (progress * 0.8); // Start at 10%, use 80% of remaining progress
+              parentPort.postMessage({ 
+                type: 'model-progress', 
+                payload: { 
+                  progress: adjustedProgress,
+                  message: `Loading model from cache: ${(adjustedProgress * 100).toFixed(1)}%`
+                } 
+              });
+            }
+          }
+        );
+        
+        console.log('[Worker] Model loaded successfully from cache');
+        parentPort.postMessage({ type: 'model-progress', payload: { progress: 1.0, message: 'Model loaded from cache' } });
+        return model;
+      } catch (error) {
+        console.error('[Worker] Failed to load model from cache:', error);
+        // Fall through to download if cache loading fails
+      }
+    }
+    
+    // Model not cached or cache loading failed, download it
+    console.log('[Worker] Model not found in cache, downloading...');
+    parentPort.postMessage({ type: 'model-progress', payload: { progress: 0, message: 'Downloading AI model...' } });
+    
     for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
       try {
         console.log(`[Worker] Loading model (attempt ${attempt}/${this.maxRetries})...`);
+        console.log(`[Worker] About to call pipeline() with feature-extraction`);
         
-        return await pipeline(
+        const model = await pipeline(
           'feature-extraction',
           'xenova/all-MiniLM-L6-v2',
           {
             progress_callback: ({ progress }) => {
               // progress is 0-1 float; convert to percentage for convenience
-              parentPort.postMessage({ type: 'model-progress', payload: { progress } });
+              parentPort.postMessage({ 
+                type: 'model-progress', 
+                payload: { 
+                  progress,
+                  message: `Downloading AI model: ${(progress * 100).toFixed(1)}%`
+                } 
+              });
             }
           }
         );
+        
+        console.log(`[Worker] Model loaded successfully on attempt ${attempt}`);
+        console.log(`[Worker] Model type:`, typeof model);
+        console.log(`[Worker] Model keys:`, Object.keys(model || {}));
+        
+        parentPort.postMessage({ type: 'model-progress', payload: { progress: 1.0, message: 'Model downloaded successfully' } });
+        return model;
       } catch (error) {
         console.error(`[Worker] Model load attempt ${attempt} failed:`, error);
         
@@ -130,7 +241,7 @@ class SearchWorkerService {
         }
         
         // Wait before retry (exponential backoff)
-        await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt - 1)));
+        await new Promise(resolve => setTimeout(resolve, 100000 * Math.pow(2, attempt - 1)));
       }
     }
   }
@@ -161,8 +272,11 @@ class SearchWorkerService {
       console.log('[Worker] Performing traditional text search...');
       
       // Simple text matching fallback
+      console.log('[Worker] TRADITIONAL SEARCH: About to call .search() with vector_column_name');
+      console.log('[Worker] TRADITIONAL SEARCH params:', { query, vector_column_name: "keyword_vector" });
       const results = await this.table
         .search(query)
+        .column('keyword_vector')
         .select([
           'name',
           'mana_cost',
@@ -228,6 +342,8 @@ class SearchWorkerService {
         semanticWeight = 0.7
       } = options;
 
+      console.log('[Worker] SEARCH OPTIONS:', { limit, offset, useSemanticSearch, useHybridSearch, semanticWeight });
+
       if (!this.isInitialized || !this.embedder || !this.table) {
         console.error('[Worker] Search service is not ready.');
         return [];
@@ -244,99 +360,152 @@ class SearchWorkerService {
         return results;
       }
 
+      console.log('[Worker] Using semantic search with useHybridSearch:', useHybridSearch);
+
       console.log('[Worker] Generating embedding for query...');
-      const queryEmbedding = await this.embedder(query, { pooling: 'mean', normalize: true });
-      console.log('[Worker] Embedding generated successfully.');
+      console.log('[Worker] About to call this.embedder() with params:', { query, pooling: 'mean', normalize: true });
+      console.log('[Worker] this.embedder type:', typeof this.embedder);
+      console.log('[Worker] this.embedder is function:', typeof this.embedder === 'function');
+      
+      let queryEmbedding;
+      try {
+        console.log('[Worker] Calling this.embedder() now...');
+        queryEmbedding = await this.embedder(query, { pooling: 'mean', normalize: true });
+        console.log('[Worker] Embedding generated successfully.');
+        console.log('[Worker] Embedding data length:', queryEmbedding?.data?.length);
+        console.log('[Worker] Embedding type:', typeof queryEmbedding);
+        console.log('[Worker] Embedding keys:', Object.keys(queryEmbedding || {}));
+      } catch (embeddingError) {
+        console.error('[Worker] Error during embedding generation:', embeddingError);
+        console.error('[Worker] Embedding error stack:', embeddingError?.stack);
+        console.error('[Worker] Embedding error message:', embeddingError?.message);
+        throw embeddingError;
+      }
 
       const searchLimit = Math.min(limit, 1000);
       let searchResults;
 
-             if (useHybridSearch) {
-         console.log('[Worker] Starting LanceDB HYBRID search...');
-         try {
-           // Try modern LanceDB hybrid search - different approaches
-           try {
-             // Method 1: Try with query_type parameter
-             searchResults = await this.table
-               .search(query, { query_type: "hybrid" })
-               .select([
-                 'name',
-                 'mana_cost', 
-                 'mana_value',
-                 'type_line',
-                 'oracle_text',
-                 'keywords',
-                 'colors',
-                 'color_identity',
-                 'power',
-                 'toughness',
-                 'loyalty',
-                 'rarity',
-                 'legalities',
-                 'set_name'
-               ])
-               .limit(searchLimit)
-               .offset(offset)
-               .toArray();
-           } catch (method1Error) {
-             console.warn('[Worker] Method 1 failed, trying method 2:', method1Error.message);
-             // Method 2: Try with vector search + FTS combination
-             searchResults = await this.table
-               .search(Array.from(queryEmbedding.data))
-               .select([
-                 'name',
-                 'mana_cost', 
-                 'mana_value',
-                 'type_line',
-                 'oracle_text',
-                 'keywords',
-                 'colors',
-                 'color_identity',
-                 'power',
-                 'toughness',
-                 'loyalty',
-                 'rarity',
-                 'legalities',
-                 'set_name',
-                 '_distance'
-               ])
-               .limit(searchLimit)
-               .offset(offset)
-               .toArray();
-           }
-           
-           console.log('[Worker] Hybrid search completed.');
-         } catch (hybridErr) {
-           console.warn('[Worker] Hybrid search failed, falling back to vector search:', hybridErr?.message || hybridErr);
-           // Fallback to vector search if hybrid fails
-           searchResults = await this.table
-             .search(Array.from(queryEmbedding.data))
-             .select([
-               'name',
-               'mana_cost',
-               'mana_value', 
-               'type_line',
-               'oracle_text',
-               'keywords',
-               'colors',
-               'color_identity',
-               'power',
-               'toughness',
-               'loyalty',
-               'rarity',
-               'legalities',
-               'set_name',
-               '_distance'
-             ])
-             .limit(searchLimit)
-             .offset(offset)
-             .toArray();
-         }
+      if (useHybridSearch) {
+        console.log('[Worker] Starting LanceDB HYBRID search...');
+        console.log('[Worker] HYBRID SEARCH PATH SELECTED');
+        try {
+          // Try modern LanceDB hybrid search - different approaches
+          try {
+            // Method 1: Try with query_type parameter and vector column specification
+            console.log('[Worker] HYBRID METHOD 1: About to call .search() with hybrid params');
+            const hybridParams = { 
+              query_type: "hybrid", 
+              vector_column_name: "keyword_vector",
+              fts_columns: "oracle_text",
+              metric: "cosine" // Explicitly specify metric
+            };
+            console.log('[Worker] HYBRID METHOD 1 params:', { query, ...hybridParams });
+            searchResults = await this.table
+              .search(query, hybridParams)
+              .column('keyword_vector')
+              .select([
+                'name',
+                'mana_cost', 
+                'mana_value',
+                'type_line',
+                'oracle_text',
+                'keywords',
+                'colors',
+                'color_identity',
+                'power',
+                'toughness',
+                'loyalty',
+                'rarity',
+                'legalities',
+                'set_name'
+              ])
+              .limit(searchLimit)
+              .offset(offset)
+              .toArray();
+          } catch (method1Error) {
+            console.warn('[Worker] Method 1 failed, trying method 2:', method1Error.message);
+            // Method 2: Try with vector search + FTS combination
+            console.log('[Worker] HYBRID METHOD 2: About to call .search() with vector data');
+            console.log('[Worker] HYBRID METHOD 2 params:', { 
+              embeddingLength: queryEmbedding.data.length, 
+              ...vectorParams 
+            });
+            searchResults = await this.table
+              .search(Array.from(queryEmbedding.data))
+              .column('keyword_vector')
+              .select([
+                'name',
+                'mana_cost', 
+                'mana_value',
+                'type_line',
+                'oracle_text',
+                'keywords',
+                'colors',
+                'color_identity',
+                'power',
+                'toughness',
+                'loyalty',
+                'rarity',
+                'legalities',
+                'set_name',
+                '_distance'
+              ])
+              .limit(searchLimit)
+              .offset(offset)
+              .toArray();
+          }
+          
+          console.log('[Worker] Hybrid search completed.');
+        } catch (hybridErr) {
+          console.warn('[Worker] Hybrid search failed, falling back to vector search:', hybridErr?.message || hybridErr);
+          // Fallback to vector search if hybrid fails
+          console.log('[Worker] HYBRID FALLBACK: About to call .search() with vector data');
+          console.log('[Worker] HYBRID FALLBACK params:', { 
+            embeddingLength: queryEmbedding.data.length, 
+            ...fallbackParams 
+          });
+          searchResults = await this.table
+            .search(Array.from(queryEmbedding.data))
+            .column('keyword_vector')
+            .select([
+              'name',
+              'mana_cost',
+              'mana_value', 
+              'type_line',
+              'oracle_text',
+              'keywords',
+              'colors',
+              'color_identity',
+              'power',
+              'toughness',
+              'loyalty',
+              'rarity',
+              'legalities',
+              'set_name',
+              '_distance'
+            ])
+            .limit(searchLimit)
+            .offset(offset)
+            .toArray();
+        }
       } else {
         console.log('[Worker] Starting LanceDB VECTOR search...');
+        console.log('[Worker] VECTOR SEARCH PATH SELECTED');
+        console.log('[Worker] VECTOR search parameters:', {
+          column: 'keyword_vector',
+          embeddingLength: queryEmbedding?.data?.length,
+          useHybridSearch
+        });
+        console.log('[Worker] VECTOR SEARCH: About to call .search() with vector data');
+       
+        console.log('[Worker] VECTOR SEARCH params:', { 
+          embeddingLength: queryEmbedding.data.length
+        });
         searchResults = await this.table
           .search(Array.from(queryEmbedding.data))
+          .column('keyword_vector')
           .select([
+            'keyword_vector',
             'name',
             'mana_cost',
             'mana_value',
@@ -423,6 +592,13 @@ class SearchWorkerService {
 
     } catch (error) {
       console.error('[Worker] Error during semantic search:', error);
+      console.error('[Worker] Error stack:', error?.stack);
+      try {
+        const idxInfo = typeof this.table?.listIndexes === 'function' ? await this.table.listIndexes() : 'N/A';
+        console.error('[Worker] Table index info at error time:', idxInfo);
+      } catch (idxErr) {
+        console.warn('[Worker] Failed to log index info during error handling:', idxErr);
+      }
       throw error;
     }
   }
@@ -477,4 +653,4 @@ parentPort.on('message', async (message) => {
   } catch (error) {
     parentPort.postMessage({ type: 'error', payload: { message: error.message, stack: error.stack }, id });
   }
-}); 
+});

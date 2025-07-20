@@ -29,6 +29,9 @@ const CardDetailModal = ({
   const [quantityInput, setQuantityInput] = useState(1);
   const [showRulings, setShowRulings] = useState(false);
 
+  // Deck management state
+  const [deckActionStatus, setDeckActionStatus] = useState('idle'); // 'idle' | 'adding' | 'removing' | 'success' | 'error'
+
   useEffect(() => {
     let isMounted = true;
     (async () => {
@@ -145,6 +148,82 @@ const CardDetailModal = ({
     }
   };
 
+  // Deck management validation logic
+  const validateDeckAction = (card) => {
+    if (!card) return { valid: false, error: 'Invalid card data' };
+
+    // Check color identity for commander format
+    if (deckFormat === 'commander' && commanderColorIdentity) {
+      if (card.color_identity && card.color_identity.length > 0) {
+        const isValidColorIdentity = card.color_identity.every(color =>
+          commanderColorIdentity.has(color)
+        );
+        if (!isValidColorIdentity) {
+          return {
+            valid: false,
+            error: `This card is outside your commander's color identity. Card colors: ${card.color_identity.join(', ')}`
+          };
+        }
+      }
+    }
+
+    // Check singleton rules for commander format
+    if (deckFormat === 'commander') {
+      const typeLine = (card.type || card.type_line || '').toLowerCase();
+      const isBasicLand = typeLine.includes('basic') && typeLine.includes('land');
+
+      if (!isBasicLand && isInDeck) {
+        return {
+          valid: false,
+          error: 'Commander format allows only one copy of each non-basic card'
+        };
+      }
+    }
+
+    return { valid: true };
+  };
+
+  // Deck management click handlers
+  const handleAddToDeck = async () => {
+    if (!onAddToDeck) return;
+
+    const validation = validateDeckAction(card);
+    if (!validation.valid) {
+      setDeckActionStatus('error');
+      alert(validation.error);
+      setTimeout(() => setDeckActionStatus('idle'), 2000);
+      return;
+    }
+
+    try {
+      setDeckActionStatus('adding');
+      await onAddToDeck(card);
+      setDeckActionStatus('success');
+      setTimeout(() => setDeckActionStatus('idle'), 1500);
+    } catch (error) {
+      console.error('Failed to add card to deck:', error);
+      setDeckActionStatus('error');
+      alert('Failed to add card to deck');
+      setTimeout(() => setDeckActionStatus('idle'), 2000);
+    }
+  };
+
+  const handleRemoveFromDeck = async () => {
+    if (!onRemoveFromDeck) return;
+
+    try {
+      setDeckActionStatus('removing');
+      await onRemoveFromDeck(card.id);
+      setDeckActionStatus('success');
+      setTimeout(() => setDeckActionStatus('idle'), 1500);
+    } catch (error) {
+      console.error('Failed to remove card from deck:', error);
+      setDeckActionStatus('error');
+      alert('Failed to remove card from deck');
+      setTimeout(() => setDeckActionStatus('idle'), 2000);
+    }
+  };
+
   return (
     <div className="modal-backdrop" onClick={handleBackdropClick}>
       <div className="modal-content">
@@ -178,9 +257,9 @@ const CardDetailModal = ({
         </div>
         <div className="modal-body">
           <div className="modal-card-image">
-            <img 
-              src={imageUrl} 
-              alt={card.name} 
+            <img
+              src={imageUrl}
+              alt={card.name}
               className={isLoading ? 'loading' : ''}
               loading="lazy"
             />
@@ -239,6 +318,41 @@ const CardDetailModal = ({
               {card.purchase_uris?.cardkingdom && <a href={card.purchase_uris.cardkingdom} target="_blank" rel="noopener noreferrer">Buy on Card Kingdom</a>}
               {card.related_uris?.edhrec && <a href={card.related_uris.edhrec} target="_blank" rel="noopener noreferrer">EDHREC</a>}
             </div>
+
+            {/* Deck Management Buttons */}
+            {(onAddToDeck || onRemoveFromDeck) && (
+              <div className="deck-actions">
+                <h4>Deck Management</h4>
+                <div className="deck-action-buttons">
+                  {!isInDeck ? (
+                    <button
+                      className={`deck-action-btn add-to-deck ${deckActionStatus === 'adding' ? 'loading' : ''}`}
+                      onClick={handleAddToDeck}
+                      disabled={deckActionStatus === 'adding' || deckActionStatus === 'removing'}
+                    >
+                      {deckActionStatus === 'adding' ? '⏳ Adding...' :
+                        deckActionStatus === 'success' ? '✅ Added!' :
+                          '➕ Add to Deck'}
+                    </button>
+                  ) : (
+                    <button
+                      className={`deck-action-btn remove-from-deck ${deckActionStatus === 'removing' ? 'loading' : ''}`}
+                      onClick={handleRemoveFromDeck}
+                      disabled={deckActionStatus === 'adding' || deckActionStatus === 'removing'}
+                    >
+                      {deckActionStatus === 'removing' ? '⏳ Removing...' :
+                        deckActionStatus === 'success' ? '✅ Removed!' :
+                          '➖ Remove from Deck'}
+                    </button>
+                  )}
+                </div>
+                {deckActionStatus === 'error' && (
+                  <div className="deck-action-error">
+                    ❌ Operation failed. Please try again.
+                  </div>
+                )}
+              </div>
+            )}
 
             <button className="add-to-collection-btn" onClick={() => { setActionMode('add'); }}>
               {addStatus || '➕ Add to Collection'}
