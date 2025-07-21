@@ -204,6 +204,55 @@
   margin-left: 8px;
 }
 
+.delete-btn {
+  background-color: #dc2626 !important;
+  color: white !important;
+}
+
+.delete-btn:hover {
+  background-color: #b91c1c !important;
+}
+
+.delete-mode-selector {
+  margin: 10px 0;
+  padding: 10px;
+  background-color: #1f1f1f;
+  border-radius: 4px;
+  border: 1px solid #444;
+}
+
+.delete-mode-selector label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  color: #e0e0e0;
+  font-size: 0.9em;
+}
+
+.delete-mode-selector label:last-child {
+  margin-bottom: 0;
+}
+
+.delete-mode-selector input[type="radio"] {
+  margin: 0;
+  cursor: pointer;
+}
+
+.collection-buttons-group {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.collection-buttons-group .add-to-collection-btn {
+  flex: 1;
+  margin: 0;
+  font-size: 0.9em;
+  padding: 8px 12px;
+}
+
 .collection-form {
   margin-top: 12px;
   display: flex;
@@ -264,6 +313,22 @@
 }
 
 .rulings-toggle-btn:hover {
+  background-color: #0056b3;
+}
+
+.legalities-toggle-btn {
+  background-color: #007bff;
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9em;
+  margin-bottom: 10px;
+  transition: background-color 0.2s;
+}
+
+.legalities-toggle-btn:hover {
   background-color: #0056b3;
 }
 

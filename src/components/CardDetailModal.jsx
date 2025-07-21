@@ -24,10 +24,12 @@ const CardDetailModal = ({
 
   const [addStatus, setAddStatus] = useState(null);
   const [ownedQty, setOwnedQty] = useState(null);
-  const [actionMode, setActionMode] = useState(null); // 'add' | 'update'
+  const [actionMode, setActionMode] = useState(null); // 'add' | 'update' | 'delete'
   const [collectionInput, setCollectionInput] = useState('My Collection');
   const [quantityInput, setQuantityInput] = useState(1);
+  const [deleteMode, setDeleteMode] = useState('specific'); // 'specific' | 'all'
   const [showRulings, setShowRulings] = useState(false);
+  const [showLegalities, setShowLegalities] = useState(false);
 
   // Deck management state
   const [deckActionStatus, setDeckActionStatus] = useState('idle'); // 'idle' | 'adding' | 'removing' | 'success' | 'error'
@@ -75,6 +77,7 @@ const CardDetailModal = ({
     setCollectionInput('My Collection');
     setQuantityInput(1);
     setActionMode(null);
+    setDeleteMode('specific');
   };
 
   const performAdd = async () => {
@@ -107,7 +110,7 @@ const CardDetailModal = ({
     }
   };
 
-  const performUpdateOrDelete = async () => {
+  const performUpdate = async () => {
     try {
       const newQty = parseInt(quantityInput, 10);
       if (isNaN(newQty) || newQty < 0) {
@@ -121,20 +124,55 @@ const CardDetailModal = ({
         foil: 'normal'
       };
 
+      const res = await window.electronAPI.collectionUpdateCardQuantity(collectionInput.trim(), cardKey, newQty);
+      if (res.success) {
+        alert('Quantity updated');
+        setOwnedQty(newQty);
+        resetForm();
+      } else {
+        alert(res?.error || 'Operation failed');
+      }
+    } catch (err) {
+      console.error(err);
+      alert(err.message || 'Operation failed');
+    }
+  };
+
+  const performDelete = async () => {
+    try {
+      const cardKey = {
+        card_name: card.name,
+        set_code: card.setCode,
+        collector_number: card.number,
+        foil: 'normal'
+      };
+
       let res;
-      if (newQty === 0) {
+      if (deleteMode === 'all') {
         res = await window.electronAPI.collectionDeleteCard(collectionInput.trim(), cardKey);
         if (res.success) {
-          alert('Card deleted from collection');
-          setOwnedQty(prev => Math.max(0, (prev || 0) - 1));
+          alert('All copies deleted from collection');
+          setOwnedQty(0);
           resetForm();
           onClose();
         }
       } else {
+        // Delete specific quantity
+        const deleteQty = parseInt(quantityInput, 10);
+        if (isNaN(deleteQty) || deleteQty <= 0) {
+          return alert('Invalid quantity to delete');
+        }
+        
+        const currentQty = ownedQty || 0;
+        if (deleteQty > currentQty) {
+          return alert(`Cannot delete ${deleteQty} copies when you only own ${currentQty}`);
+        }
+        
+        const newQty = currentQty - deleteQty;
         res = await window.electronAPI.collectionUpdateCardQuantity(collectionInput.trim(), cardKey, newQty);
         if (res.success) {
-          alert('Quantity updated');
-          setOwnedQty(newQty); // simplistic update
+          alert(`${deleteQty} cop${deleteQty === 1 ? 'y' : 'ies'} deleted from collection`);
+          setOwnedQty(newQty);
           resetForm();
         }
       }
@@ -264,15 +302,19 @@ const CardDetailModal = ({
               loading="lazy"
             />
             <div className="legalities">
-              <h3>Legalities</h3>
-              <ul>
-                {Object.entries(legalities).map(([format, legality]) => (
-                  <li key={format}>
-                    <span className="format-name">{format.replace(/_/g, ' ')}:</span>
-                    <span className={`legality-status ${legality}`}>{legality.replace(/_/g, ' ')}</span>
-                  </li>
-                ))}
-              </ul>
+              <button onClick={() => setShowLegalities(!showLegalities)} className="legalities-toggle-btn">
+                {showLegalities ? 'Hide' : 'Show'} Legalities ({Object.keys(legalities).length})
+              </button>
+              {showLegalities && (
+                <ul>
+                  {Object.entries(legalities).map(([format, legality]) => (
+                    <li key={format}>
+                      <span className="format-name">{format.replace(/_/g, ' ')}:</span>
+                      <span className={`legality-status ${legality}`}>{legality.replace(/_/g, ' ')}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
           <div className="modal-card-details">
@@ -354,33 +396,75 @@ const CardDetailModal = ({
               </div>
             )}
 
-            <button className="add-to-collection-btn" onClick={() => { setActionMode('add'); }}>
-              {addStatus || '➕ Add to Collection'}
-            </button>
+            <div className="collection-buttons-group">
+              <button className="add-to-collection-btn" onClick={() => { setActionMode('add'); }}>
+                {addStatus || '➕ Add'}
+              </button>
 
-            <button className="add-to-collection-btn" onClick={() => { setActionMode('update'); }}>
-              ✏️ Update / 🗑️ Delete
-            </button>
+              <button className="add-to-collection-btn" onClick={() => { setActionMode('update'); }}>
+                ✏️ Update
+              </button>
+
+              <button className="add-to-collection-btn delete-btn" onClick={() => { setActionMode('delete'); }}>
+                🗑️ Remove
+              </button>
+            </div>
 
             {actionMode && (
               <div className="collection-form">
-                <h4>{actionMode === 'add' ? 'Add to Collection' : 'Update / Delete'}</h4>
+                <h4>
+                  {actionMode === 'add' ? 'Add to Collection' : 
+                   actionMode === 'update' ? 'Update Quantity' : 
+                   'Remove from Collection'}
+                </h4>
                 <input
                   type="text"
                   value={collectionInput}
                   onChange={(e) => setCollectionInput(e.target.value)}
                   placeholder="Collection name"
                 />
-                <input
-                  type="number"
-                  value={quantityInput}
-                  onChange={(e) => setQuantityInput(e.target.value)}
-                  min="0"
-                  placeholder="Quantity (0 to delete)"
-                />
+                {actionMode === 'delete' && (
+                  <div className="delete-mode-selector">
+                    <label>
+                      <input
+                        type="radio"
+                        name="deleteMode"
+                        value="specific"
+                        checked={deleteMode === 'specific'}
+                        onChange={(e) => setDeleteMode(e.target.value)}
+                      />
+                      Remove specific quantity
+                    </label>
+                    <label>
+                      <input
+                        type="radio"
+                        name="deleteMode"
+                        value="all"
+                        checked={deleteMode === 'all'}
+                        onChange={(e) => setDeleteMode(e.target.value)}
+                      />
+                      Remove all copies
+                    </label>
+                  </div>
+                )}
+                {(actionMode === 'add' || actionMode === 'update' || (actionMode === 'delete' && deleteMode === 'specific')) && (
+                  <input
+                    type="number"
+                    value={quantityInput}
+                    onChange={(e) => setQuantityInput(e.target.value)}
+                    min={actionMode === 'delete' ? 1 : 0}
+                    placeholder={actionMode === 'delete' ? 'Quantity to remove' : 'Quantity'}
+                  />
+                )}
                 <div className="form-buttons">
-                  <button onClick={actionMode === 'add' ? performAdd : performUpdateOrDelete}>
-                    {actionMode === 'add' ? 'Add' : 'Confirm'}
+                  <button onClick={
+                    actionMode === 'add' ? performAdd : 
+                    actionMode === 'update' ? performUpdate : 
+                    performDelete
+                  }>
+                    {actionMode === 'add' ? 'Add' : 
+                     actionMode === 'update' ? 'Update' : 
+                     'Remove'}
                   </button>
                   <button onClick={resetForm}>Cancel</button>
                 </div>
