@@ -86,15 +86,24 @@ ipcMain.handle('get-available-strategies', () => {
 // IPC Handlers
 // =================================================================
 
-// User Collections Operations
-ipcMain.handle('get-user-collections', async () => {
-  try {
-    return await collectionImporter.getCollections();
-  } catch (error) {
-    console.error('Error getting user collections:', error);
-    return [];
-  }
-});
+  // User Collections Operations
+  ipcMain.handle('get-user-collections', async () => {
+    try {
+      return await collectionImporter.getCollections();
+    } catch (error) {
+      console.error('Error getting user collections:', error);
+      return [];
+    }
+  });
+
+  ipcMain.handle('get-collection-names', async () => {
+    try {
+      return await collectionImporter.getCollectionNames();
+    } catch (error) {
+      console.error('Error getting collection names:', error);
+      return [];
+    }
+  });
 
 ipcMain.handle('get-user-collection-cards', async (event, collectionName, options = {}) => {
   try {
@@ -1451,22 +1460,22 @@ app.whenReady().then(async () => {
   await settingsManager.initialize();
 
   // 🤖 Load @electron/llm for AI features
-  try {
-    console.log('🤖 Loading @electron/llm...');
-    await loadElectronLlm({
-      // Map the model alias used in renderers to the actual GGUF file we
-      // ship inside the electron/AI folder. Returning `null` will make
-      // @electron/llm fall back to its default logic, so we only override
-      // when the file exists.
-      getModelPath: (modelAlias) => {
-        const resolved = path.resolve(__dirname, 'AI', modelAlias);
-        return fsSync.existsSync(resolved) ? resolved : null;
-      }
-    });
-    console.log('✅ @electron/llm loaded successfully');
-  } catch (error) {
-    console.error('❌ Failed to load @electron/llm:', error);
-  }
+  // try {
+  //   console.log('🤖 Loading @electron/llm...');
+  //   await loadElectronLlm({
+  //     // Map the model alias used in renderers to the actual GGUF file we
+  //     // ship inside the electron/AI folder. Returning `null` will make
+  //     // @electron/llm fall back to its default logic, so we only override
+  //     // when the file exists.
+  //     getModelPath: (modelAlias) => {
+  //       const resolved = path.resolve(__dirname, 'AI', modelAlias);
+  //       return fsSync.existsSync(resolved) ? resolved : null;
+  //     }
+  //   });
+  //   console.log('✅ @electron/llm loaded successfully');
+  // } catch (error) {
+  //   console.error('❌ Failed to load @electron/llm:', error);
+  // }
 
   // Auto-updater setup
   if (process.env.NODE_ENV === 'production') {
@@ -1520,7 +1529,7 @@ app.whenReady().then(async () => {
   await collectionImporter.initialize();
 
   // Connect bulk data service to collection importer for card lookups
-  collectionImporter.bulkDataService = bulkDataService;
+  collectionImporter.setBulkDataService(bulkDataService);
 
   console.log('Collection importer initialized successfully.');
 

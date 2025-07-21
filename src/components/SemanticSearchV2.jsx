@@ -37,14 +37,14 @@ function SemanticSearchV2({
     try {
       const startTime = Date.now();
       console.log('Starting semantic search for:', query);
-      
+
       // Call the semantic search API - only get partial data for performance
       const searchResults = await window.electronAPI.searchCardsSemantic(query, {
         limit: Math.max(1, resultLimit) || undefined
       });
 
       const searchTime = Date.now() - startTime;
-      
+
       let finalResults = searchResults;
 
       // If collectionCards are provided, filter & map results to that subset
@@ -89,7 +89,7 @@ function SemanticSearchV2({
                 image_uri: result.scryfallData.image_uris.normal || result.scryfallData.image_uris.large
               };
             }
-            
+
             // For semantic search results, fetch the full card data
             const fullCard = await window.electronAPI.bulkDataFindCard(result.name);
             if (fullCard && fullCard.image_uris) {
@@ -98,7 +98,7 @@ function SemanticSearchV2({
                 image_uri: fullCard.image_uris.normal || fullCard.image_uris.large
               };
             }
-            
+
             return result; // Return without image if not found
           } catch (error) {
             console.warn(`Failed to fetch image for card: ${result.name}`, error);
@@ -139,7 +139,7 @@ function SemanticSearchV2({
     }
   };
 
-  const handleKeyPress = (e) => {
+  const handleKeyDown = (e) => {
     if (e.key === 'Enter') {
       handleSearch();
     }
@@ -199,22 +199,27 @@ function SemanticSearchV2({
           <input
             type="text"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyPress={handleKeyPress}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              // Ensure input keeps focus
+              e.target.focus();
+            }}
+            onKeyDown={handleKeyDown}
             placeholder={defaultPlaceholder}
             className="search-input"
             disabled={isLoading}
+            autoFocus
           />
-          <button 
-            onClick={handleSearch} 
-            disabled={isLoading || !query.trim()} 
+          <button
+            onClick={handleSearch}
+            disabled={isLoading || !query.trim()}
             className="search-button"
           >
             {isLoading ? 'Searching...' : 'Search'}
           </button>
           {query && (
-            <button 
-              onClick={clearSearch} 
+            <button
+              onClick={clearSearch}
               className="clear-button"
               disabled={isLoading}
             >
@@ -222,17 +227,17 @@ function SemanticSearchV2({
             </button>
           )}
         </div>
-        
+
         <div className="search-info">
           <p className="semantic-search-hint">
-            🧠 <strong>Semantic Search</strong><br/>
+            🧠 <strong>Semantic Search</strong><br />
             Describe what the card does, not just keywords. Try: "creatures that gain life", "instant spells that counter", "artifacts that draw cards"
           </p>
         </div>
       </div>
 
       {/* Search Stats */}
-      
+
 
       {/* Loading State */}
       {isLoading && (
@@ -255,7 +260,7 @@ function SemanticSearchV2({
               <small>Ranked by semantic similarity</small>
             </div>
           </div>
-          
+
           <div className="cards-grid-simple">
             {results.map((card, index) => (
               <div key={`${card.name}-${index}`} className="card-wrapper clickable-card" onClick={() => handleCardClick(card)}>

@@ -1,106 +1,77 @@
 import { useState, useEffect, useCallback } from 'react';
 
-// Global image cache to persist across component unmounts
+// Global caches
 const imageCache = new Map();
 const loadingPromises = new Map();
 
-const useImageCache = (imageUrl, fallbackUrl = 'https://placehold.co/488x680/1a1a1a/e0e0e0?text=No+Image') => {
-  const [cachedUrl, setCachedUrl] = useState(null);
+// Default placeholder
+const DEFAULT_FALLBACK =
+  'https://placehold.co/488x680/1a1a1a/e0e0e0?text=No+Image';
+
+export default function useImageCache(
+  src,
+  fallback = DEFAULT_FALLBACK
+) {
+  const [imageUrl, setImageUrl] = useState(fallback);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const loadImage = useCallback(async (url) => {
-    if (!url || url === fallbackUrl) {
-      setCachedUrl(fallbackUrl);
-      return;
-    }
-
-    // Check if image is already cached
-    if (imageCache.has(url)) {
-      setCachedUrl(imageCache.get(url));
-      return;
-    }
-
-    // Check if image is currently being loaded
-    if (loadingPromises.has(url)) {
-      try {
-        const cachedImageUrl = await loadingPromises.get(url);
-        setCachedUrl(cachedImageUrl);
-        return;
-      } catch (err) {
-        setError(err);
-        setCachedUrl(fallbackUrl);
-        return;
-      }
-    }
-
-    setIsLoading(true);
-    setError(null);
-
-    // Create loading promise
-    const loadingPromise = new Promise((resolve, reject) => {
-      const img = new Image();
-      
-      img.onload = () => {
-        // Since we can't use canvas due to CORS, just cache the original URL
-        // The browser will still cache the image naturally
-        imageCache.set(url, url);
-        resolve(url);
-      };
-
-      img.onerror = () => {
-        const errorMsg = `Failed to load image: ${url}`;
-        imageCache.set(url, fallbackUrl); // Cache the fallback to avoid retry loops
-        reject(new Error(errorMsg));
-      };
-
-      // Don't set crossOrigin to avoid CORS issues with Scryfall
-      // This means we can't use canvas manipulation, but images will still load and cache
-      img.src = url;
-    });
-
-    loadingPromises.set(url, loadingPromise);
-
-    try {
-      const cachedImageUrl = await loadingPromise;
-      setCachedUrl(cachedImageUrl);
-    } catch (err) {
-      setError(err);
-      setCachedUrl(fallbackUrl);
-    } finally {
-      setIsLoading(false);
-      loadingPromises.delete(url);
-    }
-  }, [fallbackUrl]);
-
-  useEffect(() => {
-    loadImage(imageUrl);
-  }, [imageUrl, loadImage]);
-
-  // Cleanup function to manage cache size
-  useEffect(() => {
-    return () => {
-      // Clean up cache if it gets too large (> 100 images)
-      if (imageCache.size > 1000) {
-        const entries = Array.from(imageCache.entries());
-        const oldEntries = entries.slice(0, 20); // Remove oldest 20 entries
-        
-        oldEntries.forEach(([key]) => {
-          imageCache.delete(key);
-        });
-      }
-    };
+  const clearCache = useCallback(() => {
+    imageCache.clear();
+    loadingPromises.clear();
   }, []);
 
-  return {
-    imageUrl: cachedUrl || fallbackUrl,
-    isLoading,
-    error,
-    clearCache: () => {
-      imageCache.clear();
-      loadingPromises.clear();
+  useEffect(() => {
+    let cancelled = false;
+    const url = (src || '').trim();
+    if (!url) {
+      setImageUrl(fallback);
+      return;
     }
-  };
-};
 
-export default useImageCache; 
+    // If we’ve already got it
+    if (imageCache.has(url)) {
+      setImageUrl(imageCache.get(url));
+      return;
+    }
+
+    // If it’s already loading, reuse the promise
+    let promise = loadingPromises.get(url);
+    if (!promise) {
+      setIsLoading(true);
+      setError(null);
+
+      promise = new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(url);
+        img.onerror = () => reject(new Error(`Failed to load: ${url}`));
+        img.src = url;
+      });
+
+      loadingPromises.set(url, promise);
+    }
+
+    promise
+      .then((loadedUrl) => {
+        imageCache.set(loadedUrl, loadedUrl);
+        if (!cancelled) setImageUrl(loadedUrl);
+      })
+      .catch((err) => {
+        imageCache.set(url, fallback);
+        if (!cancelled) {
+          setError(err);
+          setImageUrl(fallback);
+        }
+      })
+      .finally(() => {
+        loadingPromises.delete(url);
+        if (!cancelled) setIsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [src, fallback]);
+
+  return { imageUrl, isLoading, error, clearCache };
+}

@@ -44,6 +44,11 @@
 .card-footer {
   background: linear-gradient(to top, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.8) 50%, transparent 100%);
   align-items: flex-end;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 8px 12px 8px;
+  min-height: 60px;
+  justify-content: flex-end;
 }
 
 .badges {
@@ -139,22 +144,44 @@
 
 .name-and-type {
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
 }
 
 .footer-card-name {
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 600;
   color: var(--color-text-primary);
   margin: 0;
-  white-space: nowrap;
+  line-height: 1.2;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  hyphens: auto;
+  max-width: 100%;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .footer-type-line {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   color: var(--color-text-secondary);
   margin: 2px 0 0 0;
+  line-height: 1.1;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  max-width: 100%;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .footer-price {

@@ -30,6 +30,7 @@ const CardDetailModal = ({
   const [deleteMode, setDeleteMode] = useState('specific'); // 'specific' | 'all'
   const [showRulings, setShowRulings] = useState(false);
   const [showLegalities, setShowLegalities] = useState(false);
+  const [collectionNames, setCollectionNames] = useState([]);
 
   // Deck management state
   const [deckActionStatus, setDeckActionStatus] = useState('idle'); // 'idle' | 'adding' | 'removing' | 'success' | 'error'
@@ -38,7 +39,36 @@ const CardDetailModal = ({
     let isMounted = true;
     (async () => {
       try {
+        // Get quantity from user collections
         const res = await window.electronAPI.collectionGetCardQuantity(card.name);
+
+        // Check if the card is marked as collected in the main database
+        let isCollected = false;
+        if (card.id || card.uuid) {
+          try {
+            // We don't have a direct API to check if a card is collected, so we'll search for it
+            const collectedCards = await window.electronAPI.collectionGetSimple({
+              limit: 1,
+              search: card.name
+            });
+
+            isCollected = collectedCards && collectedCards.some(c =>
+              (c.id === card.id || c.uuid === card.uuid) && c.collected
+            );
+
+            console.log(`Card ${card.name} collected status:`, isCollected);
+
+            // If there's a mismatch (0 quantity but still marked as collected), fix it
+            if ((res?.total === 0 || !res?.total) && isCollected && (card.id || card.uuid)) {
+              console.log('Fixing collection sync issue for card:', card.name);
+              await window.electronAPI.collectionMarkCard(card.id || card.uuid, false);
+              isCollected = false;
+            }
+          } catch (err) {
+            console.error('Error checking card collected status:', err);
+          }
+        }
+
         if (isMounted) {
           setOwnedQty(res?.total || 0);
         }
@@ -47,7 +77,24 @@ const CardDetailModal = ({
       }
     })();
     return () => { isMounted = false; };
-  }, [card.name]);
+  }, [card.name, card.id, card.uuid]);
+
+  // Load collection names for the dropdown
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      try {
+        const names = await window.electronAPI.getCollectionNames();
+        if (isMounted) {
+          setCollectionNames(names);
+          console.log('Available collections:', names);
+        }
+      } catch (err) {
+        console.error('Failed to load collection names:', err);
+      }
+    })();
+    return () => { isMounted = false; };
+  }, []);
 
   const handleBackdropClick = (e) => {
     if (e.target === e.currentTarget) {
@@ -86,9 +133,9 @@ const CardDetailModal = ({
       const quantity = parseInt(quantityInput, 10) || 1;
       const result = await window.electronAPI.collectionAddCard(collectionInput.trim(), {
         card_name: card.name,
-        set_code: card.setCode,
-        set_name: card.setName,
-        collector_number: card.number,
+        set_code: card.set_code || card.setCode || card.set,
+        set_name: card.set_name || card.setName,
+        collector_number: card.collector_number || card.collectorNumber || card.number,
         foil: 'normal',
         rarity: card.rarity,
         quantity
@@ -119,13 +166,17 @@ const CardDetailModal = ({
 
       const cardKey = {
         card_name: card.name,
-        set_code: card.setCode,
-        collector_number: card.number,
-        foil: 'normal'
+        set_code: card.set_code || card.setCode || card.set,
+        collector_number: card.collector_number || card.collectorNumber || card.number,
+        foil: card.foil || 'normal',
+        uuid: card.uuid
       };
 
+      const collectionNames = await window.electronAPI.getCollectionNames();
+
+
       const res = await window.electronAPI.collectionUpdateCardQuantity(collectionInput.trim(), cardKey, newQty);
-      if (res.success) {
+      if (res && res.success) {
         alert('Quantity updated');
         setOwnedQty(newQty);
         resetForm();
@@ -138,23 +189,77 @@ const CardDetailModal = ({
     }
   };
 
+  // Function to force sync collection with main database
+  const syncCollectionWithDatabase = async () => {
+    try {
+      console.log('Syncing collection with main database...');
+      const result = await window.electronAPI.collectionSync();
+      if (result && result.success) {
+        console.log('Collection sync completed successfully');
+        return true;
+      } else {
+        console.error('Collection sync failed:', result?.error);
+        return false;
+      }
+    } catch (error) {
+      console.error('Collection sync error:', error);
+      return false;
+    }
+  };
+
   const performDelete = async () => {
     try {
       const cardKey = {
         card_name: card.name,
-        set_code: card.setCode,
-        collector_number: card.number,
+        set_code: card.set_code || card.setCode || card.set,
+        collector_number: card.collector_number || card.collectorNumber || card.number,
         foil: 'normal'
       };
 
+      console.log('Deleting card:', cardKey);
+      console.log('Collection:', collectionInput.trim());
+      console.log('Mode:', deleteMode);
+
       let res;
       if (deleteMode === 'all') {
+        console.log('Attempting to delete all copies...');
+
+        // First, mark the card as not collected in the main database
+        if (card.id || card.uuid) {
+          try {
+            await window.electronAPI.collectionMarkCard(card.id || card.uuid, false);
+            console.log('Card marked as not collected in main database');
+          } catch (markError) {
+            console.error('Error marking card as not collected:', markError);
+          }
+        }
+
+        // Then delete from collection
         res = await window.electronAPI.collectionDeleteCard(collectionInput.trim(), cardKey);
-        if (res.success) {
+        console.log('Delete response:', res);
+
+        // Force sync to ensure database consistency
+        await syncCollectionWithDatabase();
+
+        if (res && res.success) {
           alert('All copies deleted from collection');
           setOwnedQty(0);
           resetForm();
           onClose();
+        } else {
+          // Check if the card doesn't exist in the collection
+          if (ownedQty === 0 || ownedQty === null) {
+            // If the card shows 0 quantity but might still be marked as collected in the main DB
+            if (card.id || card.uuid) {
+              await window.electronAPI.collectionMarkCard(card.id || card.uuid, false);
+              alert('Card removed from collection');
+              onClose();
+            } else {
+              alert('This card is not in the collection');
+            }
+          } else {
+            alert('Failed to delete card from collection');
+          }
         }
       } else {
         // Delete specific quantity
@@ -162,26 +267,74 @@ const CardDetailModal = ({
         if (isNaN(deleteQty) || deleteQty <= 0) {
           return alert('Invalid quantity to delete');
         }
-        
-        const currentQty = ownedQty || 0;
-        if (deleteQty > currentQty) {
-          return alert(`Cannot delete ${deleteQty} copies when you only own ${currentQty}`);
-        }
-        
-        const newQty = currentQty - deleteQty;
-        res = await window.electronAPI.collectionUpdateCardQuantity(collectionInput.trim(), cardKey, newQty);
-        if (res.success) {
-          alert(`${deleteQty} cop${deleteQty === 1 ? 'y' : 'ies'} deleted from collection`);
-          setOwnedQty(newQty);
-          resetForm();
-        }
-      }
 
-      if (!res || !res.success) {
-        alert(res?.error || 'Operation failed');
+        // Get current quantity from the database
+        try {
+          const currentQtyResult = await window.electronAPI.collectionGetCardQuantity(card.name, {
+            set_code: cardKey.set_code,
+            collector_number: cardKey.collector_number,
+            foil: cardKey.foil
+          });
+
+          const currentQty = currentQtyResult?.total || 0;
+          console.log(`Current quantity in database: ${currentQty}`);
+
+          if (currentQty === 0) {
+            // If quantity is 0 but card might still be marked as collected
+            if (card.id || card.uuid) {
+              await window.electronAPI.collectionMarkCard(card.id || card.uuid, false);
+              alert('Card removed from collection');
+              onClose();
+              return;
+            } else {
+              alert('This card is not in the collection');
+              return;
+            }
+          }
+
+          if (deleteQty > currentQty) {
+            return alert(`Cannot delete ${deleteQty} copies when you only own ${currentQty}`);
+          }
+
+          const newQty = currentQty - deleteQty;
+          console.log(`Attempting to update quantity from ${currentQty} to ${newQty}...`);
+
+          // If removing all copies, mark as not collected in main database
+          if (newQty === 0 && (card.id || card.uuid)) {
+            try {
+              await window.electronAPI.collectionMarkCard(card.id || card.uuid, false);
+              console.log('Card marked as not collected in main database');
+            } catch (markError) {
+              console.error('Error marking card as not collected:', markError);
+            }
+          }
+
+          res = await window.electronAPI.collectionUpdateCardQuantity(collectionInput.trim(), cardKey, newQty);
+          console.log('Update quantity response:', res);
+
+          // Force sync to ensure database consistency
+          await syncCollectionWithDatabase();
+
+          if (res && res.success) {
+            alert(`${deleteQty} cop${deleteQty === 1 ? 'y' : 'ies'} deleted from collection`);
+            setOwnedQty(newQty);
+            resetForm();
+
+            // If quantity is now 0, close the modal
+            if (newQty === 0) {
+              onClose();
+            }
+          } else {
+            alert('Failed to update card quantity');
+          }
+        } catch (error) {
+          console.error('Error getting current quantity:', error);
+          alert('Failed to get current card quantity. Please try again.');
+          return;
+        }
       }
     } catch (err) {
-      console.error(err);
+      console.error('Delete operation error:', err);
       alert(err.message || 'Operation failed');
     }
   };
@@ -401,11 +554,47 @@ const CardDetailModal = ({
                 {addStatus || '➕ Add'}
               </button>
 
-              <button className="add-to-collection-btn" onClick={() => { setActionMode('update'); }}>
+              <button
+                className="add-to-collection-btn"
+                onClick={() => {
+                  if (ownedQty === 0 || ownedQty === null) {
+                    alert('This card is not in the collection');
+                    return;
+                  }
+                  setActionMode('update');
+                }}
+                disabled={ownedQty === 0 || ownedQty === null}
+                title={ownedQty === 0 || ownedQty === null ? 'Card not in collection' : 'Update quantity'}
+              >
                 ✏️ Update
               </button>
 
-              <button className="add-to-collection-btn delete-btn" onClick={() => { setActionMode('delete'); }}>
+              <button
+                className="add-to-collection-btn delete-btn"
+                onClick={async () => {
+                  // If quantity is 0 but card might still be in the database
+                  if (ownedQty === 0 || ownedQty === null) {
+                    if (card.id || card.uuid) {
+                      // Try to fix the sync issue by marking as not collected
+                      try {
+                        await window.electronAPI.collectionMarkCard(card.id || card.uuid, false);
+                        await syncCollectionWithDatabase();
+                        alert('Card removed from collection');
+                        onClose();
+                      } catch (error) {
+                        console.error('Error fixing collection sync:', error);
+                        alert('This card is not in the collection');
+                      }
+                    } else {
+                      alert('This card is not in the collection');
+                    }
+                    return;
+                  }
+                  setActionMode('delete');
+                }}
+                disabled={false} // Never disable the remove button to allow fixing sync issues
+                title="Remove from collection"
+              >
                 🗑️ Remove
               </button>
             </div>
@@ -413,16 +602,22 @@ const CardDetailModal = ({
             {actionMode && (
               <div className="collection-form">
                 <h4>
-                  {actionMode === 'add' ? 'Add to Collection' : 
-                   actionMode === 'update' ? 'Update Quantity' : 
-                   'Remove from Collection'}
+                  {actionMode === 'add' ? 'Add to Collection' :
+                    actionMode === 'update' ? 'Update Quantity' :
+                      'Remove from Collection'}
                 </h4>
-                <input
-                  type="text"
+                <select
                   value={collectionInput}
                   onChange={(e) => setCollectionInput(e.target.value)}
-                  placeholder="Collection name"
-                />
+                  style={{ width: '100%', padding: '8px', marginBottom: '8px' }}
+                >
+                  <option value="">Select a collection...</option>
+                  {collectionNames.map((name, index) => (
+                    <option key={index} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
                 {actionMode === 'delete' && (
                   <div className="delete-mode-selector">
                     <label>
@@ -458,13 +653,13 @@ const CardDetailModal = ({
                 )}
                 <div className="form-buttons">
                   <button onClick={
-                    actionMode === 'add' ? performAdd : 
-                    actionMode === 'update' ? performUpdate : 
-                    performDelete
+                    actionMode === 'add' ? performAdd :
+                      actionMode === 'update' ? performUpdate :
+                        performDelete
                   }>
-                    {actionMode === 'add' ? 'Add' : 
-                     actionMode === 'update' ? 'Update' : 
-                     'Remove'}
+                    {actionMode === 'add' ? 'Add' :
+                      actionMode === 'update' ? 'Update' :
+                        'Remove'}
                   </button>
                   <button onClick={resetForm}>Cancel</button>
                 </div>

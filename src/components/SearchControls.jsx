@@ -23,7 +23,7 @@ const SearchControls = ({ onSearch, bulkDataStats }) => {
   const debouncedSearch = useCallback(
     debounce((params) => {
       onSearch(params);
-    }, 500),
+    }, 300), // Reduced debounce time for more responsive search
     [onSearch]
   );
 
@@ -34,6 +34,8 @@ const SearchControls = ({ onSearch, bulkDataStats }) => {
       debouncedSearch(newParams);
       return newParams;
     });
+    // Ensure the input keeps focus after state update
+    e.target.focus();
   };
 
   const handleColorChange = (color) => {
@@ -55,8 +57,10 @@ const SearchControls = ({ onSearch, bulkDataStats }) => {
           name="name"
           value={searchParams.name}
           onChange={handleChange}
+          onClick={(e) => e.target.focus()}
           placeholder="Card name..."
           className="search-input"
+          autoFocus
         />
         {bulkDataStats && (
           <div className="database-info">
@@ -73,116 +77,116 @@ const SearchControls = ({ onSearch, bulkDataStats }) => {
         </button>
       </div>
       {!collapsed && (
-      <div className="search-advanced">
-        <div className="search-field">
-          <input
-            type="text"
-            name="text"
-            value={searchParams.text}
-            onChange={handleChange}
-            placeholder="Oracle text..."
-          />
-        </div>
-        <div className="search-field">
-          <input
-            type="text"
-            name="type"
-            value={searchParams.type}
-            onChange={handleChange}
-            placeholder="Type line..."
-          />
-        </div>
-        <div className="search-field">
-          <input
-            type="text"
-            name="types"
-            value={searchParams.types}
-            onChange={handleChange}
-            placeholder="Types (e.g., Creature, Instant)..."
-          />
-        </div>
-        <div className="search-field">
-          <input
-            type="text"
-            name="subTypes"
-            value={searchParams.subTypes}
-            onChange={handleChange}
-            placeholder="Subtypes (e.g., Human, Wizard)..."
-          />
-        </div>
-        <div className="search-field">
-          <input
-            type="text"
-            name="superTypes"
-            value={searchParams.superTypes}
-            onChange={handleChange}
-            placeholder="Supertypes (e.g., Legendary, Basic)..."
-          />
-        </div>
-        <div className="search-field">
-            <div className="color-selector">
-                {['W', 'U', 'B', 'R', 'G'].map((color) => (
-                    <button
-                        key={color}
-                        className={`color-button ${searchParams.colors.includes(color) ? 'selected' : ''}`}
-                        onClick={() => handleColorChange(color)}
-                    >
-                        {color}
-                    </button>
-                ))}
-            </div>
-        </div>
-        <div className="search-field">
-          <input
-            type="text"
-            name="manaCost"
-            value={searchParams.manaCost}
-            onChange={handleChange}
-            placeholder="Mana cost (e.g., {2}{W}{U})..."
-          />
-        </div>
-        <div className="search-field">
-          <input
-            type="number"
-            name="manaValue"
-            value={searchParams.manaValue}
-            onChange={handleChange}
-            placeholder="Mana value (CMC)..."
-            min="0"
-          />
-        </div>
-        <div className="search-field-group">
-            <div className="search-field">
+        <div className="search-advanced">
+          <div className="search-field">
             <input
+              type="text"
+              name="text"
+              value={searchParams.text}
+              onChange={handleChange}
+              placeholder="Oracle text..."
+            />
+          </div>
+          <div className="search-field">
+            <input
+              type="text"
+              name="type"
+              value={searchParams.type}
+              onChange={handleChange}
+              placeholder="Type line..."
+            />
+          </div>
+          <div className="search-field">
+            <input
+              type="text"
+              name="types"
+              value={searchParams.types}
+              onChange={handleChange}
+              placeholder="Types (e.g., Creature, Instant)..."
+            />
+          </div>
+          <div className="search-field">
+            <input
+              type="text"
+              name="subTypes"
+              value={searchParams.subTypes}
+              onChange={handleChange}
+              placeholder="Subtypes (e.g., Human, Wizard)..."
+            />
+          </div>
+          <div className="search-field">
+            <input
+              type="text"
+              name="superTypes"
+              value={searchParams.superTypes}
+              onChange={handleChange}
+              placeholder="Supertypes (e.g., Legendary, Basic)..."
+            />
+          </div>
+          <div className="search-field">
+            <div className="color-selector">
+              {['W', 'U', 'B', 'R', 'G'].map((color) => (
+                <button
+                  key={color}
+                  className={`color-button ${searchParams.colors.includes(color) ? 'selected' : ''}`}
+                  onClick={() => handleColorChange(color)}
+                >
+                  {color}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="search-field">
+            <input
+              type="text"
+              name="manaCost"
+              value={searchParams.manaCost}
+              onChange={handleChange}
+              placeholder="Mana cost (e.g., {2}{W}{U})..."
+            />
+          </div>
+          <div className="search-field">
+            <input
+              type="number"
+              name="manaValue"
+              value={searchParams.manaValue}
+              onChange={handleChange}
+              placeholder="Mana value (CMC)..."
+              min="0"
+            />
+          </div>
+          <div className="search-field-group">
+            <div className="search-field">
+              <input
                 type="text"
                 name="power"
                 value={searchParams.power}
                 onChange={handleChange}
                 placeholder="Power..."
-            />
+              />
             </div>
             <div className="search-field">
-            <input
+              <input
                 type="text"
                 name="toughness"
                 value={searchParams.toughness}
                 onChange={handleChange}
                 placeholder="Toughness..."
-            />
+              />
             </div>
-        </div>
-        <div className="search-field">
+          </div>
+          <div className="search-field">
             <select name="rarity" value={searchParams.rarity} onChange={handleChange}>
-                <option value="">Any Rarity</option>
-                <option value="common">Common</option>
-                <option value="uncommon">Uncommon</option>
-                <option value="rare">Rare</option>
-                <option value="mythic">Mythic</option>
-                <option value="special">Special</option>
-                <option value="bonus">Bonus</option>
+              <option value="">Any Rarity</option>
+              <option value="common">Common</option>
+              <option value="uncommon">Uncommon</option>
+              <option value="rare">Rare</option>
+              <option value="mythic">Mythic</option>
+              <option value="special">Special</option>
+              <option value="bonus">Bonus</option>
             </select>
+          </div>
         </div>
-      </div>
       )}
     </div>
   );

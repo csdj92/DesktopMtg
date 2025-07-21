@@ -5,6 +5,7 @@ import CollectionManager from './components/CollectionManager';
 import SemanticSearchV2 from './components/SemanticSearchV2';
 import DeckBuilder from './components/DeckBuilder';
 import HandSimulator from './components/HandSimulator';
+import CollectionView from './components/CollectionView';
 import './App.css'
 import './components/SearchControls.css';
 import SetBrowser from './components/SetBrowser';
@@ -16,7 +17,7 @@ function App() {
   const [selectedFile, setSelectedFile] = useState(null)
   const [fileCards, setFileCards] = useState([])
   const [fileLoading, setFileLoading] = useState(false)
-  
+
   // Collection aggregator state
   const [collectionCards, setCollectionCards] = useState([])
   const [collectionLoading, setCollectionLoading] = useState(false)
@@ -26,22 +27,22 @@ function App() {
   const [lastFileCheck, setLastFileCheck] = useState(null) // Track when we last checked files
   const [collectionSearchQuery, setCollectionSearchQuery] = useState('') // Search within collection
   const [filteredCollectionCards, setFilteredCollectionCards] = useState([]) // Filtered cards
-  
+
   // Bulk data state
   const [bulkDataStats, setBulkDataStats] = useState(null)
   const [searchResults, setSearchResults] = useState([])
   const [searchLoading, setSearchLoading] = useState(false)
   const [currentSearchParams, setCurrentSearchParams] = useState(null)
   const [currentLimit, setCurrentLimit] = useState(100)
-  
 
-  
+
+
   // Collection Semantic Search State
   const [collectionSemanticQuery, setCollectionSemanticQuery] = useState('');
   const [collectionSemanticResults, setCollectionSemanticResults] = useState([]);
   const [collectionSemanticLoading, setCollectionSemanticLoading] = useState(false);
   const [collectionSearchMode, setCollectionSearchMode] = useState('regular'); // 'regular' or 'semantic'
-  
+
   // UI state
   const [activeTab, setActiveTab] = useState('collections') // 'collections', 'search', 'semantic-search', 'deckbuilder', 'hand-simulator', 'import', or 'synergy'
   const [selectedSet, setSelectedSet] = useState(null);
@@ -75,14 +76,14 @@ function App() {
   const parseCardLine = (line) => {
     const trimmed = line.trim()
     if (!trimmed) return null
-    
+
     // Match pattern: [quantity] [card name] ([set code]) [collector number] [*F* for foil]
     const match = trimmed.match(/^(\d+)\s+(.+?)\s+\(([^)]+)\)\s+(.+?)(\s+\*F\*)?$/)
-    
+
     if (match) {
       const [, quantity, name, setCode, collectorInfo, foilMarker] = match
       const isFoil = Boolean(foilMarker)
-      
+
       return {
         quantity: parseInt(quantity, 10),
         name: name.trim(),
@@ -92,7 +93,7 @@ function App() {
         originalLine: trimmed
       }
     }
-    
+
     return null
   }
 
@@ -103,14 +104,14 @@ function App() {
     if (!collectionCache) {
       return true
     }
-    
+
     // Check if collection list has changed
     if (collectionCache.collectionList.length !== cardFiles.length ||
-        !collectionCache.collectionList.every(collection => cardFiles.includes(collection))) {
+      !collectionCache.collectionList.every(collection => cardFiles.includes(collection))) {
       console.log('Collection list changed, refreshing collection')
       return true
     }
-    
+
     // Check if any files have been modified (simplified check)
     // In a more robust implementation, you'd check file modification times
     const timeSinceLastCheck = Date.now() - (lastFileCheck || 0)
@@ -118,7 +119,7 @@ function App() {
       console.log('Cache expired (5 minutes), refreshing collection')
       return true
     }
-    
+
     return false
   }
 
@@ -158,22 +159,22 @@ function App() {
       setBreakdown: {},
       colorBreakdown: {}
     }
-    
+
     // Calculate breakdowns
     cards.forEach(card => {
       const quantity = card.quantity
       const scryfallData = card.scryfallData
-      
+
       // Rarity breakdown
       if (scryfallData.rarity) {
         stats.rarityBreakdown[scryfallData.rarity] = (stats.rarityBreakdown[scryfallData.rarity] || 0) + quantity
       }
-      
+
       // Set breakdown
       if (scryfallData.set_name) {
         stats.setBreakdown[scryfallData.set_name] = (stats.setBreakdown[scryfallData.set_name] || 0) + quantity
       }
-      
+
       // Color breakdown (defensive: always treat as array)
       let colorsArr = Array.isArray(scryfallData.colors) ? scryfallData.colors : (typeof scryfallData.colors === 'string' && scryfallData.colors.length > 0 ? [scryfallData.colors] : []);
       if (colorsArr.length > 0) {
@@ -184,7 +185,7 @@ function App() {
         stats.colorBreakdown['Colorless'] = (stats.colorBreakdown['Colorless'] || 0) + quantity
       }
     })
-    
+
     return stats
   }
 
@@ -195,17 +196,30 @@ function App() {
     try {
       const collectionCards = await window.electronAPI.getUserCollectionCards(collectionName, { limit: 10000 })
       setSelectedFile(collectionName)
-      
+
       // Get Scryfall data for each card
       const cardsWithData = await Promise.all(
         collectionCards.map(async (collectionCard) => {
           try {
             // Use the new precise matching function that considers name, set, and collector number
             const scryfallCard = await window.electronAPI.bulkDataFindCardByDetails(
-              collectionCard.cardName, 
-              collectionCard.setCode, 
+              collectionCard.cardName,
+              collectionCard.setCode,
               collectionCard.collectorNumber
             )
+
+            console.log(scryfallCard)
+
+            // Fix for prices not showing correctly
+            if (scryfallCard && (!scryfallCard.prices || !scryfallCard.prices.usd)) {
+              if (!scryfallCard.prices) {
+                scryfallCard.prices = { usd: '0.00', usd_foil: '0.00' };
+              } else if (!scryfallCard.prices.usd && scryfallCard.prices.usd_regular) {
+                // Use regular price if available
+                scryfallCard.prices.usd = scryfallCard.prices.usd_regular;
+              }
+            }
+
             return {
               name: collectionCard.cardName,
               setCode: collectionCard.setCode || '',
@@ -227,7 +241,7 @@ function App() {
           }
         })
       )
-      
+
       setFileCards(cardsWithData)
     } catch (error) {
       console.error('Error reading collection:', error)
@@ -250,7 +264,7 @@ function App() {
       setCurrentLimit(100)
       return
     }
-    
+
     // Reset limit if it's a new search
     let limitToUse = currentLimit
     if (!isLoadMore) {
@@ -258,7 +272,7 @@ function App() {
       setCurrentLimit(100)
       setCurrentSearchParams(params)
     }
-    
+
     setSearchLoading(true)
     try {
       const results = await window.electronAPI.bulkDataSearch(params, {
@@ -275,10 +289,10 @@ function App() {
 
   const loadMoreResults = async () => {
     if (!currentSearchParams) return
-    
+
     const newLimit = currentLimit + 100
     setCurrentLimit(newLimit)
-    
+
     setSearchLoading(true)
     try {
       const results = await window.electronAPI.bulkDataSearch(currentSearchParams, {
@@ -295,7 +309,7 @@ function App() {
   const handleCollectionSearch = (searchParams) => {
     filterCollectionCards(collectionCards, searchParams)
   }
-  
+
 
   const handleCollectionSemanticSearch = async (query) => {
     if (!query) {
@@ -308,16 +322,16 @@ function App() {
       // Check if the query is asking for specific power/toughness values
       const powerMatch = query.match(/(\d+)\s*power/i);
       const toughnessMatch = query.match(/(\d+)\s*toughness/i);
-      
+
       let results = [];
-      
+
       if (powerMatch || toughnessMatch) {
         // For power/toughness queries, use regular filtering on collection
         console.log('Detected power/toughness query, using regular filtering');
-        
+
         results = collectionCards.filter(card => {
           const scryfallData = card.scryfallData;
-          
+
           // Check power
           if (powerMatch) {
             const requestedPower = powerMatch[1];
@@ -325,7 +339,7 @@ function App() {
               return false;
             }
           }
-          
+
           // Check toughness
           if (toughnessMatch) {
             const requestedToughness = toughnessMatch[1];
@@ -333,35 +347,35 @@ function App() {
               return false;
             }
           }
-          
+
           return true;
         });
-        
+
         console.log(`Found ${results.length} cards with specified power/toughness in collection`);
       } else {
         // Hybrid approach: Combine semantic search with text search
         console.log('Using hybrid search for query:', query);
-        
+
         // Step 1: Get semantic search results
         let semanticMatches = [];
         try {
           const semanticResults = await window.electronAPI.searchCardsSemantic(query);
           const cardIds = semanticResults.map(r => r.id);
-          
-          semanticMatches = collectionCards.filter(collectionCard => 
+
+          semanticMatches = collectionCards.filter(collectionCard =>
             cardIds.includes(collectionCard.scryfallData.id)
           );
-          
+
           console.log(`Semantic search found ${semanticMatches.length} matches in collection`);
         } catch (error) {
           console.error('Semantic search failed:', error);
         }
-        
+
         // Step 2: Perform text-based search on collection for better coverage
         const textMatches = collectionCards.filter(card => {
           const scryfallData = card.scryfallData;
           const searchText = query.toLowerCase();
-          
+
           // Search in multiple fields
           const searchFields = [
             scryfallData.name || '',
@@ -372,9 +386,9 @@ function App() {
             ...(scryfallData.card_faces || []).map(face => face.name || ''),
             ...(scryfallData.card_faces || []).map(face => face.type_line || '')
           ];
-          
+
           // Check if any field contains relevant keywords
-          return searchFields.some(field => 
+          return searchFields.some(field =>
             field.toLowerCase().includes(searchText) ||
             // Handle common semantic search terms
             (searchText.includes('counter') && (
@@ -396,24 +410,24 @@ function App() {
             (searchText.includes('token') && field.toLowerCase().includes('token'))
           );
         });
-        
+
         console.log(`Text search found ${textMatches.length} matches in collection`);
-        
+
         // Step 3: Combine and deduplicate results
         const combinedResults = new Map();
-        
+
         // Add semantic matches first (higher priority)
         semanticMatches.forEach((card, index) => {
           combinedResults.set(card.cardKey, { card, priority: 1, semanticIndex: index });
         });
-        
+
         // Add text matches
         textMatches.forEach(card => {
           if (!combinedResults.has(card.cardKey)) {
             combinedResults.set(card.cardKey, { card, priority: 2 });
           }
         });
-        
+
         // Sort by priority (semantic first) then by name
         results = Array.from(combinedResults.values())
           .sort((a, b) => {
@@ -426,7 +440,7 @@ function App() {
             return a.card.name.localeCompare(b.card.name);
           })
           .map(item => item.card);
-        
+
         console.log(`Combined search found ${results.length} total matches`);
       }
 
@@ -455,7 +469,7 @@ function App() {
 
     const filtered = cards.filter(card => {
       const scryfallData = card.scryfallData
-      
+
       // Name search (case-insensitive)
       if (name && !card.name.toLowerCase().includes(name.toLowerCase())) {
         return false;
@@ -470,7 +484,7 @@ function App() {
         }
         // Check card faces for double-faced cards
         if (!hasTextMatch && scryfallData.card_faces) {
-          hasTextMatch = scryfallData.card_faces.some(face => 
+          hasTextMatch = scryfallData.card_faces.some(face =>
             face.oracle_text && face.oracle_text.toLowerCase().includes(text.toLowerCase())
           );
         }
@@ -488,7 +502,7 @@ function App() {
         }
         // Check card faces for double-faced cards
         if (!hasTypeMatch && scryfallData.card_faces) {
-          hasTypeMatch = scryfallData.card_faces.some(face => 
+          hasTypeMatch = scryfallData.card_faces.some(face =>
             face.type_line && face.type_line.toLowerCase().includes(type.toLowerCase())
           );
         }
@@ -496,7 +510,7 @@ function App() {
           return false;
         }
       }
-      
+
       // Colors (must include all selected colors)
       if (colors && colors.length > 0) {
         let cardColors = Array.isArray(scryfallData.colors) ? scryfallData.colors : (typeof scryfallData.colors === 'string' && scryfallData.colors.length > 0 ? [scryfallData.colors] : []);
@@ -513,7 +527,7 @@ function App() {
           return false;
         }
       }
-      
+
       // Power
       if (power && (!scryfallData.power || scryfallData.power !== power)) {
         return false;
@@ -523,7 +537,7 @@ function App() {
       if (toughness && (!scryfallData.toughness || scryfallData.toughness !== toughness)) {
         return false;
       }
-      
+
       // Mana value (converted mana cost)
       if (manaValue) {
         const cardManaValue = scryfallData.cmc || scryfallData.convertedManaCost || scryfallData.mana_value;
@@ -563,7 +577,7 @@ function App() {
 
       return true;
     })
-    
+
     setFilteredCollectionCards(filtered)
   }
 
@@ -571,40 +585,70 @@ function App() {
     setIsViewingCollection(true);
     setSelectedFile(null); // Clear individual file selection
     setCollectionLoading(true);
-    
+
     try {
       // Check if we have valid cached data (cache for 5 minutes)
       const cacheValidDuration = 5 * 60 * 1000; // 5 minutes
       const now = Date.now();
-      
-      if (collectionCache && 
-          collectionCache.timestamp && 
-          (now - collectionCache.timestamp) < cacheValidDuration) {
+
+      if (collectionCache &&
+        collectionCache.timestamp &&
+        (now - collectionCache.timestamp) < cacheValidDuration) {
         setCollectionCards(collectionCache.cards);
         setCollectionStats(collectionCache.stats);
         filterCollectionCards(collectionCache.cards, {});
         return;
       }
-      
+
       // Use the new simple method that directly queries collected cards
       const collectedCards = await window.electronAPI.collectionGetSimple({ limit: 10000, offset: 0 });
-      
+
       if (collectedCards.length === 0) {
         setCollectionCards([]);
         setCollectionStats({ totalCards: 0, totalValue: 0, byRarity: {} });
         filterCollectionCards([], {});
         return;
       }
-      
+
       let totalValue = 0;
 
       // Single pass: map each card and track total price
       const processedCards = collectedCards.map((card) => {
         let priceUsd = 0;
-        if (card.prices?.usd) {
-          priceUsd = parseFloat(card.prices.usd) || 0;
+
+        // Fix for prices not showing correctly
+        if (card.prices) {
+          // Try to parse prices if they're strings
+          if (typeof card.prices.usd === 'string') {
+            priceUsd = parseFloat(card.prices.usd) || 0;
+          } else if (typeof card.prices.usd === 'number') {
+            priceUsd = card.prices.usd;
+          }
+
+          // Ensure prices are properly formatted in the card object
+          if (!card.prices.usd && priceUsd > 0) {
+            card.prices.usd = priceUsd.toFixed(2);
+          }
+
+          // If we have usd_regular but not usd, use that
+          if (!priceUsd && card.prices.usd_regular) {
+            if (typeof card.prices.usd_regular === 'string') {
+              priceUsd = parseFloat(card.prices.usd_regular) || 0;
+            } else if (typeof card.prices.usd_regular === 'number') {
+              priceUsd = card.prices.usd_regular;
+            }
+
+            if (!card.prices.usd && priceUsd > 0) {
+              card.prices.usd = priceUsd.toFixed(2);
+            }
+          }
+
           totalValue += priceUsd;
+        } else {
+          // Create prices object if it doesn't exist
+          card.prices = { usd: '0.00', usd_foil: '0.00' };
         }
+
         return {
           name: card.name,
           setCode: card.setCode || card.set_code || card.set || '',
@@ -612,15 +656,14 @@ function App() {
           isFoil: false,
           quantity: card.quantity || 1,
           scryfallData: card,
-          cardKey: `${card.name}|${card.setCode || card.set_code || ''}|${
-            card.number || card.collector_number || ''
-          }|false`,
+          cardKey: `${card.name}|${card.setCode || card.set_code || ''}|${card.number || card.collector_number || ''
+            }|false`,
           sourceFiles: ['Database Collection'],
         };
       });
-      
+
       const stats = generateCollectionStats(processedCards, totalValue);
-      
+
       // Cache the results
       const cacheData = {
         cards: processedCards,
@@ -628,13 +671,13 @@ function App() {
         timestamp: now
       };
       setCollectionCache(cacheData);
-      
+
       setCollectionCards(processedCards);
       setCollectionStats(stats);
       filterCollectionCards(processedCards, {});
-      
+
       return;
-      
+
     } catch (error) {
       console.error('Error loading collection with simple method:', error);
       setCollectionCards([]);
@@ -675,32 +718,32 @@ function App() {
       <header className="app-header">
         <h1>🃏 MTG Desktop Collection</h1>
         <div className="tab-controls">
-          <button 
-            className={`tab-button ${activeTab === 'collections' ? 'active' : ''}`} 
+          <button
+            className={`tab-button ${activeTab === 'collections' ? 'active' : ''}`}
             onClick={() => setActiveTab('collections')}>
             My Collection
           </button>
-          <button 
+          <button
             className={`tab-button ${activeTab === 'search' ? 'active' : ''}`}
             onClick={() => setActiveTab('search')}>
             Card Search
           </button>
-          <button 
+          <button
             className={`tab-button ${activeTab === 'semantic-search' ? 'active' : ''}`}
             onClick={() => setActiveTab('semantic-search')}>
             Semantic Search
           </button>
-          <button 
+          <button
             className={`tab-button ${activeTab === 'deckbuilder' ? 'active' : ''}`}
             onClick={() => setActiveTab('deckbuilder')}>
             Deck Builder
           </button>
-          <button 
+          <button
             className={`tab-button ${activeTab === 'hand-simulator' ? 'active' : ''}`}
             onClick={() => setActiveTab('hand-simulator')}>
             Draw Simulator
           </button>
-          <button 
+          <button
             className={`tab-button ${activeTab === 'import' ? 'active' : ''}`}
             onClick={() => setActiveTab('import')}>
             Import from File
@@ -713,7 +756,7 @@ function App() {
           <div className="collections-view">
             <div className="sidebar">
               <h3>Collections</h3>
-              
+
               {/* My Collection Aggregator */}
               <div className="collection-section">
                 <div
@@ -723,7 +766,7 @@ function App() {
                   📚 My Collection (All Collections)
                 </div>
               </div>
-              
+
               {/* Individual Collections */}
               <div className="file-list">
                 {cardFiles.map((file) => (
@@ -736,7 +779,7 @@ function App() {
                   </div>
                 ))}
               </div>
-              
+
               {cardFiles.length === 0 && (
                 <div className="empty-state">
                   <p>No collections found</p>
@@ -752,129 +795,26 @@ function App() {
                   <p>{fileLoading ? 'Loading cards...' : 'Loading collection...'}</p>
                 </div>
               )}
-              
+
               {/* My Collection View */}
               {isViewingCollection && !collectionLoading && (
-                <div className="collection-content">
-                  <div className="collection-header">
-                    <div className="collection-title-row">
-                      <h2>📚 My Collection</h2>
-                      <div className="collection-buttons">
-                        <button 
-                          className="refresh-button"
-                          onClick={syncCollection}
-                          title="Sync collections to main database"
-                          disabled={collectionLoading}
-                        >
-                          🔄 Sync
-                        </button>
-                        <button 
-                          className="refresh-button"
-                          onClick={refreshCollection}
-                          title="Refresh collection data"
-                          disabled={collectionLoading}
-                        >
-                          🔄 Refresh
-                        </button>
-                      </div>
-                    </div>
-                    {collectionStats && (
-                      <div className="collection-stats">
-                        <div className="stat-item">
-                          <span className="stat-value">{collectionStats.totalCards}</span>
-                          <span className="stat-label">Total Cards</span>
-                        </div>
-                        <div className="stat-item">
-                          <span className="stat-value">{collectionStats.uniqueCards}</span>
-                          <span className="stat-label">Unique Cards</span>
-                        </div>
-                        <div className="stat-item">
-                          <span className="stat-value">${collectionStats.totalValue.toFixed(2)}</span>
-                          <span className="stat-label">Est. Value</span>
-                        </div>
-                        <div className="stat-item">
-                          <span className="stat-value">{Object.keys(collectionStats.setBreakdown).length}</span>
-                          <span className="stat-label">Sets</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div className="collection-search">
-                    <div className="search-mode-toggle">
-                      <button 
-                        className={`mode-button ${collectionSearchMode === 'regular' ? 'active' : ''}`}
-                        onClick={() => setCollectionSearchMode('regular')}
-                      >
-                        🔍 Regular Search
-                      </button>
-                      <button 
-                        className={`mode-button ${collectionSearchMode === 'semantic' ? 'active' : ''}`}
-                        onClick={() => setCollectionSearchMode('semantic')}
-                      >
-                        🧠 Semantic Search
-                      </button>
-                    </div>
-                    
-                    {collectionSearchMode === 'regular' ? (
-                      <SearchControls 
-                        onSearch={handleCollectionSearch} 
-                        bulkDataStats={{
-                          cardCount: filteredCollectionCards.length,
-                          totalCards: collectionStats?.totalCards
-                        }}
-                      />
-                    ) : (
-                      <SemanticSearchV2 
-                        collectionCards={collectionCards}
-                        displayResults={false}
-                        onResults={setCollectionSemanticResults}
-                      />
-                    )}
-                  </div>
-                  
-                  <div className="collection-results">
-                    <div className="results-header">
-                      <h3>Your Cards</h3>
-                      <span className="result-count">
-                        {collectionSearchMode === 'semantic' ? (
-                          `Showing ${collectionSemanticResults.length} matching cards from your collection`
-                        ) : (
-                          `Showing ${filteredCollectionCards.length} of ${collectionStats?.totalCards || 0} cards`
-                        )}
-                      </span>
-                    </div>
-                    
-                    {collectionSemanticLoading && (
-                      <div className="loading-state">
-                        <div className="spinner"></div>
-                        <p>Searching your collection...</p>
-                      </div>
-                    )}
-                    
-                    <div className="cards-grid">
-                      {collectionSearchMode === 'semantic' ? (
-                        collectionSemanticResults.map((card, index) => (
-                          <Card
-                            key={`${card.cardKey}-${index}`}
-                            card={card.scryfallData}
-                            quantity={card.quantity}
-                          />
-                        ))
-                      ) : (
-                        filteredCollectionCards.map((card, index) => (
-                          <Card
-                            key={`${card.cardKey}-${index}`}
-                            card={card.scryfallData}
-                            quantity={card.quantity}
-                          />
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </div>
+                <CollectionView
+                  collectionCards={collectionCards}
+                  collectionStats={collectionStats}
+                  collectionLoading={collectionLoading}
+                  isViewingCollection={isViewingCollection}
+                  collectionSearchMode={collectionSearchMode}
+                  setCollectionSearchMode={setCollectionSearchMode}
+                  collectionSemanticResults={collectionSemanticResults}
+                  collectionSemanticLoading={collectionSemanticLoading}
+                  filteredCollectionCards={filteredCollectionCards}
+                  onCollectionSearch={handleCollectionSearch}
+                  onRefreshCollection={refreshCollection}
+                  onSyncCollection={syncCollection}
+                  onSemanticResults={handleCollectionSemanticSearch}
+                />
               )}
-              
+
               {/* Individual Collection View */}
               {selectedFile && !fileLoading && !isViewingCollection && (
                 <div className="file-content">
@@ -882,7 +822,7 @@ function App() {
                     <h2>{selectedFile}</h2>
                     <span className="card-count">{fileCards.length} cards</span>
                   </div>
-                  
+
                   <div className="cards-grid">
                     {fileCards.map((card, index) => (
                       <Card
@@ -894,7 +834,7 @@ function App() {
                   </div>
                 </div>
               )}
-              
+
               {/* Empty State */}
               {!selectedFile && !isViewingCollection && !fileLoading && !collectionLoading && (
                 <div className="empty-state">
@@ -918,7 +858,7 @@ function App() {
                 )}
               </div>
             </div>
-            
+
             <div className="search-content">
               {searchLoading && (
                 <div className="loading-state">
@@ -926,14 +866,14 @@ function App() {
                   <p>Searching cards...</p>
                 </div>
               )}
-              
+
               {!searchLoading && searchResults.length > 0 && (
                 <div className="search-results">
                   <div className="results-header">
                     <h3>Search Results</h3>
                     <span className="result-count">Showing {searchResults.length} cards</span>
                   </div>
-                  
+
                   <div className="cards-grid">
                     {searchResults.map((card) => (
                       <Card
@@ -942,10 +882,10 @@ function App() {
                       />
                     ))}
                   </div>
-                  
+
                   {searchResults.length >= currentLimit && (
                     <div className="load-more-section">
-                      <button 
+                      <button
                         className="load-more-button"
                         onClick={loadMoreResults}
                         disabled={searchLoading}
@@ -956,7 +896,7 @@ function App() {
                   )}
                 </div>
               )}
-              
+
               {!searchLoading && searchResults.length === 0 && (
                 <div className="empty-state">
                   <h2>🔍 Search the Magic Database</h2>
@@ -982,11 +922,11 @@ function App() {
           </div>
         )}
       </div>
-      
+
       {bulkDataStats && (
         <footer className="app-footer">
           <small>
-            Database: {bulkDataStats.cardCount?.toLocaleString()} cards • 
+            Database: {bulkDataStats.cardCount?.toLocaleString()} cards •
             Last updated: {new Date(bulkDataStats.lastUpdate).toLocaleDateString()}
           </small>
         </footer>

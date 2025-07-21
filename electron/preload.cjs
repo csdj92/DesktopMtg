@@ -11,6 +11,7 @@ console.log('Preload script loaded.');
 contextBridge.exposeInMainWorld('electronAPI', {
   // User Collections operations
   getUserCollections: () => ipcRenderer.invoke('get-user-collections'),
+  getCollectionNames: () => ipcRenderer.invoke('get-collection-names'),
   getUserCollectionCards: (collectionName, options) => ipcRenderer.invoke('get-user-collection-cards', collectionName, options),
 
   // Bulk data operations

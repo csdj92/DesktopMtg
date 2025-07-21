@@ -1051,9 +1051,32 @@ class BulkDataService {
     return null;
   }
 
+  possibleLayouts = [
+    'normal',
+    'saga',
+    'adventure',
+    'class',
+    'aftermath',
+    'split',
+    'flip',
+    'transform',
+    'prototype',
+    'meld',
+    'leveler',
+    'mutate',
+    'vanguard',
+    'planar',
+    'scheme',
+    'modal_dfc',
+    'case',
+    'reversible_card',
+    'augment',
+    'host',
+  ]
+
   // Helper method to get both faces of a double-faced card
   async getCardFaces(cardRow) {
-    if (!cardRow.layout || (cardRow.layout !== 'transform' && cardRow.layout !== 'modal_dfc')) {
+    if (!cardRow.layout || !this.possibleLayouts.includes(cardRow.layout)) {
       return null;
     }
 
@@ -1455,7 +1478,24 @@ class BulkDataService {
                cl.standardbrawl, cl.timeless, cl.vintage,
                s.name as setName,
                cpu.cardKingdom, cpu.cardmarket, cpu.tcgplayer,
-               crl.gatherer, crl.edhrec
+               crl.gatherer, crl.edhrec,
+
+               /* JSON array of all price records for this card */
+          (
+            SELECT json_group_array(
+              json_object(
+                'vendor',           dp2.vendor,
+                'price',            dp2.price,
+                'transaction_type', dp2.transaction_type,
+                'card_type',        dp2.card_type,
+                'date',             dp2.date,
+                'currency',         dp2.currency
+              )
+            )
+            FROM daily_prices AS dp2
+            WHERE dp2.uuid = c.uuid
+          ) AS prices_json
+           
         FROM cards c
         LEFT JOIN cardIdentifiers ci ON c.uuid = ci.uuid
         LEFT JOIN cardLegalities cl ON c.uuid = cl.uuid
@@ -1468,7 +1508,7 @@ class BulkDataService {
           AND (c.language = "English" OR c.language IS NULL)
         LIMIT 1
       `, [name, setCode, collectorNumber]);
-
+      console.log(exactMatch)
       if (exactMatch) {
         const cardData = await this.convertDbRowToCard(exactMatch);
         // console.log(`Found exact match for ${name} (${setCode}) #${collectorNumber} - Language: ${cardData.lang || 'en'}`);
@@ -1485,7 +1525,24 @@ class BulkDataService {
                cl.standardbrawl, cl.timeless, cl.vintage,
                s.name as setName,
                cpu.cardKingdom, cpu.cardmarket, cpu.tcgplayer,
-               crl.gatherer, crl.edhrec
+               crl.gatherer, crl.edhrec,
+
+               /* JSON array of all price records for this card */
+          (
+            SELECT json_group_array(
+              json_object(
+                'vendor',           dp2.vendor,
+                'price',            dp2.price,
+                'transaction_type', dp2.transaction_type,
+                'card_type',        dp2.card_type,
+                'date',             dp2.date,
+                'currency',         dp2.currency
+              )
+            )
+            FROM daily_prices AS dp2
+            WHERE dp2.uuid = c.uuid
+          ) AS prices_json
+
         FROM cards c
         LEFT JOIN cardIdentifiers ci ON c.uuid = ci.uuid
         LEFT JOIN cardLegalities cl ON c.uuid = cl.uuid
@@ -1515,7 +1572,24 @@ class BulkDataService {
                cl.standardbrawl, cl.timeless, cl.vintage,
                s.name as setName,
                cpu.cardKingdom, cpu.cardmarket, cpu.tcgplayer,
-               crl.gatherer, crl.edhrec
+               crl.gatherer, crl.edhrec,
+
+               /* JSON array of all price records for this card */
+          (
+            SELECT json_group_array(
+              json_object(
+                'vendor',           dp2.vendor,
+                'price',            dp2.price,
+                'transaction_type', dp2.transaction_type,
+                'card_type',        dp2.card_type,
+                'date',             dp2.date,
+                'currency',         dp2.currency
+              )
+            )
+            FROM daily_prices AS dp2
+            WHERE dp2.uuid = c.uuid
+          ) AS prices_json
+
         FROM cards c
         LEFT JOIN cardIdentifiers ci ON c.uuid = ci.uuid
         LEFT JOIN cardLegalities cl ON c.uuid = cl.uuid

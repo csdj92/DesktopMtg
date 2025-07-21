@@ -10,10 +10,212 @@ const { resolveDatabasePath } = require('./dbPathResolver.cjs');
 const DATABASE_FILE = resolveDatabasePath();
 console.log('[collectionImporter] Using database at:', DATABASE_FILE);
 
+// Optimized card matching class with prepared statements and caching
+class CardMatcher {
+  constructor(bulkDataService) {
+    this.db = bulkDataService.db;
+    this.cache = new Map();
+    
+    // Initialize prepared statements when bulkDataService is available
+    this.initializeStatements();
+  }
+
+  async initializeStatements() {
+    try {
+      // Prepared statement #1: cards table with priority ordering
+      this.cardStmt = await this.db.prepare(`
+        SELECT uuid, name, setCode, number, language, 'card' as type
+          FROM cards
+         WHERE lower(name) = lower(?)
+           AND (lower(setCode) = lower(?) OR ? IS NULL)
+           AND (number = ? OR ? IS NULL)
+      ORDER BY
+        CASE WHEN lower(name) = lower(?) THEN 0 ELSE 1 END,
+        CASE WHEN lower(setCode) = lower(?) THEN 0 ELSE 1 END,
+        CASE WHEN number = ? THEN 0 ELSE 1 END,
+        CASE WHEN language = 'en' THEN 0 ELSE 1 END
+         LIMIT 1
+      `);
+
+      // Prepared statement #2: tokens table
+      this.tokenStmt = await this.db.prepare(`
+        SELECT uuid, name, setCode, number, language, 'token' as type
+          FROM tokens
+         WHERE lower(name) = lower(?)
+           AND (lower(setCode) = lower(?) OR ? IS NULL)
+           AND (number = ? OR ? IS NULL)
+      ORDER BY CASE WHEN language = 'en' THEN 0 ELSE 1 END
+         LIMIT 1
+      `);
+
+      // Name-only token fallback
+      this.tokenNameOnlyStmt = await this.db.prepare(`
+        SELECT uuid, name, setCode, number, language, 'token' as type
+          FROM tokens
+         WHERE lower(name) = lower(?)
+      ORDER BY CASE WHEN language = 'en' THEN 0 ELSE 1 END
+         LIMIT 1
+      `);
+
+      console.log('✅ CardMatcher prepared statements initialized');
+    } catch (error) {
+      console.error('❌ Failed to initialize CardMatcher statements:', error);
+      // Fall back to dynamic queries if prepared statements fail
+      this.cardStmt = null;
+      this.tokenStmt = null;
+      this.tokenNameOnlyStmt = null;
+    }
+  }
+
+  async findBestCardMatch(cardName, setCode = null, collectorNumber = null) {
+    if (!cardName || cardName.trim() === '' || cardName.trim().toLowerCase() === 'undefined') {
+      console.warn(`⚠️ Skipping card lookup with invalid name: "${cardName}"`);
+      return null;
+    }
+
+    const key = `${cardName}|${setCode}|${collectorNumber}`;
+    if (this.cache.has(key)) {
+      console.log(`⚡ Cache hit for "${cardName}"`);
+      return this.cache.get(key);
+    }
+
+    const startTime = Date.now();
+
+    try {
+      let result = null;
+
+      // Use prepared statements if available, otherwise fall back to dynamic queries
+      if (this.cardStmt) {
+        // 1) One trip into the cards table with priority ordering
+        result = await this.cardStmt.get(
+          cardName,
+          setCode, setCode,
+          collectorNumber, collectorNumber,
+          // for ORDER BY:
+          cardName, setCode, collectorNumber
+        );
+        
+        if (result) {
+          const duration = Date.now() - startTime;
+          console.log(`✓ Found card match for "${cardName}" (${result.setCode || 'unknown set'}) - Language: ${result.language || 'en'} (${duration}ms)`);
+          this.cache.set(key, result);
+          return result;
+        }
+      } else {
+        // Fallback to dynamic query for cards
+        let cardQuery = `SELECT uuid, name, setCode, number, language, 'card' as type FROM cards WHERE lower(name) = lower(?)`;
+        let params = [cardName];
+
+        if (setCode) {
+          cardQuery += ` AND lower(setCode) = lower(?)`;
+          params.push(setCode);
+        }
+        if (collectorNumber) {
+          cardQuery += ` AND number = ?`;
+          params.push(collectorNumber);
+        }
+
+        cardQuery += ` ORDER BY CASE WHEN language = 'en' THEN 0 ELSE 1 END LIMIT 1`;
+        
+        result = await this.db.get(cardQuery, params);
+        if (result) {
+          const duration = Date.now() - startTime;
+          console.log(`✓ Found card match for "${cardName}" (${result.setCode || 'unknown set'}) - Language: ${result.language || 'en'} (${duration}ms)`);
+          this.cache.set(key, result);
+          return result;
+        }
+      }
+
+      // 2) One trip into the tokens table
+      if (this.tokenStmt) {
+        result = await this.tokenStmt.get(
+          cardName,
+          setCode, setCode,
+          collectorNumber, collectorNumber
+        );
+        
+        if (result) {
+          console.log(`🪙 Found token match for "${cardName}" (${result.setCode || 'unknown set'})`);
+          this.cache.set(key, result);
+          return result;
+        }
+      } else {
+        // Fallback to dynamic query for tokens
+        let tokenQuery = `SELECT uuid, name, setCode, number, language, 'token' as type FROM tokens WHERE lower(name) = lower(?)`;
+        let params = [cardName];
+
+        if (setCode) {
+          tokenQuery += ` AND lower(setCode) = lower(?)`;
+          params.push(setCode);
+        }
+        if (collectorNumber) {
+          tokenQuery += ` AND number = ?`;
+          params.push(collectorNumber);
+        }
+
+        tokenQuery += ` ORDER BY CASE WHEN language = 'en' THEN 0 ELSE 1 END LIMIT 1`;
+        
+        result = await this.db.get(tokenQuery, params);
+        if (result) {
+          console.log(`🪙 Found token match for "${cardName}" (${result.setCode || 'unknown set'})`);
+          this.cache.set(key, result);
+          return result;
+        }
+      }
+
+      // 3) Name-only token fallback
+      if (this.tokenNameOnlyStmt) {
+        result = await this.tokenNameOnlyStmt.get(cardName);
+        if (result) {
+          console.log(`🪙 Found token name match for "${cardName}" (${result.setCode || 'unknown set'})`);
+          this.cache.set(key, result);
+          return result;
+        }
+      } else {
+        // Fallback to dynamic query for name-only token search
+        result = await this.db.get(
+          `SELECT uuid, name, setCode, number, language, 'token' as type FROM tokens WHERE lower(name) = lower(?) ORDER BY CASE WHEN language = 'en' THEN 0 ELSE 1 END LIMIT 1`,
+          [cardName]
+        );
+        
+        if (result) {
+          console.log(`🪙 Found token name match for "${cardName}" (${result.setCode || 'unknown set'})`);
+          this.cache.set(key, result);
+          return result;
+        }
+      }
+
+      const duration = Date.now() - startTime;
+      console.warn(`✗ No match found for "${cardName}" in cards or tokens (${duration}ms)`);
+      return null;
+
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      console.error(`Error finding card match for "${cardName}" (${duration}ms):`, error);
+      return null;
+    }
+  }
+
+  // Clear cache when needed (e.g., after database updates)
+  clearCache() {
+    this.cache.clear();
+    console.log('🗑️ CardMatcher cache cleared');
+  }
+
+  // Get cache statistics
+  getCacheStats() {
+    return {
+      size: this.cache.size,
+      keys: Array.from(this.cache.keys())
+    };
+  }
+}
+
 class CollectionImporter {
   constructor() {
     this.db = null;
     this.isSyncing = false;
+    this.cardMatcher = null;
   }
 
   // Retry mechanism for database operations
@@ -30,6 +232,15 @@ class CollectionImporter {
         }
         throw error;
       }
+    }
+  }
+
+  // Set bulk data service and initialize CardMatcher
+  setBulkDataService(bulkDataService) {
+    this.bulkDataService = bulkDataService;
+    if (bulkDataService && bulkDataService.db) {
+      this.cardMatcher = new CardMatcher(bulkDataService);
+      console.log('✅ CardMatcher initialized with bulk data service');
     }
   }
 
@@ -78,6 +289,20 @@ class CollectionImporter {
         CREATE INDEX IF NOT EXISTS idx_card_name ON user_collections(cardName);
         CREATE INDEX IF NOT EXISTS idx_set_code ON user_collections(setCode);
       `);
+
+      // Add performance indexes for card lookups in main database
+      console.log('🔧 Adding performance indexes for card lookups...');
+      try {
+        await this.db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_cards_lower_name ON cards(lower(name));
+          CREATE INDEX IF NOT EXISTS idx_cards_setcode_number ON cards(lower(setCode), number);
+          CREATE INDEX IF NOT EXISTS idx_tokens_lower_name ON tokens(lower(name));
+          CREATE INDEX IF NOT EXISTS idx_tokens_setcode ON tokens(lower(setCode));
+        `);
+        console.log('✅ Performance indexes created successfully');
+      } catch (indexError) {
+        console.warn('⚠️ Could not create performance indexes (tables might not exist yet):', indexError.message);
+      }
 
       console.log('Collection database initialized');
       return true;
@@ -453,6 +678,23 @@ class CollectionImporter {
     }
   }
 
+  async getCollectionNames() {
+    if (!this.db) return [];
+
+    try {
+      const collections = await this.db.all(`
+        SELECT DISTINCT collectionName
+        FROM user_collections 
+        ORDER BY collectionName
+      `);
+
+      return collections.map(c => c.collectionName);
+    } catch (error) {
+      console.error('Error getting collection names:', error);
+      return [];
+    }
+  }
+
   async getCollection(collectionName, options = {}) {
     if (!this.db) return [];
 
@@ -771,6 +1013,9 @@ class CollectionImporter {
       console.log(`✅ Collection sync complete in ${duration}ms: ${totalUpdates} items updated (${tokensFound} tokens), ${notFound} not found`);
       console.log(`📈 Sync details: ${cardUpdates.length} cards updated, ${tokenUpdates.length} tokens updated, ${resets.length} reset`);
 
+      // Clear card cache after sync since database was updated
+      this.clearCardCache();
+
       return {
         success: true,
         synced: totalUpdates,
@@ -805,99 +1050,27 @@ class CollectionImporter {
     }
   }
 
+  // Clear CardMatcher cache when needed (e.g., after database updates)
+  clearCardCache() {
+    if (this.cardMatcher) {
+      this.cardMatcher.clearCache();
+    }
+  }
+
+  // Get CardMatcher cache statistics
+  getCardCacheStats() {
+    if (this.cardMatcher) {
+      return this.cardMatcher.getCacheStats();
+    }
+    return { size: 0, keys: [] };
+  }
+
   async findBestCardMatch(cardName, setCode = null, collectorNumber = null) {
-    if (!this.bulkDataService) {
-      throw new Error('Bulk data service not available');
+    if (!this.cardMatcher) {
+      throw new Error('CardMatcher not initialized - bulk data service not available');
     }
 
-    // Handle undefined, "undefined", or empty card names
-    if (!cardName || cardName.trim() === '' || cardName.trim().toLowerCase() === 'undefined') {
-      console.warn(`⚠️ Skipping card lookup with invalid name: "${cardName}"`);
-      return null;
-    }
-
-    try {
-      let card = null;
-
-      // First try exact match with set and collector number if provided, prioritizing English
-      if (setCode && collectorNumber && cardName) {
-        card = await this.bulkDataService.findCardByDetails(cardName, setCode, collectorNumber);
-        if (card) {
-          console.log(`✓ Found exact match for "${cardName}" (${setCode}) #${collectorNumber} - Language: ${card.language || 'en'}`);
-          return card;
-        }
-      }
-
-      // Try exact match with set only, prioritizing English
-      if (setCode && cardName) {
-        card = await this.bulkDataService.findCardByName(cardName);
-        if (card && card.setCode && card.setCode.toLowerCase() === setCode.toLowerCase()) {
-          console.log(`✓ Found set match for "${cardName}" (${setCode}) - Language: ${card.language || 'en'}`);
-          return card;
-        }
-      }
-
-      // Fallback to name-only search (already prioritizes English in bulkDataService)
-      if (cardName) {
-        card = await this.bulkDataService.findCardByName(cardName);
-        if (card) {
-          const langNote = card.language && card.language !== 'English' ? ` (${card.language})` : ' (English)';
-          console.log(`✓ Found name match for "${cardName}"${langNote}`);
-          return card;
-        }
-      }
-
-      // If no card found, try searching tokens table
-      console.log(`🔍 Card not found, searching tokens for "${cardName}"`);
-
-      try {
-        let tokenQuery = `SELECT * FROM tokens WHERE lower(name) = lower(?)`;
-        let params = [cardName];
-
-        // If we have set code, try to match it too
-        if (setCode) {
-          tokenQuery += ` AND lower(setCode) = lower(?)`;
-          params.push(setCode);
-        }
-
-        // If we have collector number, try to match it too
-        if (collectorNumber) {
-          tokenQuery += ` AND number = ?`;
-          params.push(collectorNumber);
-        }
-
-        // Prefer English language
-        tokenQuery += ` ORDER BY CASE WHEN language = 'en' THEN 0 ELSE 1 END LIMIT 1`;
-
-        const token = await this.bulkDataService.db.get(tokenQuery, params);
-
-        if (token) {
-          console.log(`🪙 Found token match for "${cardName}" (${token.setCode || 'unknown set'})`);
-          return token;
-        }
-
-        // Fallback: try name-only token search
-        if (!token && (setCode || collectorNumber)) {
-          const nameOnlyToken = await this.bulkDataService.db.get(
-            `SELECT * FROM tokens WHERE lower(name) = lower(?) ORDER BY CASE WHEN language = 'en' THEN 0 ELSE 1 END LIMIT 1`,
-            [cardName]
-          );
-
-          if (nameOnlyToken) {
-            console.log(`🪙 Found token name match for "${cardName}" (${nameOnlyToken.setCode || 'unknown set'})`);
-            return nameOnlyToken;
-          }
-        }
-      } catch (tokenError) {
-        console.error(`Error searching tokens for "${cardName}":`, tokenError);
-      }
-
-      console.warn(`✗ No match found for "${cardName}" in cards or tokens`);
-      return null;
-    } catch (error) {
-      console.error(`Error finding card match for "${cardName}":`, error);
-      return null;
-    }
+    return await this.cardMatcher.findBestCardMatch(cardName, setCode, collectorNumber);
   }
 
   async addCard(collectionName, cardData = {}) {
