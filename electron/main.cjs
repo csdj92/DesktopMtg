@@ -12,13 +12,13 @@ const rulesEngine = require('./rulesEngine.cjs');
 const { weights } = require('./reranker/weights.cjs');
 const settingsManager = require('./settingsManager.cjs');
 const { loadElectronLlm } = require('@electron/llm');
-const { 
-  isCardInColorIdentity, 
-  rerankCardsByDeckSynergy, 
-  calculateKeywordSimilarity, 
+const {
+  isCardInColorIdentity,
+  rerankCardsByDeckSynergy,
+  calculateKeywordSimilarity,
   calculateSmartHybridScore,
   normalizeStrategyScores,
-  extractDeckInsights, 
+  extractDeckInsights,
   analyzeDeckForQuery,
   // 🔧 NEW: Import advanced pattern analysis functions
   parseOracleTextPatterns,
@@ -209,6 +209,37 @@ ipcMain.handle('collection-get-simple', async (event, options = {}) => {
 ipcMain.handle('collection-get-stats', async (event, collectionName) => {
   // Get collection stats from main database
   return await bulkDataService.getCollectionStats();
+});
+
+///window.electronAPI.testOraclePatternAnalysis 
+ipcMain.handle('test-oracle-pattern-analysis', async (event, cardName) => {
+  try {
+    console.log(`🧪 Testing oracle text pattern analysis for: ${cardName}`);
+
+    // Find the card in the database
+    const card = await bulkDataService.findCardByName(cardName);
+    if (!card) {
+      return { error: `Card "${cardName}" not found`, success: false };
+    }
+
+    console.log(`📜 Oracle text: ${card.oracle_text || card.text || 'No oracle text'}`);
+
+    // Parse the oracle text patterns using advanced analysis
+    const patterns = parseOracleTextPatterns(card.oracle_text || card.text || '');
+
+    console.log('🔍 Parsed patterns:', JSON.stringify(patterns, null, 2));
+
+    return {
+      cardName,
+      oracleText: card.oracle_text || card.text || '',
+      patterns,
+      success: true
+    };
+
+  } catch (error) {
+    console.error('❌ Oracle pattern analysis error:', error);
+    return { error: error.message, success: false };
+  }
 });
 
 ipcMain.handle('collection-get-ruling', async (event, cardId) => {
@@ -659,7 +690,7 @@ const validateDeckWithRules = (deck, format) => {
 ipcMain.handle('auto-build-commander-deck', async () => {
   try {
     console.log('🤖 Starting Auto-Build Commander Deck process...');
-    
+
     // 1. Get the user's full collection to serve as the card pool
     const cardPool = await bulkDataService.getCollectedCards({ limit: 20000 });
     if (!cardPool || cardPool.length < 101) {
@@ -686,15 +717,15 @@ ipcMain.handle('auto-build-commander-deck', async () => {
     // 3. Generate a query and get semantic scores for the whole pool based on that commander
     const query = analyzeDeckForQuery({ commanders: [commanderForQuery], mainboard: [] }, 'commander');
     const allSemanticResults = await bulkDataService.searchCardsSemantic(query, { limit: 90000 });
-    
+
     const semanticScoreMap = new Map();
     allSemanticResults.forEach(result => {
       const distance = result._distance || result.distance || 1.0;
-      
+
       // Use the same configurable distance conversion as main recommendations
       const settings = settingsManager.getSettings();
       const conversionType = settings.recommendations?.scoring?.distanceConversion || 'sqrt';
-      
+
       let score;
       switch (conversionType) {
         case 'linear':
@@ -712,7 +743,7 @@ ipcMain.handle('auto-build-commander-deck', async () => {
         default:
           score = Math.max(0, 1 - Math.sqrt(distance));
       }
-      
+
       semanticScoreMap.set(result.name, score);
     });
 
@@ -779,7 +810,7 @@ ipcMain.handle('get-deck-recommendations', async (event, { deck, formatName }) =
     }
 
     // 🔧 NEW IMPROVED ALGORITHM - Deduplication and Better Score Preservation
-    
+
     // 5A. FIRST: Deduplicate owned cards by name, keeping the most complete version
     console.log('🔄 Deduplicating owned cards by name...');
     const ownedCardsByName = new Map();
@@ -790,8 +821,8 @@ ipcMain.handle('get-deck-recommendations', async (event, { deck, formatName }) =
       } else {
         // Keep the card with more complete information (prefer non-null oracle_text)
         const existing = ownedCardsByName.get(name);
-        if ((card.oracle_text && !existing.oracle_text) || 
-            (card.oracle_text && card.oracle_text.length > (existing.oracle_text || '').length)) {
+        if ((card.oracle_text && !existing.oracle_text) ||
+          (card.oracle_text && card.oracle_text.length > (existing.oracle_text || '').length)) {
           ownedCardsByName.set(name, card);
         }
       }
@@ -805,7 +836,7 @@ ipcMain.handle('get-deck-recommendations', async (event, { deck, formatName }) =
       const isCommanderFormat = formatName === 'commander';
       const cardIsInIdentity = !isCommanderFormat || isCardInColorIdentity(card, commanderColorIdentity);
       const cardIsNotInDeck = !existingCardNames.has(name);
-      
+
       if (cardIsInIdentity && cardIsNotInDeck) {
         eligibleCardsByName.set(name, card);
       }
@@ -833,11 +864,11 @@ ipcMain.handle('get-deck-recommendations', async (event, { deck, formatName }) =
     if (semanticSearchInitialized) {
       try {
         console.log('📡 Running semantic search with smart caching...');
-        
+
         // Check cache first
         const cacheKey = `semantic_${query.substring(0, 100)}`; // Use first 100 chars as cache key
         const cached = global.semanticCache?.get(cacheKey);
-        
+
         let allSemanticResults;
         if (cached && (Date.now() - cached.timestamp) < 300000) { // 5 minute cache
           console.log('💾 Using cached semantic results');
@@ -845,7 +876,7 @@ ipcMain.handle('get-deck-recommendations', async (event, { deck, formatName }) =
         } else {
           console.log('🔍 Performing fresh semantic search...');
           allSemanticResults = await bulkDataService.searchCardsSemantic(query, { limit: semanticLimit });
-          
+
           // Cache the results
           if (!global.semanticCache) {
             global.semanticCache = new Map();
@@ -861,20 +892,20 @@ ipcMain.handle('get-deck-recommendations', async (event, { deck, formatName }) =
             global.semanticCache.delete(oldestKey);
           }
         }
-        
+
         console.log('Semantic search results:', allSemanticResults.length);
 
         // 🔧 IMPROVED: Better distance-to-score conversion and deduplication
         const semanticResultsByName = new Map();
-      allSemanticResults.forEach(result => {
+        allSemanticResults.forEach(result => {
           const name = result.name;
           // Improved distance-to-score conversion: use configurable approach for better scores
           const distance = result._distance || result.distance || 1.0;
-          
+
           // Multiple conversion options - use square root for better separation while keeping higher scores
           const settings = settingsManager.getSettings();
           const conversionType = settings.recommendations?.scoring?.distanceConversion || 'sqrt';
-          
+
           let score;
           switch (conversionType) {
             case 'linear':
@@ -892,13 +923,13 @@ ipcMain.handle('get-deck-recommendations', async (event, { deck, formatName }) =
             default:
               score = Math.max(0, 1 - Math.sqrt(distance)); // Default to sqrt
           }
-          
+
           // Keep the best score for each card name (in case of duplicates)
           if (!semanticResultsByName.has(name) || score > semanticResultsByName.get(name)) {
             semanticResultsByName.set(name, score);
           }
         });
-        
+
         semanticScores = semanticResultsByName;
         console.log('Cards with semantic scores (deduplicated):', semanticScores.size);
 
@@ -906,9 +937,9 @@ ipcMain.handle('get-deck-recommendations', async (event, { deck, formatName }) =
         const topSemanticScores = Array.from(semanticScores.entries())
           .sort((a, b) => b[1] - a[1])
           .slice(0, 5);
-        console.log('Top 5 semantic scores:', topSemanticScores.map(([name, score]) => 
+        console.log('Top 5 semantic scores:', topSemanticScores.map(([name, score]) =>
           `${name}: ${score.toFixed(3)}`).join(', '));
-          
+
       } catch (error) {
         console.error('❌ Semantic search failed:', error);
         semanticScores = new Map();
@@ -929,7 +960,7 @@ ipcMain.handle('get-deck-recommendations', async (event, { deck, formatName }) =
     const scoredCards = eligibleCards.map(card => {
       const semanticScore = semanticScores.get(card.name) || 0;
       const keywordScore = keywordScores.get(card.name) || 0;
-      
+
       // Calculate ALL strategies simultaneously for comparison
       const strategies = {
         primary_fallback: semanticScore > 0.01 ? semanticScore : keywordScore, // Increased threshold
@@ -964,23 +995,23 @@ ipcMain.handle('get-deck-recommendations', async (event, { deck, formatName }) =
 
     // Apply score normalization for better strategy comparison
     const normalizedCards = normalizeStrategyScores(scoredCards);
-    
+
     // Sort by combined score (highest first)
     normalizedCards.sort((a, b) => b.combined_score - a.combined_score);
-      
+
     console.log('📊 Improved scoring comparison:');
     console.log(`  - Cards with semantic scores > 0.01: ${normalizedCards.filter(c => c.semantic_score > 0.01).length}`);
     console.log(`  - Cards with keyword scores > 0: ${normalizedCards.filter(c => c.keyword_score > 0).length}`);
     console.log(`  - Using semantic as primary: ${normalizedCards.filter(c => c.score_source === 'semantic').length}`);
     console.log(`  - Using keyword as fallback: ${normalizedCards.filter(c => c.score_source === 'keyword').length}`);
     console.log(`  - Active strategy: ${settings.recommendations.activeStrategy}`);
-    
+
     // 🧪 STRATEGY COMPARISON - Show top 3 cards from each strategy
     const strategies = ['primary_fallback', 'weighted_70_30', 'weighted_50_50', 'max_score', 'average', 'multiplicative', 'semantic_only', 'keyword_only', 'smart_hybrid'];
     console.log('\n🧪 Strategy Comparison (Top 3 cards each):');
-    
+
     strategies.forEach(strategy => {
-      const strategySorted = [...normalizedCards].sort((a, b) => 
+      const strategySorted = [...normalizedCards].sort((a, b) =>
         (b.strategy_scores[strategy] || 0) - (a.strategy_scores[strategy] || 0)
       );
       const top3 = strategySorted.slice(0, 3);
@@ -998,7 +1029,7 @@ ipcMain.handle('get-deck-recommendations', async (event, { deck, formatName }) =
     console.log('🎯 Applying MTG-specific reranking...');
     const rerankedResults = rerankCardsByDeckSynergy(normalizedCards.slice(0, resultLimit), deck, formatName, settings);
     console.log('Reranked results count:', rerankedResults.length);
-    
+
     // 🔧 FINAL DEDUPLICATION: Ensure no duplicate card names in final results
     console.log('🔄 Final deduplication check...');
     const finalResultsByName = new Map();
@@ -1016,9 +1047,9 @@ ipcMain.handle('get-deck-recommendations', async (event, { deck, formatName }) =
     });
     const deduplicatedResults = Array.from(finalResultsByName.values())
       .sort((a, b) => b.synergy_score - a.synergy_score);
-    
+
     console.log(`Final deduplication: ${rerankedResults.length} → ${deduplicatedResults.length} unique cards`);
-    
+
     // Show scoring method distribution after reranking
     if (deduplicatedResults.length > 0) {
       const methodCounts = {};
@@ -1028,7 +1059,7 @@ ipcMain.handle('get-deck-recommendations', async (event, { deck, formatName }) =
       });
       console.log('📊 Reranked results by scoring method:', methodCounts);
     }
-    
+
     // 10. Filter recommendations based on format legality using the rules engine
     const legalRecommendations = deduplicatedResults.filter(card => {
       const legality = rulesEngine.isCardLegal(card, formatName);
@@ -1037,10 +1068,10 @@ ipcMain.handle('get-deck-recommendations', async (event, { deck, formatName }) =
     console.log(`⚖️ Filtered for legality. Kept ${legalRecommendations.length} of ${deduplicatedResults.length} recommendations.`);
 
     if (legalRecommendations.length > 0) {
-      console.log('Top 3 final results:', legalRecommendations.slice(0, 3).map(r => ({ 
-        name: r.name, 
+      console.log('Top 3 final results:', legalRecommendations.slice(0, 3).map(r => ({
+        name: r.name,
         synergy_score: r.synergy_score,
-        semantic_score: r.semantic_score 
+        semantic_score: r.semantic_score
       })));
     }
 
@@ -1145,7 +1176,7 @@ ipcMain.handle('list-sets', async () => {
 ipcMain.handle('get-cards-by-set', async (event, setCode, options) => {
   try {
     const cards = await bulkDataService.getCardsBySet(setCode, options);
-    
+
     // Ensure all cards are serializable by doing a test JSON serialization
     try {
       const testSerialization = JSON.stringify(cards);
@@ -1153,11 +1184,11 @@ ipcMain.handle('get-cards-by-set', async (event, setCode, options) => {
       console.error('Serialization test failed:', serializationError);
       throw new Error('An object could not be cloned.');
     }
-    
+
     return cards;
   } catch (error) {
     console.error('Error in get-cards-by-set:', error);
-    
+
     // If it's a serialization error, try to return a simplified version
     if (error.message && (error.message.includes('could not be cloned') || error.message.includes('circular'))) {
       console.warn('Serialization error detected, attempting to return basic card data');
@@ -1194,7 +1225,7 @@ ipcMain.handle('get-cards-by-set', async (event, setCode, options) => {
             };
           }
         });
-        
+
         // Test serialization of sanitized cards
         JSON.stringify(sanitizedCards);
         return sanitizedCards;
@@ -1203,7 +1234,7 @@ ipcMain.handle('get-cards-by-set', async (event, setCode, options) => {
         return [];
       }
     }
-    
+
     return [];
   }
 });
@@ -1415,10 +1446,10 @@ const broadcast = (payload) => {
 
 app.whenReady().then(async () => {
   await createWindow();
-  
+
   // Initialize settings
   await settingsManager.initialize();
-  
+
   // 🤖 Load @electron/llm for AI features
   try {
     console.log('🤖 Loading @electron/llm...');
@@ -1516,20 +1547,20 @@ app.on('activate', () => {
 // Test semantic search functionality
 ipcMain.handle('test-semantic-search', async (event, query = 'lightning bolt') => {
   console.log('🧪 Testing semantic search with query:', query);
-  
+
   try {
     // Check if semantic search is initialized
     const initialized = await bulkDataService.ensureSemanticSearchInitialized();
     console.log('Semantic search initialized:', initialized);
-    
+
     if (!initialized) {
       return { error: 'Semantic search not initialized', results: [] };
     }
-    
+
     // Perform a simple search
     const results = await bulkDataService.searchCardsSemantic(query, { limit: 10 });
     console.log('Test search results:', results.length);
-    
+
     if (results.length > 0) {
       console.log('Sample results:', results.slice(0, 3).map(r => ({
         name: r.name,
@@ -1537,7 +1568,7 @@ ipcMain.handle('test-semantic-search', async (event, query = 'lightning bolt') =
         type: r.type_line || r.type
       })));
     }
-    
+
     return { results, count: results.length };
   } catch (error) {
     console.error('❌ Test semantic search error:', error);
@@ -1548,24 +1579,24 @@ ipcMain.handle('test-semantic-search', async (event, query = 'lightning bolt') =
 // Debug path resolution
 ipcMain.handle('debug-semantic-paths', async () => {
   console.log('🔍 Debugging semantic search paths...');
-  
+
   try {
     const { resolveVectorDbPath } = require('./vectordbResolver.cjs');
     const { resolveCachePath } = require('./cacheResolver.cjs');
-    
+
     const vectorDbPath = await resolveVectorDbPath();
     const cachePath = await resolveCachePath();
-    
+
     console.log('Vector DB path:', vectorDbPath);
     console.log('Cache path:', cachePath);
-    
+
     const fs = require('fs');
     const vectorDbExists = fs.existsSync(vectorDbPath);
     const cacheExists = fs.existsSync(cachePath);
-    
+
     console.log('Vector DB exists:', vectorDbExists);
     console.log('Cache exists:', cacheExists);
-    
+
     let vectorDbContents = [];
     if (vectorDbExists) {
       try {
@@ -1575,7 +1606,7 @@ ipcMain.handle('debug-semantic-paths', async () => {
         console.error('Error reading vector DB contents:', error);
       }
     }
-    
+
     return {
       vectorDbPath,
       cachePath,
@@ -1592,23 +1623,23 @@ ipcMain.handle('debug-semantic-paths', async () => {
 // Debug worker initialization
 ipcMain.handle('debug-worker-init', async () => {
   console.log('🔍 Debugging worker initialization...');
-  
+
   try {
     const semanticSearchService = require('./semanticSearch.cjs');
-    
+
     // Try to initialize the service
     await semanticSearchService.initialize();
-    
+
     return {
       initialized: true,
       message: 'Worker initialized successfully'
     };
   } catch (error) {
     console.error('❌ Worker initialization error:', error);
-    return { 
-      initialized: false, 
+    return {
+      initialized: false,
       error: error.message,
-      stack: error.stack 
+      stack: error.stack
     };
   }
 });
@@ -1677,57 +1708,9 @@ ipcMain.handle('rules-analyze-mana-curve', (event, cards) => {
 // Analyze color balance
 ipcMain.handle('rules-analyze-color-balance', (event, cards) => {
   return rulesEngine.analyzeColorBalance(cards);
-}); 
+});
 
-// 🔧 NEW: Test Oracle Text Pattern Analysis
-ipcMain.handle('test-oracle-pattern-analysis', async (event, cardName) => {
-  try {
-    console.log(`🧪 Testing oracle text pattern analysis for: ${cardName}`);
-    
-    // Find the card in the database
-    const card = await bulkDataService.findCardByName(cardName);
-    if (!card) {
-      return { error: `Card "${cardName}" not found` };
-    }
-    
-    console.log(`📜 Oracle text: ${card.oracle_text || card.text || 'No oracle text'}`);
-    
-    // Parse the oracle text patterns
-    const patterns = parseOracleTextPatterns(card.oracle_text || card.text || '');
-    
-    console.log('🔍 Parsed patterns:', JSON.stringify(patterns, null, 2));
-    
-    // Test with some other cards for synergy calculation
-    const testCards = ['Skullclamp', 'Puresteel Paladin', 'Stoneforge Mystic'];
-    const synergyTests = [];
-    
-    for (const testCardName of testCards) {
-      const testCard = await bulkDataService.findCardByName(testCardName);
-      if (testCard) {
-        const testPatterns = parseOracleTextPatterns(testCard.oracle_text || testCard.text || '');
-        const synergy = calculateMechanicalSynergy(patterns, testPatterns);
-        synergyTests.push({
-          cardName: testCardName,
-          synergy,
-          patterns: testPatterns
-        });
-        console.log(`🤝 Synergy with ${testCardName}: ${synergy}`);
-      }
-    }
-    
-    return {
-      cardName,
-      oracleText: card.oracle_text || card.text || '',
-      patterns,
-      synergyTests,
-      success: true
-    };
-    
-  } catch (error) {
-    console.error('❌ Oracle pattern analysis error:', error);
-    return { error: error.message, success: false };
-  }
-}); 
+
 
 // 🤖 LLM availability check
 // Note: @electron/llm automatically injects window.electronAi into renderer
@@ -1739,8 +1722,8 @@ ipcMain.handle('llm-initialize', async () => {
 
 // Simple handler to check if LLM is available
 ipcMain.handle('llm-check-availability', async () => {
-  return { 
-    success: true, 
+  return {
+    success: true,
     available: true,
     modelPath: path.join(__dirname, 'AI', 'Meta-Llama-3-8B-Instruct.Q4_K_M.gguf')
   };

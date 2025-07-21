@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   collectionMarkCard: (cardId, collected) => ipcRenderer.invoke('collection-mark-card', cardId, collected),
   collectionClearAll: () => ipcRenderer.invoke('collection-clear-all'),
   collectionSync: () => ipcRenderer.invoke('collection-sync'),
+  getDailyPrices: () => ipcRenderer.invoke('get-daily-prices'),
 
   // Deck Management
   deckSave: (filename, deckData) => ipcRenderer.invoke('deck-save', filename, deckData),
@@ -77,11 +78,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setActiveStrategy: (strategy) => ipcRenderer.invoke('set-active-strategy', strategy),
   getAvailableStrategies: () => ipcRenderer.invoke('get-available-strategies'),
 
-  // 🔧 NEW: Oracle Text Pattern Analysis
-  testOraclePatternAnalysis: (cardName) => ipcRenderer.invoke('test-oracle-pattern-analysis', cardName),
+
 
   // Set browsing
   listSets: () => ipcRenderer.invoke('list-sets'),
   getCardsBySet: (setCode, options) => ipcRenderer.invoke('get-cards-by-set', setCode, options),
   onTaskProgress: (callback) => ipcRenderer.on('task-progress', (event, ...args) => callback(...args)),
+
+  // Pattern Analysis
+  testOraclePatternAnalysis: (cardName) => ipcRenderer.invoke('test-oracle-pattern-analysis', cardName),
 }); 

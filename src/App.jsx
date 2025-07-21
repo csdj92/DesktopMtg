@@ -610,7 +610,7 @@ function App() {
           setCode: card.setCode || card.set_code || card.set || '',
           collectorNumber: card.number || card.collector_number || '',
           isFoil: false,
-          quantity: 1,
+          quantity: card.quantity || 1,
           scryfallData: card,
           cardKey: `${card.name}|${card.setCode || card.set_code || ''}|${
             card.number || card.collector_number || ''

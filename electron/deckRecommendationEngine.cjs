@@ -30,22 +30,22 @@ const isCardInColorIdentity = (card, commanderId) => {
  */
 const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
   if (!cards || cards.length === 0) return [];
-  
+
   // DEBUG: Check settingsManager state
   console.log('🔍 SettingsManager debug:');
   console.log('settingsManager.getSettings():', settingsManager.getSettings());
-  
+
   // Use provided settings or fallback to current settings
   const recoSettings = settings?.recommendations || settingsManager.getSettings().recommendations;
   const weights = recoSettings.weights || {};
   const thresholds = recoSettings.thresholds || {};
   const idealCurve = recoSettings.idealCurve;
-  
+
   // DEBUG: Log the actual settings structure
   console.log('\n🔍 SETTINGS DEBUG:');
   console.log('recoSettings:', JSON.stringify(recoSettings, null, 2));
   console.log('weights before processing:', JSON.stringify(weights, null, 2));
-  
+
   // ===== NEW: Robust Default Handling to Prevent NaN =====
   // Helper to coerce any value to a finite number or fallback to default
   const toNumberOrDefault = (val, def) => {
@@ -73,7 +73,7 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
     console.log('⚠️ Commander weights missing or invalid, creating default structure');
     weights.commander = {};
   }
-  
+
   // Force commander weights to exist regardless of what's in settings
   const commanderWeightDefaults = { multiplayer: 1, legendary: 1 };
   Object.entries(commanderWeightDefaults).forEach(([key, def]) => {
@@ -110,19 +110,19 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
     }
     return weight;
   };
-  
+
   // Re-validate all weights again (covers any user supplied extras)
   Object.keys(weights).forEach(key => {
     const defaultValue = weightDefaults[key] ?? 1;
     weights[key] = validateWeight(weights[key], key, defaultValue);
   });
-  
+
   const allDeckCards = [...deck.mainboard, ...(deck.commanders || [])];
   const deckText = allDeckCards.map(card => `${card.oracle_text || card.text || ''} ${card.type_line || card.type || ''}`).join(' ').toLowerCase();
-  
+
   console.log('\n🎯 === DECK SYNERGY ANALYSIS ===');
   console.log(`📊 Analyzing deck with ${allDeckCards.length} cards for synergy scoring...`);
-  
+
   // Analyze deck themes for scoring
   const deckThemes = {
     graveyard: /graveyard|flashback|unearth|dredge|delve|escape|disturb/g,
@@ -134,19 +134,19 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
     sacrifice: /sacrifice|devour|exploit|emerge/g,
     tribal: /choose.*type|tribal|changeling/g
   };
-  
+
   const deckThemeScores = {};
   Object.entries(deckThemes).forEach(([theme, pattern]) => {
     const matches = deckText.match(pattern);
     deckThemeScores[theme] = matches ? matches.length : 0;
   });
-  
+
   // 🔍 LOG THEME ANALYSIS
   console.log('\n🎨 DECK THEME ANALYSIS:');
   const significantThemes = Object.entries(deckThemeScores)
     .filter(([theme, count]) => count > 0)
     .sort((a, b) => b[1] - a[1]);
-  
+
   if (significantThemes.length > 0) {
     significantThemes.forEach(([theme, count]) => {
       const percentage = Math.round((count / allDeckCards.length) * 100);
@@ -155,7 +155,7 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
   } else {
     console.log('  No significant themes detected');
   }
-  
+
   // Calculate mana curve needs
   const manaCurve = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, '7+': 0 };
   allDeckCards.forEach(card => {
@@ -163,7 +163,7 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
     if (cmc >= 7) manaCurve['7+']++;
     else manaCurve[cmc]++;
   });
-  
+
   const totalDeckCards = allDeckCards.length || 1;
   const curveNeeds = {};
   Object.entries(manaCurve).forEach(([cost, count]) => {
@@ -172,7 +172,7 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
     const ideal = idealCurve[cost] || 0.05;
     curveNeeds[cost] = Math.max(0, ideal - percentage); // Higher need = bigger gap
   });
-  
+
   // 🔍 LOG MANA CURVE ANALYSIS
   console.log('\n⚡ MANA CURVE ANALYSIS:');
   console.log('Current curve:');
@@ -183,7 +183,7 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
     const needIndicator = need > 0.05 ? ` (NEEDS MORE: ${(need * 100).toFixed(1)}%)` : '';
     console.log(`  ${cost} CMC: ${count} cards (${percentage}% vs ${ideal}% ideal)${needIndicator}`);
   });
-  
+
   // Analyze tribal themes in the deck
   const deckTribes = new Map();
   allDeckCards.forEach(card => {
@@ -191,10 +191,10 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
     if (cardTypeLine.includes('creature')) {
       const typeMatch = cardTypeLine.match(/creature\s+—\s+(.+)/i);
       if (typeMatch) {
-        const cardTribes = typeMatch[1].split(' ').map(tribe => 
+        const cardTribes = typeMatch[1].split(' ').map(tribe =>
           tribe.replace(/[^a-zA-Z]/g, '').toLowerCase()
         ).filter(tribe => tribe.length > 2);
-        
+
         cardTribes.forEach(tribe => {
           const formattedTribe = tribe.charAt(0).toUpperCase() + tribe.slice(1);
           deckTribes.set(formattedTribe, (deckTribes.get(formattedTribe) || 0) + 1);
@@ -202,13 +202,13 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
       }
     }
   });
-  
+
   // 🔍 LOG TRIBAL ANALYSIS
   console.log('\n🏛️ TRIBAL ANALYSIS:');
   const significantTribes = Array.from(deckTribes.entries())
     .filter(([tribe, count]) => count >= 2)
     .sort((a, b) => b[1] - a[1]);
-  
+
   if (significantTribes.length > 0) {
     significantTribes.forEach(([tribe, count]) => {
       const percentage = Math.round((count / allDeckCards.length) * 100);
@@ -217,7 +217,7 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
   } else {
     console.log('  No significant tribal themes detected');
   }
-  
+
   console.log('\n🧮 SCORING WEIGHTS:');
   console.log(`  Semantic similarity: ${weights.semantic}x`);
   console.log(`  Theme multiplier: ${weights.themeMultiplier}x`);
@@ -227,20 +227,20 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
   console.log(`  Card draw bonus: ${weights.cardDraw}x`);
   console.log(`  Removal bonus: ${weights.removal}x`);
   console.log(`  Tutor bonus: ${weights.tutor}x`);
-  
+
   // Calculate creature percentage in current deck
   const creatureCount = allDeckCards.filter(card => {
     const cardTypeLine = (card.type_line || card.type || '').toLowerCase();
     return cardTypeLine.includes('creature');
   }).length;
-  
+
   const creaturePct = totalDeckCards > 0 ? creatureCount / totalDeckCards : 0;
   const desiredCreaturePct = (formatName || '').toLowerCase() === 'commander' ? 0.35 : 0.4; // 35% for commander, 40% for other formats
-  
+
   console.log(`\n🦄 CREATURE ANALYSIS:`);
   console.log(`  Current creatures: ${creatureCount}/${totalDeckCards} (${Math.round(creaturePct * 100)}%)`);
   console.log(`  Desired creatures: ${Math.round(desiredCreaturePct * 100)}%`);
-  
+
   // Score each card
   const scoredCards = cards.map(card => {
     let score = 0;
@@ -248,7 +248,7 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
     const cardCMC = card.manaValue || card.cmc || card.mana_value || 0;
     const cmcKey = cardCMC >= 7 ? '7+' : cardCMC.toString();
     const cardName = (card.name || '').toLowerCase();
-    
+
     // Track scoring breakdown for detailed logging
     const scoreBreakdown = {
       nameHash: 0,
@@ -261,18 +261,18 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
       utility: 0,
       typeAdjustment: 0
     };
-    
+
     // Add deterministic component based on card name for consistent ordering
     const nameHash = cardName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
     const nameHashBonus = (nameHash % 100) / 100 * weights.nameHashContrib;
     score += nameHashBonus;
     scoreBreakdown.nameHash = nameHashBonus;
-    
+
     // Base similarity score (can be semantic, keyword-based, or combined)
     // Priority: combined_score > semantic_score > keyword_score > fallback calculation
     let similarityScore = 0;
     let scoreMethod = 'fallback';
-    
+
     if (card.combined_score !== undefined && !isNaN(card.combined_score)) {
       similarityScore = card.combined_score;
       scoreMethod = card.score_source || 'combined';
@@ -286,7 +286,7 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
       // Fallback for legacy compatibility - use configurable distance conversion
       const distance = card._distance || card.distance || 1.0;
       const conversionType = recoSettings.scoring?.distanceConversion || 'sqrt';
-      
+
       // Ensure distance is a valid number
       if (isNaN(distance) || !isFinite(distance)) {
         similarityScore = 0;
@@ -311,17 +311,17 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
         scoreMethod = 'distance';
       }
     }
-    
+
     // Ensure similarity score is valid
     if (isNaN(similarityScore) || !isFinite(similarityScore)) {
       console.warn(`[SIMILARITY WARNING] Invalid similarity score for card "${card.name}": ${similarityScore}`);
       similarityScore = 0;
     }
-    
+
     // Apply configurable similarity scaling for better balance with synergy bonuses
     const similarityScale = recoSettings.scoring?.similarityScale || 200;
     const balanceMode = recoSettings.scoring?.balanceMode || 'mixed';
-    
+
     let similarityBonus;
     switch (balanceMode) {
       case 'similarity_first':
@@ -338,10 +338,10 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
         similarityBonus = similarityScore * similarityScale;
         break;
     }
-    
+
     score += similarityBonus;
     scoreBreakdown.similarity = similarityBonus;
-    
+
     // Theme synergy bonuses (improved calculation)
     Object.entries(deckThemes).forEach(([theme, pattern]) => {
       if (deckThemeScores[theme] > 0) {
@@ -350,28 +350,28 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
           // More sophisticated scoring based on theme prominence
           const themeStrength = Math.min(deckThemeScores[theme] / totalDeckCards, thresholds.themeStrengthCap); // Configurable cap
           const matchStrength = Math.min(cardMatches.length, thresholds.matchStrengthCap); // Configurable cap
-          
+
           // Apply reduced multiplier for artifacts in auto-build context
           let themeMultiplier = weights.themeMultiplier;
           if (theme === 'artifacts') {
             themeMultiplier = weights.themeMultiplier * 0.6; // Reduce artifact scoring by 40%
             // Note: Artifact theme scoring reduced to prevent over-prioritization
           }
-          
+
           const themeBonus = themeStrength * matchStrength * themeMultiplier;
           score += themeBonus;
           scoreBreakdown.themes[theme] = themeBonus;
         }
       }
     });
-    
+
     // Mana curve filling bonus (improved)
     if (curveNeeds[cmcKey] > thresholds.curveNeedsMin) { // Configurable threshold
       const curveBonus = curveNeeds[cmcKey] * weights.curveMultiplier;
       score += curveBonus;
       scoreBreakdown.curve = curveBonus;
     }
-    
+
     // Tribal synergy bonuses
     const cardTypeLine = card.type_line || card.type || '';
     let tribalBonus = 0;
@@ -379,10 +379,10 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
       // Extract creature types from this card
       const typeMatch = cardTypeLine.match(/creature\s+—\s+(.+)/i);
       if (typeMatch) {
-        const cardTribes = typeMatch[1].split(' ').map(tribe => 
+        const cardTribes = typeMatch[1].split(' ').map(tribe =>
           tribe.replace(/[^a-zA-Z]/g, '').toLowerCase()
         ).filter(tribe => tribe.length > 2);
-        
+
         // Check if this card matches any of the deck's tribal themes
         cardTribes.forEach(cardTribe => {
           allDeckCards.forEach(deckCard => {
@@ -393,20 +393,20 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
           });
         });
       }
-      
+
       // Check for tribal support cards (cards that care about creature types)
       const cardText = (card.oracle_text || card.text || '').toLowerCase();
-      if (cardText.includes('creature type') || 
-          cardText.includes('choose a creature type') ||
-          cardText.includes('creatures you control') ||
-          cardText.includes('creatures of the chosen type') ||
-          cardText.includes('other') && cardText.includes('creatures')) {
+      if (cardText.includes('creature type') ||
+        cardText.includes('choose a creature type') ||
+        cardText.includes('creatures you control') ||
+        cardText.includes('creatures of the chosen type') ||
+        cardText.includes('other') && cardText.includes('creatures')) {
         tribalBonus += weights.tribalSupport; // Configurable tribal support bonus
       }
     }
     score += tribalBonus;
     scoreBreakdown.tribal = tribalBonus;
-    
+
     // Keyword synergy bonuses
     const keywords = ['flying', 'trample', 'haste', 'vigilance', 'lifelink', 'deathtouch', 'first strike', 'double strike'];
     let keywordBonus = 0;
@@ -417,7 +417,7 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
     });
     score += keywordBonus;
     scoreBreakdown.keywords = keywordBonus;
-    
+
     // Format-specific bonuses
     let formatBonus = 0;
     if (formatName === 'commander') {
@@ -439,7 +439,7 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
       formatBonus = 0;
     }
     scoreBreakdown.format = formatBonus;
-    
+
     // Utility and staple bonuses
     let utilityBonus = 0;
     if (cardText.includes('draw') && cardText.includes('card')) {
@@ -453,11 +453,11 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
     }
     score += utilityBonus;
     scoreBreakdown.utility = utilityBonus;
-    
+
     // Type distribution adjustment to reduce creature bias
     let typeAdj = 0;
     const typeAdjustmentWeight = weights.typeAdjustment || 1;
-    
+
     if (cardTypeLine.toLowerCase().includes('creature')) {
       if (creaturePct > desiredCreaturePct) {
         // Too many creatures already – penalise
@@ -472,27 +472,27 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
         typeAdj = 10 * typeAdjustmentWeight;
       }
     }
-    
+
     // Ensure typeAdj is a valid number
     if (isNaN(typeAdj) || !isFinite(typeAdj)) {
       console.warn(`[TYPE ADJUSTMENT WARNING] Invalid typeAdj for card "${card.name}": ${typeAdj}, using 0`);
       typeAdj = 0;
     }
-    
+
     score += typeAdj;
     scoreBreakdown.typeAdjustment = typeAdj;
-    
+
     // Ensure score is a valid number and round to 2 decimal places for consistency
     if (isNaN(score) || !isFinite(score)) {
       console.warn(`[SCORE WARNING] Invalid score for card "${card.name}": ${score}`);
       console.warn(`  Score breakdown:`, scoreBreakdown);
       score = 0; // Fallback to 0 for invalid scores
     }
-    
+
     const finalScore = Math.round(score * 100) / 100;
-    
-    return { 
-      ...card, 
+
+    return {
+      ...card,
       synergy_score: isNaN(finalScore) ? 0 : finalScore,
       // Add debugging info about scoring method used
       _scoring_method: scoreMethod,
@@ -500,7 +500,7 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
       _score_breakdown: scoreBreakdown
     };
   });
-  
+
   // Sort by synergy score (highest first), then by name for consistent tie-breaking
   // --- NEW: Apply semantic similarity boost ---
   scoredCards.forEach(card => {
@@ -522,13 +522,13 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
     }
     return scoreDiff;
   });
-  
+
   // 🔍 LOG TOP SCORING CARDS WITH BREAKDOWN
   console.log('\n🏆 TOP 5 SCORING CARDS BREAKDOWN:');
   sortedCards.slice(0, 5).forEach((card, i) => {
     console.log(`\n${i + 1}. ${card.name} (Total: ${card.synergy_score})`);
     console.log(`   Similarity: ${card._similarity_score?.toFixed(3)} → ${card._score_breakdown.similarity?.toFixed(2)} pts`);
-    
+
     const themeEntries = Object.entries(card._score_breakdown.themes || {});
     if (themeEntries.length > 0) {
       console.log(`   Themes:`);
@@ -536,7 +536,7 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
         console.log(`     ${theme}: ${points.toFixed(2)} pts`);
       });
     }
-    
+
     if (card._score_breakdown.curve > 0) {
       const cardCMC = card.manaValue || card.cmc || card.mana_value || 0;
       console.log(`   Curve filling (${cardCMC}): ${card._score_breakdown.curve.toFixed(2)} pts`);
@@ -560,9 +560,9 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
       console.log(`   Semantic boost: ${card._score_breakdown.semantic_boost.toFixed(2)} pts`);
     }
   });
-  
+
   console.log('\n🎯 === END DECK SYNERGY ANALYSIS ===\n');
-  
+
   return sortedCards;
 };
 
@@ -580,13 +580,13 @@ const rerankCardsByDeckSynergy = (cards, deck, formatName, settings = null) => {
  */
 const parseOracleTextPatterns = (oracleText) => {
   if (!oracleText) return {};
-  
+
   const text = oracleText.toLowerCase();
   const patterns = {};
-  
+
   // 1. TRIGGERED ABILITIES
   patterns.triggers = [];
-  
+
   // Enter the battlefield triggers
   const etbMatches = text.match(/when(?:ever)?\s+(?:.*?\s+)?enters(?:\s+the\s+battlefield)?/g) || [];
   etbMatches.forEach(match => {
@@ -596,7 +596,7 @@ const parseOracleTextPatterns = (oracleText) => {
       affects: extractAffectedTypes(match)
     });
   });
-  
+
   // Dies/leaves battlefield triggers  
   const diesMatches = text.match(/when(?:ever)?\s+(?:.*?\s+)?(?:dies|leaves\s+the\s+battlefield)/g) || [];
   diesMatches.forEach(match => {
@@ -606,7 +606,7 @@ const parseOracleTextPatterns = (oracleText) => {
       affects: extractAffectedTypes(match)
     });
   });
-  
+
   // Attack/combat triggers
   const attackMatches = text.match(/when(?:ever)?\s+(?:.*?\s+)?attacks?/g) || [];
   attackMatches.forEach(match => {
@@ -616,7 +616,7 @@ const parseOracleTextPatterns = (oracleText) => {
       affects: extractAffectedTypes(match)
     });
   });
-  
+
   // Spell triggers
   const spellMatches = text.match(/when(?:ever)?\s+you\s+cast\s+(?:a\s+)?(?:.*?\s+)?(?:spell|instant|sorcery)/g) || [];
   spellMatches.forEach(match => {
@@ -626,10 +626,30 @@ const parseOracleTextPatterns = (oracleText) => {
       spellTypes: extractSpellTypes(match)
     });
   });
-  
+
+  // Triggered ability doubling/multiplication
+  const abilityDoublingMatches = text.match(/(?:that\s+ability\s+triggers?\s+an?\s+additional\s+time|triggers?\s+twice|triggers?\s+an?\s+additional\s+time)/g) || [];
+  abilityDoublingMatches.forEach(match => {
+    patterns.triggers.push({
+      type: 'ability_doubling',
+      text: match,
+      affects: extractAffectedTypes(match)
+    });
+  });
+
+  // Conditional triggered abilities (like "if X causes a triggered ability to trigger")
+  const conditionalTriggerMatches = text.match(/if\s+(?:a\s+)?(?:.*?\s+)?(?:entering\s+the\s+battlefield\s+)?causes\s+a\s+triggered\s+ability.*?to\s+trigger/g) || [];
+  conditionalTriggerMatches.forEach(match => {
+    patterns.triggers.push({
+      type: 'conditional_trigger',
+      text: match,
+      affects: extractAffectedTypes(match)
+    });
+  });
+
   // 2. MECHANICAL ENGINES (like Giott's discard/draw)
   patterns.engines = [];
-  
+
   // Discard/Draw engines
   if (text.includes('discard') && text.includes('draw')) {
     const discardDrawPattern = /(?:may\s+)?discard.*?(?:if\s+you\s+do,?\s*)?draw/g;
@@ -643,7 +663,7 @@ const parseOracleTextPatterns = (oracleText) => {
       });
     });
   }
-  
+
   // Sacrifice/benefit engines
   if (text.includes('sacrifice') && (text.includes('draw') || text.includes('gain') || text.includes('deal'))) {
     patterns.engines.push({
@@ -652,13 +672,33 @@ const parseOracleTextPatterns = (oracleText) => {
       benefits: extractSacrificeRewards(text)
     });
   }
-  
+
   // Tap/untap engines
   if (text.includes('tap') || text.includes('untap')) {
     patterns.engines.push({
-      type: 'tap_engine', 
+      type: 'tap_engine',
       text: text,
       generates: extractTapBenefits(text)
+    });
+  }
+
+  // Library manipulation engines
+  if (text.includes('look at the top') || text.includes('reveal the top') || text.includes('top card of your library')) {
+    patterns.engines.push({
+      type: 'library_manipulation',
+      text: text,
+      allows_play: text.includes('may play') || text.includes('you may cast'),
+      continuous: text.includes('any time') || text.includes('at any time')
+    });
+  }
+
+  // Play from library engines
+  if (text.includes('play') && text.includes('from the top of your library') ||
+    text.includes('cast') && text.includes('from the top of your library')) {
+    patterns.engines.push({
+      type: 'play_from_library',
+      text: text,
+      restrictions: extractPlayRestrictions(text)
     });
   }
 
@@ -678,18 +718,40 @@ const parseOracleTextPatterns = (oracleText) => {
   ];
   patterns.cares_about_tokens = caresAboutTokensPatterns.some(re => re.test(text));
 
+  // 2.5. LIBRARY MANIPULATION ABILITIES
+  patterns.libraryManipulation = [];
+
+  // Top of library viewing
+  if (text.includes('look at the top') || text.includes('reveal the top')) {
+    patterns.libraryManipulation.push({
+      type: 'library_viewing',
+      text: text,
+      continuous: text.includes('any time') || text.includes('at any time'),
+      scope: extractLibraryScope(text)
+    });
+  }
+
+  // Play from library abilities
+  if ((text.includes('may play') || text.includes('may cast')) && text.includes('from the top of your library')) {
+    patterns.libraryManipulation.push({
+      type: 'play_from_library',
+      text: text,
+      restrictions: extractPlayRestrictions(text)
+    });
+  }
+
   // 3. TYPE-BASED SYNERGIES
   patterns.typeSynergies = extractTypeSynergies(text);
-  
+
   // 4. KEYWORD ABILITIES (enhanced detection)
   patterns.keywords = extractKeywordAbilities(text);
-  
+
   // 5. RESOURCE MANIPULATION
   patterns.resources = extractResourceEffects(text);
-  
+
   // 6. PROTECTION AND INTERACTION
   patterns.interaction = extractInteractionPatterns(text);
-  
+
   return patterns;
 };
 
@@ -698,19 +760,19 @@ const parseOracleTextPatterns = (oracleText) => {
  */
 const extractAffectedTypes = (text) => {
   const types = [];
-  
+
   // Creature types
   const creatureTypes = [
     'dwarf', 'elf', 'goblin', 'human', 'dragon', 'angel', 'demon', 'wizard', 'warrior',
     'knight', 'soldier', 'beast', 'spirit', 'zombie', 'vampire', 'merfolk', 'faerie'
   ];
-  
+
   creatureTypes.forEach(type => {
     if (text.includes(type)) {
       types.push({ category: 'creature', type: type });
     }
   });
-  
+
   // Card types
   const cardTypes = ['artifact', 'equipment', 'enchantment', 'planeswalker', 'instant', 'sorcery'];
   cardTypes.forEach(type => {
@@ -718,7 +780,7 @@ const extractAffectedTypes = (text) => {
       types.push({ category: 'card_type', type: type });
     }
   });
-  
+
   return types;
 };
 
@@ -739,48 +801,82 @@ const extractSpellTypes = (text) => {
  * Extract creature type synergies from oracle text
  */
 const extractTypeSynergies = (text) => {
+  // Create a map to store unique tribal synergies by type
+  const tribalMap = new Map();
   const synergies = {};
-  
+
   // Common creature types that appear in tribal strategies
   const tribalTypes = [
-    'angel', 'beast', 'demon', 'dragon', 'dwarf', 'elf', 'elemental', 'faerie', 'giant',
+    'angel', 'beast', 'bird', 'demon', 'dragon', 'dwarf', 'elf', 'elemental', 'faerie', 'giant',
     'goblin', 'human', 'knight', 'merfolk', 'soldier', 'spirit', 'vampire', 'warrior', 'wizard', 'zombie'
   ];
-  
-  tribalTypes.forEach(type => {
-    if (text.includes(type)) {
-      // Look for synergy patterns
-      const patterns = [
-        `other ${type}`,
-        `${type} creatures`,
-        `each ${type}`,
-        `target ${type}`,
-        `${type} you control`
-      ];
-      
-      patterns.forEach(pattern => {
-        if (text.includes(pattern)) {
-          if (!synergies.tribal) synergies.tribal = [];
-          synergies.tribal.push({
-            type: type,
-            pattern: pattern,
-            strength: calculateTribalStrength(text, type)
-          });
-        }
+
+  // Process each tribal type only once
+  for (const type of tribalTypes) {
+    // Skip if type isn't in the text
+    if (!text.toLowerCase().includes(type.toLowerCase())) continue;
+
+    // Skip if we've already processed this type
+    if (tribalMap.has(type)) continue;
+
+    // Look for synergy patterns
+    const patterns = [
+      `other ${type}`,
+      `${type} creatures`,
+      `${type} spells`,
+      `cast ${type}`,
+      `each ${type}`,
+      `target ${type}`,
+      `${type} you control`,
+      `${type} entering`,
+      `${type} enters`
+    ];
+
+    const matchedPatterns = patterns.filter(pattern =>
+      text.toLowerCase().includes(pattern.toLowerCase())
+    );
+
+    if (matchedPatterns.length > 0) {
+      // Calculate strength for this type
+      const strength = calculateTribalStrength(text, type);
+
+      // Add to map (ensures uniqueness by type)
+      tribalMap.set(type, {
+        type: type,
+        pattern: matchedPatterns[0],
+        matchCount: matchedPatterns.length,
+        strength: strength
       });
     }
-  });
-  
+  }
+
+  // Convert map to array for the synergies object
+  if (tribalMap.size > 0) {
+    synergies.tribal = Array.from(tribalMap.values());
+  }
+
   // Equipment synergies
   if (text.includes('equipment')) {
     synergies.equipment = extractEquipmentSynergies(text);
   }
-  
+
   // Artifact synergies
   if (text.includes('artifact')) {
     synergies.artifacts = extractArtifactSynergies(text);
   }
-  
+
+  return synergies;
+
+  // Equipment synergies
+  if (text.includes('equipment')) {
+    synergies.equipment = extractEquipmentSynergies(text);
+  }
+
+  // Artifact synergies
+  if (text.includes('artifact')) {
+    synergies.artifacts = extractArtifactSynergies(text);
+  }
+
   return synergies;
 };
 
@@ -788,17 +884,58 @@ const extractTypeSynergies = (text) => {
  * Calculate how strong the tribal synergy is
  */
 const calculateTribalStrength = (text, type) => {
+  // Convert to lowercase for case-insensitive matching
+  const lowerText = text.toLowerCase();
+  const lowerType = type.toLowerCase();
+
+  // Special case for powerful tribal commanders like the Bird example
+  // This ensures cards with this specific combination always get 5/5
+  if (lowerText.includes(`${lowerType} spells`) &&
+    lowerText.includes('from the top of your library') &&
+    (lowerText.includes('triggers an additional time') ||
+      lowerText.includes('causes a triggered ability'))) {
+    return 5; // Immediate 5/5 for this powerful combination
+  }
+
   let strength = 1;
-  
+
   // Multiple mentions increase strength
-  const mentions = (text.match(new RegExp(type, 'g')) || []).length;
-  strength += mentions - 1;
-  
-  // Certain patterns indicate stronger synergy
-  if (text.includes(`${type} creatures you control`)) strength += 2;
-  if (text.includes(`other ${type}s`)) strength += 1;
-  if (text.includes(`each ${type}`)) strength += 1;
-  
+  const mentions = (lowerText.match(new RegExp(lowerType, 'g')) || []).length;
+  strength += Math.min(mentions - 1, 2); // Cap the bonus from just mentions
+
+  // Count the number of powerful tribal synergy patterns
+  let powerfulPatterns = 0;
+
+  // Casting/playing from library - extremely powerful
+  if (lowerText.includes(`${lowerType} spells`) && lowerText.includes('from the top of your library')) {
+    strength += 3;
+    powerfulPatterns++;
+  }
+
+  // Ability doubling related to this type is extremely powerful
+  if ((lowerText.includes(`${lowerType}`) && lowerText.includes('triggers an additional time')) ||
+    (lowerText.includes(`${lowerType}`) && lowerText.includes('causes a triggered ability'))) {
+    strength += 3;
+    powerfulPatterns++;
+  }
+
+  // Standard tribal synergies
+  if (lowerText.includes(`${lowerType} creatures you control`)) {
+    strength += 2;
+    powerfulPatterns++;
+  }
+
+  if (lowerText.includes(`other ${lowerType}s`)) strength += 1;
+  if (lowerText.includes(`each ${lowerType}`)) strength += 1;
+  if (lowerText.includes(`cast ${lowerType}`)) strength += 1;
+  if (lowerText.includes(`${lowerType} entering`) || lowerText.includes(`${lowerType} enters`)) strength += 1;
+
+  // Bonus for having multiple powerful patterns in the same card
+  if (powerfulPatterns >= 2) strength += 2;
+
+  // Cards that combine library manipulation with tribal synergy are top-tier
+  if (lowerText.includes('top card of your library') && lowerText.includes(`${lowerType}`)) strength += 1;
+
   return Math.min(strength, 5); // Cap at 5
 };
 
@@ -807,45 +944,45 @@ const calculateTribalStrength = (text, type) => {
  */
 const extractEquipmentSynergies = (text) => {
   const synergies = [];
-  
+
   // Equipment ETB synergies
-  if ((text.includes('equipment') && text.includes('enters')) || 
-      (text.includes('equipment') && text.includes('enter'))) {
+  if ((text.includes('equipment') && text.includes('enters')) ||
+    (text.includes('equipment') && text.includes('enter'))) {
     synergies.push({ type: 'equipment_etb', strength: 3 });
   }
-  
+
   // Equipment count synergies
   if (text.includes('equipment you control') || text.includes('equipments you control')) {
     synergies.push({ type: 'equipment_count', strength: 3 });
   }
-  
+
   // Equipped creature synergies
   if (text.includes('equipped creature')) {
     synergies.push({ type: 'equipped_creature', strength: 2 });
   }
-  
+
   // Attach/equip synergies
   if (text.includes('attach') || text.includes('equip')) {
     synergies.push({ type: 'attach_synergy', strength: 2 });
   }
-  
+
   // Equipment tutoring/searching
   if ((text.includes('search') || text.includes('tutor')) && text.includes('equipment')) {
     synergies.push({ type: 'equipment_tutor', strength: 4 });
   }
-  
+
   // Equipment cost reduction
-  if ((text.includes('cost') || text.includes('costs')) && 
-      (text.includes('less') || text.includes('reduce')) && 
-      text.includes('equip')) {
+  if ((text.includes('cost') || text.includes('costs')) &&
+    (text.includes('less') || text.includes('reduce')) &&
+    text.includes('equip')) {
     synergies.push({ type: 'equip_cost_reduction', strength: 3 });
   }
-  
+
   // Cards that care about being equipped
   if (text.includes('if') && text.includes('equipped')) {
     synergies.push({ type: 'wants_equipment', strength: 2 });
   }
-  
+
   return synergies;
 };
 
@@ -854,19 +991,19 @@ const extractEquipmentSynergies = (text) => {
  */
 const extractArtifactSynergies = (text) => {
   const synergies = [];
-  
+
   if (text.includes('artifacts you control')) {
     synergies.push({ type: 'artifact_count', strength: 2 });
   }
-  
+
   if (text.includes('artifact enters')) {
     synergies.push({ type: 'artifact_etb', strength: 2 });
   }
-  
+
   if (text.includes('metalcraft') || text.includes('three or more artifacts')) {
     synergies.push({ type: 'metalcraft', strength: 3 });
   }
-  
+
   return synergies;
 };
 
@@ -875,7 +1012,7 @@ const extractArtifactSynergies = (text) => {
  */
 const extractKeywordAbilities = (text) => {
   const keywords = [];
-  
+
   const keywordPatterns = {
     'flying': /flying/g,
     'trample': /trample/g,
@@ -891,7 +1028,7 @@ const extractKeywordAbilities = (text) => {
     'indestructible': /indestructible/g,
     'flash': /flash/g
   };
-  
+
   Object.entries(keywordPatterns).forEach(([keyword, pattern]) => {
     const matches = text.match(pattern);
     if (matches) {
@@ -902,7 +1039,7 @@ const extractKeywordAbilities = (text) => {
       });
     }
   });
-  
+
   return keywords;
 };
 
@@ -911,30 +1048,30 @@ const extractKeywordAbilities = (text) => {
  */
 const extractResourceEffects = (text) => {
   const effects = {};
-  
+
   // Card advantage
   if (text.includes('draw')) {
     effects.cardDraw = (text.match(/draw.*?card/g) || []).length;
   }
-  
+
   if (text.includes('discard')) {
     effects.discard = (text.match(/discard.*?card/g) || []).length;
   }
-  
+
   // Mana effects
   if (text.includes('add') && (text.includes('mana') || text.match(/\{[wubrg]\}/))) {
     effects.manaGeneration = true;
   }
-  
+
   // Life effects
   if (text.includes('gain') && text.includes('life')) {
     effects.lifegain = (text.match(/gain.*?life/g) || []).length;
   }
-  
+
   if (text.includes('lose') && text.includes('life')) {
     effects.lifeloss = (text.match(/lose.*?life/g) || []).length;
   }
-  
+
   return effects;
 };
 
@@ -943,26 +1080,26 @@ const extractResourceEffects = (text) => {
  */
 const extractInteractionPatterns = (text) => {
   const patterns = {};
-  
+
   // Removal
   if (text.includes('destroy')) {
     patterns.destruction = (text.match(/destroy.*?(?:target|creature|artifact|enchantment)/g) || []).length;
   }
-  
+
   if (text.includes('exile')) {
     patterns.exile = (text.match(/exile.*?(?:target|creature|card)/g) || []).length;
   }
-  
+
   // Counterspells
   if (text.includes('counter') && text.includes('spell')) {
     patterns.counterspells = true;
   }
-  
+
   // Bounce
   if (text.includes('return') && (text.includes('hand') || text.includes('owner'))) {
     patterns.bounce = true;
   }
-  
+
   return patterns;
 };
 
@@ -987,6 +1124,46 @@ const extractTapBenefits = (text) => {
   return benefits;
 };
 
+const extractPlayRestrictions = (text) => {
+  const restrictions = [];
+
+  // Look for specific card type restrictions
+  if (text.includes('lands') || text.includes('land')) restrictions.push('lands');
+  if (text.includes('creatures') || text.includes('creature')) restrictions.push('creatures');
+  if (text.includes('spells') || text.includes('spell')) restrictions.push('spells');
+  if (text.includes('instants') || text.includes('instant')) restrictions.push('instants');
+  if (text.includes('sorceries') || text.includes('sorcery')) restrictions.push('sorceries');
+  if (text.includes('artifacts') || text.includes('artifact')) restrictions.push('artifacts');
+  if (text.includes('enchantments') || text.includes('enchantment')) restrictions.push('enchantments');
+
+  // Look for tribal restrictions (like "Bird spells")
+  const tribalTypes = ['angel', 'beast', 'bird', 'demon', 'dragon', 'dwarf', 'elf', 'elemental', 'faerie', 'giant',
+    'goblin', 'human', 'knight', 'merfolk', 'soldier', 'spirit', 'vampire', 'warrior', 'wizard', 'zombie'];
+
+  tribalTypes.forEach(type => {
+    if (text.includes(`${type} spells`) || text.includes(`${type} creatures`)) {
+      restrictions.push(`${type}_tribal`);
+    }
+  });
+
+  return restrictions;
+};
+
+const extractLibraryScope = (text) => {
+  const scope = [];
+
+  // How many cards can be looked at
+  if (text.includes('top card')) scope.push('single_card');
+  if (text.includes('top two') || text.includes('top 2')) scope.push('two_cards');
+  if (text.includes('top three') || text.includes('top 3')) scope.push('three_cards');
+
+  // Timing restrictions
+  if (text.includes('any time')) scope.push('any_time');
+  if (text.includes('during your turn')) scope.push('your_turn_only');
+
+  return scope;
+};
+
 /**
  * Helper function to calculate keyword-based similarity when semantic search isn't available
  * Now enhanced with advanced oracle text pattern matching
@@ -997,15 +1174,15 @@ const extractTapBenefits = (text) => {
  */
 const calculateKeywordSimilarity = (card, query, commanderPatterns = null) => {
   if (!card || !query) return 0;
-  
+
   const cardText = `${card.name || ''} ${card.type_line || card.type || ''} ${card.oracle_text || card.text || ''} ${card.mana_cost || ''}`.toLowerCase();
   const queryLower = query.toLowerCase();
-  
+
   let score = 0;
-  
+
   // 🔧 NEW: Advanced oracle text pattern analysis
   const cardPatterns = parseOracleTextPatterns(card.oracle_text || card.text || '');
-  
+
   // 1. TRADITIONAL THEME MATCHING (enhanced)
   const themes = {
     'token': /token|populate|convoke|create.*creature/g,
@@ -1023,7 +1200,7 @@ const calculateKeywordSimilarity = (card, query, commanderPatterns = null) => {
     'discard': /discard.*draw|draw.*discard/g,
     'sacrifice': /sacrifice.*gain|sacrifice.*draw|sacrifice.*deal/g
   };
-  
+
   // Score based on theme presence (enhanced scoring)
   Object.entries(themes).forEach(([theme, pattern]) => {
     if (queryLower.includes(theme)) {
@@ -1033,27 +1210,27 @@ const calculateKeywordSimilarity = (card, query, commanderPatterns = null) => {
       }
     }
   });
-  
+
   // 2. NEW: MECHANICAL PATTERN SYNERGY SCORING
-  
+
   // Equipment synergy detection
   if (queryLower.includes('equipment')) {
     if (cardPatterns.typeSynergies?.equipment?.length > 0) {
       score += 10; // Strong equipment synergy bonus
     }
   }
-  
+
   // Special bonus for equipment cards when artifacts are mentioned (reduced for auto-build)
   if (queryLower.includes('artifacts') && cardText.includes('equipment')) {
     score += 8; // Reduced artifact-equipment synergy bonus (was 15)
   }
-  
+
   // Enter-the-battlefield trigger synergy
   if (queryLower.includes('enters') || queryLower.includes('battlefield')) {
     const etbTriggers = cardPatterns.triggers?.filter(t => t.type === 'enters_battlefield') || [];
     score += etbTriggers.length * 20; // Strong ETB synergy
   }
-  
+
   // Tribal synergy matching
   if (cardPatterns.typeSynergies?.tribal) {
     cardPatterns.typeSynergies.tribal.forEach(tribal => {
@@ -1062,31 +1239,31 @@ const calculateKeywordSimilarity = (card, query, commanderPatterns = null) => {
       }
     });
   }
-  
+
   // Discard/Draw engine synergy
   if (queryLower.includes('discard') && queryLower.includes('draw')) {
     const discardDrawEngines = cardPatterns.engines?.filter(e => e.type === 'discard_draw') || [];
     score += discardDrawEngines.length * 30; // Very strong engine synergy
   }
-  
+
   // Resource engine matching
   if (cardPatterns.resources?.cardDraw && queryLower.includes('draw')) {
     score += cardPatterns.resources.cardDraw * 10;
   }
-  
+
   // 3. CREATURE TYPE SPECIFIC MATCHING
   const creatureTypes = ['dwarf', 'elf', 'goblin', 'human', 'dragon', 'angel', 'vampire', 'zombie'];
   creatureTypes.forEach(type => {
     if (queryLower.includes(type) && cardText.includes(type)) {
       score += 18; // Strong tribal match
-      
+
       // Bonus for tribal support patterns
       if (cardText.includes(`other ${type}`) || cardText.includes(`${type} creatures`)) {
         score += 12; // Tribal support bonus
       }
     }
   });
-  
+
   // 4. ENHANCED CARD TYPE RELEVANCE
   const cardTypes = ['creature', 'instant', 'sorcery', 'artifact', 'enchantment', 'planeswalker', 'land', 'equipment'];
   cardTypes.forEach(type => {
@@ -1094,7 +1271,7 @@ const calculateKeywordSimilarity = (card, query, commanderPatterns = null) => {
       score += 8;
     }
   });
-  
+
   // 5. MANA CURVE FITTING (enhanced)
   const curveMatches = queryLower.match(/needs more (\d+)/);
   if (curveMatches) {
@@ -1104,7 +1281,7 @@ const calculateKeywordSimilarity = (card, query, commanderPatterns = null) => {
       score += 20; // Increased curve filling bonus
     }
   }
-  
+
   // 6. ENHANCED KEYWORD ABILITIES
   const keywords = ['flying', 'vigilance', 'lifelink', 'first strike', 'double strike', 'trample', 'haste', 'deathtouch', 'menace', 'reach', 'hexproof'];
   keywords.forEach(keyword => {
@@ -1112,23 +1289,23 @@ const calculateKeywordSimilarity = (card, query, commanderPatterns = null) => {
       score += 12; // Increased keyword bonus
     }
   });
-  
+
   // 7. NEW: INTERACTION PATTERN MATCHING
   if (queryLower.includes('removal') || queryLower.includes('destroy')) {
     if (cardPatterns.interaction?.destruction > 0 || cardPatterns.interaction?.exile > 0) {
       score += 15; // Removal synergy
     }
   }
-  
+
   if (queryLower.includes('counter') && cardPatterns.interaction?.counterspells) {
     score += 15; // Counterspell synergy
   }
-  
+
   // 8. NEW: MECHANICAL ENGINE SCORING
   if (cardPatterns.engines?.length > 0) {
     // Bonus for cards that are engines themselves
     score += cardPatterns.engines.length * 10;
-    
+
     // Extra bonus for engines that match query patterns
     cardPatterns.engines.forEach(engine => {
       if (engine.type === 'discard_draw' && (queryLower.includes('discard') || queryLower.includes('draw'))) {
@@ -1207,32 +1384,32 @@ const calculateSmartHybridScore = (semanticScore, keywordScore, card, query) => 
   // Calculate confidence in each scoring method
   const semanticConfidence = semanticScore > 0.05 ? Math.min(semanticScore * 2, 1) : 0;
   const keywordConfidence = keywordScore > 0.1 ? Math.min(keywordScore * 1.5, 1) : 0;
-  
+
   // If we have high confidence in semantic, weight it heavily
   if (semanticConfidence > 0.7) {
     return (semanticScore * 0.8) + (keywordScore * 0.2);
   }
-  
+
   // If semantic is weak but keyword is strong, favor keyword
   if (semanticConfidence < 0.3 && keywordConfidence > 0.6) {
     return (semanticScore * 0.3) + (keywordScore * 0.7);
   }
-  
+
   // For cards with specific keywords mentioned in query, boost keyword scoring
   const queryLower = query.toLowerCase();
   const cardText = (card.oracle_text || card.text || '').toLowerCase();
   let keywordRelevanceBoost = 0;
-  
+
   const relevantKeywords = ['flying', 'trample', 'haste', 'vigilance', 'lifelink', 'deathtouch'];
   relevantKeywords.forEach(keyword => {
     if (queryLower.includes(keyword) && cardText.includes(keyword)) {
       keywordRelevanceBoost += 0.1;
     }
   });
-  
+
   // Apply keyword relevance boost
   const adjustedKeywordScore = keywordScore + keywordRelevanceBoost;
-  
+
   // Default balanced approach with slight semantic preference
   return (semanticScore * 0.6) + (adjustedKeywordScore * 0.4);
 };
@@ -1244,13 +1421,13 @@ const calculateSmartHybridScore = (semanticScore, keywordScore, card, query) => 
  */
 const normalizeStrategyScores = (cards) => {
   if (!cards || cards.length === 0) return cards;
-  
+
   // Get all strategy names from the first card
   const firstCard = cards[0];
   if (!firstCard.strategy_scores) return cards;
-  
+
   const strategyNames = Object.keys(firstCard.strategy_scores);
-  
+
   // Calculate min/max for each strategy
   const strategyStats = {};
   strategyNames.forEach(strategy => {
@@ -1258,25 +1435,25 @@ const normalizeStrategyScores = (cards) => {
     const min = Math.min(...scores);
     const max = Math.max(...scores);
     const range = max - min;
-    
+
     strategyStats[strategy] = { min, max, range };
   });
-  
+
   // Normalize each card's strategy scores to 0-1 range
   return cards.map(card => {
     const normalizedStrategyScores = {};
-    
+
     strategyNames.forEach(strategy => {
       const originalScore = card.strategy_scores[strategy] || 0;
       const stats = strategyStats[strategy];
-      
+
       // Normalize to 0-1 range
-      const normalizedScore = stats.range > 0 ? 
+      const normalizedScore = stats.range > 0 ?
         (originalScore - stats.min) / stats.range : 0;
-      
+
       normalizedStrategyScores[strategy] = normalizedScore;
     });
-    
+
     return {
       ...card,
       strategy_scores_normalized: normalizedStrategyScores
@@ -1291,45 +1468,45 @@ const normalizeStrategyScores = (cards) => {
  */
 const extractDeckInsights = (query) => {
   if (!query) return null;
-  
+
   const insights = [];
-  
+
   // Extract deck archetype
   const archetypeMatch = query.match(/Suggest cards for a \w+ (\w+) deck/);
   if (archetypeMatch) {
     insights.push(`Deck archetype: ${archetypeMatch[1]}`);
   }
-  
+
   // Extract key themes
   const themesMatch = query.match(/Key themes include ([^.]+)/);
   if (themesMatch) {
     insights.push(`Key themes: ${themesMatch[1]}`);
   }
-  
+
   // Extract tribal synergies
   const tribalMatch = query.match(/focuses on ([^.]+) tribal synergies/);
   if (tribalMatch) {
     insights.push(`Tribal synergies: ${tribalMatch[1]}`);
   }
-  
+
   // Extract important abilities
   const abilitiesMatch = query.match(/Important abilities include ([^.]+)/);
   if (abilitiesMatch) {
     insights.push(`Key abilities: ${abilitiesMatch[1]}`);
   }
-  
+
   // Extract win conditions
   const winConditionsMatch = query.match(/Win conditions focus on ([^.]+)/);
   if (winConditionsMatch) {
     insights.push(`Win conditions: ${winConditionsMatch[1]}`);
   }
-  
+
   // Extract mana curve needs
   const curveMatch = query.match(/needs more ([^.]+) mana cost options/);
   if (curveMatch) {
     insights.push(`Mana curve needs: ${curveMatch[1]} cost cards`);
   }
-  
+
   return insights.length > 0 ? insights.join('. ') : null;
 };
 
@@ -1435,16 +1612,17 @@ const analyzeDeckForQuery = (deck, formatName, settings = null) => {
   const commanderNames = (deck.commanders || []).map(c => c.name).join(' & ');
   const commanderKeywords = (deck.commanders || []).map(c => c.keywords).join(' & ');
   const commanderSubtypes = (deck.commanders || []).map(c => c.subtype).join(' & ');
+  const commanderOracleText = (deck.commanders || []).map(c => c.oracle_text).join(' & ');
   // --- NEW: Focused, non-redundant query template ---
   let query = '';
-//   if (topTribes) {
-//     query = `${colorNames.join('-')} tribal commander deck. ${topTribes[0]} tribal. ${topThemes.join(' & ')}. ${topKeywords.join(' & ')}.`;
-//   } else if (topThemes.includes('combo')) {
-//     query = `${colorNames.join('-')} combo commander deck. Combo. ${topThemes.filter(t => t !== 'combo').join(' & ')}. ${topKeywords.join(' & ')}.`;
-//   } else {
-//     query = `${colorNames.join('-')} commander deck. ${topThemes.join(' & ')}. ${topKeywords.join(' & ')}.`;
-//   }
-query = `${commanderNames} ${commanderKeywords} ${commanderSubtypes}`;
+  //   if (topTribes) {
+  //     query = `${colorNames.join('-')} tribal commander deck. ${topTribes[0]} tribal. ${topThemes.join(' & ')}. ${topKeywords.join(' & ')}.`;
+  //   } else if (topThemes.includes('combo')) {
+  //     query = `${colorNames.join('-')} combo commander deck. Combo. ${topThemes.filter(t => t !== 'combo').join(' & ')}. ${topKeywords.join(' & ')}.`;
+  //   } else {
+  //     query = `${colorNames.join('-')} commander deck. ${topThemes.join(' & ')}. ${topKeywords.join(' & ')}.`;
+  //   }
+  query = `${commanderNames} ${commanderKeywords} ${commanderSubtypes} ${commanderOracleText}`;
   return query.trim();
 };
 
@@ -1453,19 +1631,19 @@ query = `${commanderNames} ${commanderKeywords} ${commanderSubtypes}`;
  */
 const generateFocusedQuery = (formatName, archetype, topThemes, topTribes, colors, commanders) => {
   // Start with the most important theme or tribal synergy
-  const primaryFocus = topTribes.length > 0 ? 
-    `${topTribes[0].tribe} tribal` : 
+  const primaryFocus = topTribes.length > 0 ?
+    `${topTribes[0].tribe} tribal` :
     topThemes.length > 0 ? topThemes[0].theme : archetype;
-  
+
   let query = `${primaryFocus} ${formatName}`;
-  
+
   // Add one secondary theme if available
   if (topThemes.length > 1 && topTribes.length === 0) {
     query += ` ${topThemes[1].theme}`;
   } else if (topThemes.length > 0 && topTribes.length > 0) {
     query += ` ${topThemes[0].theme}`;
   }
-  
+
   return query;
 };
 
@@ -1474,18 +1652,18 @@ const generateFocusedQuery = (formatName, archetype, topThemes, topTribes, color
  */
 const generateBalancedQuery = (formatName, archetype, topThemes, topTribes, colors, commanders) => {
   let query = `${archetype} ${formatName} deck`;
-  
+
   // Add tribal focus if significant
   if (topTribes.length > 0) {
     query += ` with ${topTribes[0].tribe} tribal synergy`;
   }
-  
+
   // Add top 2 themes
   if (topThemes.length > 0) {
     const themes = topThemes.slice(0, 2).map(t => t.theme);
     query += ` focusing on ${themes.join(' and ')}`;
   }
-  
+
   return query;
 };
 
@@ -1503,7 +1681,7 @@ const generateComprehensiveQuery = (formatName, archetype, topThemes, topTribes,
     .slice(0, 3)
     .map(card => card.name);
   let query = `Suggest cards for a ${formatName} ${archetype} deck`;
-  
+
   // Add commander context
   if (formatName === 'commander' && commanders && commanders.length > 0) {
     const commanderNames = commanders.map(c => c.name).join(' and ');
@@ -1564,7 +1742,7 @@ const generateComprehensiveQuery = (formatName, archetype, topThemes, topTribes,
   }
 
   query += '. Suggest cards that synergize well with this strategy and fill any gaps in the deck.';
-  
+
   return query;
 };
 
@@ -1576,18 +1754,18 @@ const generateComprehensiveQuery = (formatName, archetype, topThemes, topTribes,
  */
 const calculateMechanicalSynergy = (card1Patterns, card2Patterns) => {
   let synergy = 0;
-  
+
   if (!card1Patterns || !card2Patterns) return 0;
-  
+
   // 1. TRIGGER SYNERGIES
   // ETB triggers with token/creature generation
   const card1ETB = card1Patterns.triggers?.filter(t => t.type === 'enters_battlefield') || [];
   const card2ETB = card2Patterns.triggers?.filter(t => t.type === 'enters_battlefield') || [];
-  
+
   if (card1ETB.length > 0 && card2ETB.length > 0) {
     synergy += 15; // Both have ETB triggers - good synergy
   }
-  
+
   // 2. TYPE-BASED SYNERGIES
   // Tribal synergies
   if (card1Patterns.typeSynergies?.tribal && card2Patterns.typeSynergies?.tribal) {
@@ -1599,17 +1777,17 @@ const calculateMechanicalSynergy = (card1Patterns, card2Patterns) => {
       });
     });
   }
-  
+
   // Equipment synergies
   if (card1Patterns.typeSynergies?.equipment && card2Patterns.typeSynergies?.equipment) {
     synergy += 10; // Both care about equipment
   }
-  
+
   // Artifact synergies
   if (card1Patterns.typeSynergies?.artifacts && card2Patterns.typeSynergies?.artifacts) {
     synergy += 8; // Both care about artifacts
   }
-  
+
   // 3. ENGINE SYNERGIES
   // Matching engine types
   if (card1Patterns.engines && card2Patterns.engines) {
@@ -1618,7 +1796,7 @@ const calculateMechanicalSynergy = (card1Patterns, card2Patterns) => {
         if (engine1.type === engine2.type) {
           synergy += 20; // Matching engine types
         }
-        
+
         // Complementary engines (e.g., discard enabler + discard payoff)
         if (engine1.type === 'discard_draw' && engine2.type === 'sacrifice_engine') {
           synergy += 10; // Resource engines work well together
@@ -1626,7 +1804,7 @@ const calculateMechanicalSynergy = (card1Patterns, card2Patterns) => {
       });
     });
   }
-  
+
   // 4. RESOURCE SYNERGIES
   // Card draw engines with discard outlets
   if (card1Patterns.resources?.cardDraw && card2Patterns.resources?.discard) {
@@ -1635,7 +1813,7 @@ const calculateMechanicalSynergy = (card1Patterns, card2Patterns) => {
   if (card1Patterns.resources?.discard && card2Patterns.resources?.cardDraw) {
     synergy += 12;
   }
-  
+
   // 5. KEYWORD SYNERGIES
   if (card1Patterns.keywords && card2Patterns.keywords) {
     const keywordSynergies = {
@@ -1645,13 +1823,13 @@ const calculateMechanicalSynergy = (card1Patterns, card2Patterns) => {
       'first_strike': ['deathtouch'], // First strike + deathtouch combo
       'double_strike': ['deathtouch', 'lifelink'] // Double strike + damage multipliers
     };
-    
+
     card1Patterns.keywords.forEach(keyword1 => {
       card2Patterns.keywords.forEach(keyword2 => {
         if (keyword1.keyword === keyword2.keyword) {
           synergy += 5; // Same keyword
         }
-        
+
         const synergisticKeywords = keywordSynergies[keyword1.keyword] || [];
         if (synergisticKeywords.includes(keyword2.keyword)) {
           synergy += 8; // Synergistic keyword combination
@@ -1671,20 +1849,20 @@ const calculateMechanicalSynergy = (card1Patterns, card2Patterns) => {
  */
 const enhanceCardsWithMechanicalSynergy = (candidateCards, deck) => {
   if (!candidateCards || candidateCards.length === 0 || !deck) return candidateCards;
-  
+
   // Parse patterns for all deck cards
   const allDeckCards = [...(deck.mainboard || []), ...(deck.commanders || [])];
   const deckPatterns = allDeckCards.map(card => ({
     card,
     patterns: parseOracleTextPatterns(card.oracle_text || card.text || '')
   }));
-  
+
   return candidateCards.map(candidate => {
     const candidatePatterns = parseOracleTextPatterns(candidate.oracle_text || candidate.text || '');
-    
+
     let totalSynergy = 0;
     let synergyCount = 0;
-    
+
     // Calculate synergy with each deck card
     deckPatterns.forEach(deckCardData => {
       const synergy = calculateMechanicalSynergy(candidatePatterns, deckCardData.patterns);
@@ -1693,10 +1871,10 @@ const enhanceCardsWithMechanicalSynergy = (candidateCards, deck) => {
         synergyCount++;
       }
     });
-    
+
     // Calculate average synergy score
     const mechanicalSynergyScore = synergyCount > 0 ? totalSynergy / synergyCount : 0;
-    
+
     return {
       ...candidate,
       mechanical_synergy_score: mechanicalSynergyScore,
@@ -1724,14 +1902,14 @@ const getCardRecommendations = async (deck, formatName = 'commander', options = 
 
   try {
     console.log('\n🎯 === STARTING CARD RECOMMENDATION PROCESS ===');
-    
+
     // Step 1: Generate search query based on deck analysis
     const searchQuery = analyzeDeckForQuery(deck, formatName, settings);
     console.log(`🔍 Generated search query: "${searchQuery}"`);
-    
+
     // Step 2: Get semantic search service
     const semanticSearchService = require('./semanticSearch.cjs');
-    
+
     // Step 3: Perform semantic search to get candidate cards
     console.log('🔄 Performing semantic search...');
     const searchOptions = {
@@ -1739,26 +1917,26 @@ const getCardRecommendations = async (deck, formatName = 'commander', options = 
       useSemanticSearch,
       useHybridSearch
     };
-    
+
     const candidateCards = await semanticSearchService.search(searchQuery, searchOptions);
     console.log(`📋 Found ${candidateCards.length} candidate cards from search`);
-    
+
     if (candidateCards.length === 0) {
       console.log('⚠️ No candidate cards found from search');
       return [];
     }
-    
+
     // Step 4: Filter out cards already in the deck
     const deckCardNames = new Set([
       ...deck.mainboard.map(card => card.name.toLowerCase()),
       ...(deck.commanders || []).map(card => card.name.toLowerCase())
     ]);
-    
-    const filteredCandidates = candidateCards.filter(card => 
+
+    const filteredCandidates = candidateCards.filter(card =>
       !deckCardNames.has(card.name.toLowerCase())
     );
     console.log(`🔽 Filtered to ${filteredCandidates.length} cards not already in deck`);
-    
+
     // Step 5: Filter by color identity if commanders exist
     let colorFilteredCandidates = filteredCandidates;
     if (deck.commanders && deck.commanders.length > 0) {
@@ -1768,26 +1946,26 @@ const getCardRecommendations = async (deck, formatName = 'commander', options = 
           commanderColorIdentity.add(color);
         });
       });
-      
+
       if (commanderColorIdentity.size > 0) {
-        colorFilteredCandidates = filteredCandidates.filter(card => 
+        colorFilteredCandidates = filteredCandidates.filter(card =>
           isCardInColorIdentity(card, commanderColorIdentity)
         );
         console.log(`🎨 Color identity filtered to ${colorFilteredCandidates.length} cards`);
       }
     }
-    
+
     // Step 6: Parse commander patterns for enhanced synergy scoring
-    const commanderPatterns = (deck.commanders || []).map(commander => 
+    const commanderPatterns = (deck.commanders || []).map(commander =>
       parseOracleTextPatterns(commander.oracle_text || commander.text || '')
     );
-    
+
     // Step 7: Enhance cards with keyword similarity scores
     const enhancedCandidates = colorFilteredCandidates.map(card => {
       const keywordScore = calculateKeywordSimilarity(card, searchQuery, commanderPatterns);
       const semanticScore = card.hybrid_score || 0;
       const combinedScore = calculateSmartHybridScore(semanticScore, keywordScore, card, searchQuery);
-      
+
       return {
         ...card,
         semantic_score: semanticScore,
@@ -1796,22 +1974,22 @@ const getCardRecommendations = async (deck, formatName = 'commander', options = 
         score_source: 'combined'
       };
     });
-    
+
     // Step 8: Add mechanical synergy scores
     const mechanicallyEnhancedCards = enhanceCardsWithMechanicalSynergy(enhancedCandidates, deck);
-    
+
     // Step 9: Apply deck synergy scoring (this is your main scoring algorithm)
     console.log('🧮 Applying deck synergy scoring...');
     const scoredCards = rerankCardsByDeckSynergy(mechanicallyEnhancedCards, deck, formatName, settings);
-    
+
     // Step 10: Return top recommendations
     const finalRecommendations = scoredCards.slice(0, limit);
-    
+
     console.log(`✅ Returning ${finalRecommendations.length} final recommendations`);
     console.log('🎯 === CARD RECOMMENDATION PROCESS COMPLETE ===\n');
-    
+
     return finalRecommendations;
-    
+
   } catch (error) {
     console.error('❌ Error in getCardRecommendations:', error);
     console.error('Stack trace:', error.stack);
@@ -1847,7 +2025,7 @@ const testRecommendationSystem = async (testDeck = null) => {
         color_identity: []
       },
       {
-        name: "Lightning Bolt", 
+        name: "Lightning Bolt",
         type_line: "Instant",
         oracle_text: "Lightning Bolt deals 3 damage to any target.",
         mana_value: 1,
@@ -1866,14 +2044,14 @@ const testRecommendationSystem = async (testDeck = null) => {
       }
     ]
   };
-  
+
   const deck = testDeck || defaultTestDeck;
   console.log('🧪 Testing recommendation system...');
-  
+
   try {
     const recommendations = await getCardRecommendations(deck, 'commander', { limit: 10 });
     console.log(`✅ Test completed. Got ${recommendations.length} recommendations.`);
-    
+
     if (recommendations.length > 0) {
       console.log('\n🏆 Top 3 recommendations:');
       recommendations.slice(0, 3).forEach((card, i) => {
@@ -1882,7 +2060,7 @@ const testRecommendationSystem = async (testDeck = null) => {
         console.log(`   Synergy breakdown: Semantic=${card.semantic_score?.toFixed(3)}, Keyword=${card.keyword_score?.toFixed(3)}`);
       });
     }
-    
+
     return recommendations;
   } catch (error) {
     console.error('❌ Test failed:', error);
@@ -1890,13 +2068,13 @@ const testRecommendationSystem = async (testDeck = null) => {
   }
 };
 
-module.exports = { 
-  isCardInColorIdentity, 
-  rerankCardsByDeckSynergy, 
-  calculateKeywordSimilarity, 
+module.exports = {
+  isCardInColorIdentity,
+  rerankCardsByDeckSynergy,
+  calculateKeywordSimilarity,
   calculateSmartHybridScore,
   normalizeStrategyScores,
-  extractDeckInsights, 
+  extractDeckInsights,
   analyzeDeckForQuery,
   // 🔧 NEW: Export advanced pattern analysis functions
   parseOracleTextPatterns,

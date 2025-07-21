@@ -68,30 +68,6 @@ class SearchWorkerService {
         .map(f => f.name);
       console.log('[Worker] Detected vector columns:', vectorColumns);
 
-      // // Create FTS index for oracle_text
-      // try {
-      //   await this.table.createIndex('oracle_text', { replace: false });
-      //   console.log('[Worker] FTS index created/updated for oracle_text');
-      // } catch (ftsError) {
-      //   console.warn('[Worker] Could not create FTS index:', ftsError.message);
-      // }
-      
-      // // Ensure vector index exists for keyword_vector - handle gracefully if already exists
-      // try {
-      //   // Try to create index with replace: false to avoid overwriting existing
-      //   await this.table.createIndex('keyword_vector', { 
-      //     metric: 'cosine', 
-      //     replace: false,
-      //     vector_column_name: 'keyword_vector' // Explicitly specify which column
-      //   });
-      //   console.log('[Worker] Vector index created for keyword_vector');
-      // } catch (vectorErr) {
-      //   if (vectorErr.message.includes('already exists')) {
-      //     console.log('[Worker] Vector index already exists for keyword_vector, using existing index');
-      //   } else {
-      //     console.warn('[Worker] Could not create vector index for keyword_vector:', vectorErr.message);
-      //   }
-      // }
       
       this.isInitialized = true;
       console.log(`[Worker] Semantic Search Service Initialized. Connected to table: 'magic_cards' with ${rowCount} rows`);

@@ -209,22 +209,48 @@ class BulkDataService {
     const { search = '', limit = 1000, offset = 0 } = options;
 
     let query = `
-      SELECT c.*, 
-             ci.scryfallId,
-             cl.alchemy, cl.brawl, cl.commander, cl.duel, cl.explorer, cl.future, cl.gladiator,
-             cl.historic, cl.legacy, cl.modern, cl.oathbreaker, cl.oldschool, cl.pauper,
-             cl.paupercommander, cl.penny, cl.pioneer, cl.predh, cl.premodern, cl.standard,
-             cl.standardbrawl, cl.timeless, cl.vintage,
-             s.name as setName,
-             cpu.cardKingdom, cpu.cardmarket, cpu.tcgplayer,
-             crl.gatherer, crl.edhrec
-      FROM cards c
-      LEFT JOIN cardIdentifiers ci ON c.uuid = ci.uuid
-      LEFT JOIN cardLegalities cl ON c.uuid = cl.uuid
-      LEFT JOIN sets s ON c.setCode = s.code
-      LEFT JOIN cardPurchaseUrls cpu ON c.uuid = cpu.uuid
-      LEFT JOIN cardRelatedLinks crl ON c.uuid = crl.uuid
-      WHERE c.collected >= 1
+        SELECT
+          c.*,
+          ci.scryfallId,
+          cl.alchemy,    cl.brawl,       cl.commander,     cl.duel,
+          cl.explorer,   cl.future,      cl.gladiator,     cl.historic,
+          cl.legacy,     cl.modern,      cl.oathbreaker,   cl.oldschool,
+          cl.pauper,     cl.paupercommander, cl.penny,     cl.pioneer,
+          cl.predh,      cl.premodern,   cl.standard,      cl.standardbrawl,
+          cl.timeless,   cl.vintage,
+          s.name       AS setName,
+          cpu.cardKingdom,
+          cpu.cardmarket,
+          cpu.tcgplayer,
+          crl.gatherer,
+          crl.edhrec,
+
+          /* JSON array of all price records for this card */
+          (
+            SELECT json_group_array(
+              json_object(
+                'vendor',           dp2.vendor,
+                'price',            dp2.price,
+                'transaction_type', dp2.transaction_type,
+                'card_type',        dp2.card_type,
+                'date',             dp2.date,
+                'currency',         dp2.currency
+              )
+            )
+            FROM daily_prices AS dp2
+            WHERE dp2.uuid = c.uuid
+          ) AS prices_json
+
+        FROM cards AS c
+        LEFT JOIN cardIdentifiers   AS ci  ON ci.uuid       = c.uuid
+        LEFT JOIN cardLegalities    AS cl  ON cl.uuid       = c.uuid
+        LEFT JOIN sets              AS s   ON s.code        = c.setCode
+        LEFT JOIN cardPurchaseUrls  AS cpu ON cpu.uuid      = c.uuid
+        LEFT JOIN cardRelatedLinks  AS crl ON crl.uuid      = c.uuid
+
+        WHERE c.collected >= 1
+        
+
     `;
     const params = [];
 
@@ -1163,6 +1189,63 @@ class BulkDataService {
     // Handle double-faced cards: construct card_faces array if this is a transform/modal_dfc card
     const card_faces = await this.getCardFaces(row);
 
+    //
+    // ── NEW: parse the aggregated prices_json into foil and regular prices ───────
+    //
+    let prices = { usd: 0, usd_foil: 0, usd_regular: 0 };
+    if (row.prices_json) {
+      try {
+        // 1) parse the JSON array
+        const priceArray = JSON.parse(row.prices_json);
+
+        // 2) sort descending by date so the first USD is the newest
+        priceArray.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+        // 3) find USD entries for different card types
+        const validVendors = ['tcgplayer', 'cardmarket', 'cardkingdom'];
+        
+        // Find foil price
+        const foilEntry = priceArray.find(
+          p =>
+            p.currency === 'USD' &&
+            validVendors.includes(p.vendor.toLowerCase()) &&
+            p.card_type === 'foil'
+        );
+        if (foilEntry && typeof foilEntry.price === 'number') {
+          prices.usd_foil = foilEntry.price;
+        }
+
+        // Find regular (non-foil) price
+        const regularEntry = priceArray.find(
+          p =>
+            p.currency === 'USD' &&
+            validVendors.includes(p.vendor.toLowerCase()) &&
+            p.card_type === 'normal'
+        );
+        if (regularEntry && typeof regularEntry.price === 'number') {
+          prices.usd_regular = regularEntry.price;
+        }
+
+        // Set the main USD price to the regular price (for backwards compatibility)
+        if (prices.usd_regular > 0) {
+          prices.usd = prices.usd_regular;
+        } else if (prices.usd_foil > 0) {
+          prices.usd = prices.usd_foil;
+        }
+      } catch (e) {
+        console.warn(`Failed parsing prices_json for ${row.uuid}:`, e);
+      }
+    }
+
+    const formattedPrices = {
+      usd: prices.usd.toFixed(2) || 0,
+      usd_foil: prices.usd_foil.toFixed(2) || 0,
+      usd_regular: prices.usd_regular.toFixed(2) || 0
+    };
+    //
+    // ── END NEW PRICING LOGIC ───────────────────────────────────────────────────
+    //
+
     return {
       id: row.uuid || row.id || `${row.setCode}-${row.number}`,
       uuid: row.uuid,
@@ -1174,6 +1257,7 @@ class BulkDataService {
       type: row.type_line || row.type || row.types,
       text: row.text,
       setCode: row.setCode,
+      setName: row.setName,
       number: row.number,
       supertypes: row.supertypes,
 
@@ -1182,7 +1266,7 @@ class BulkDataService {
       cmc: row.manaValue || row.cmc,
       type_line: row.type_line || row.type || row.types,
       oracle_text: row.text || row.originalText,
-      set: row.setCode,
+      set: row.setName,
       set_code: row.setCode,
       set_name: row.setName,
       collector_number: row.number,
@@ -1200,6 +1284,7 @@ class BulkDataService {
       legalities: legalities,
       rulings: rulings,
       card_faces: card_faces,
+      prices: formattedPrices,
       lang: row.language === 'English' ? 'en' : row.language,
       artist: row.artist,
       layout: row.layout,
@@ -1895,6 +1980,69 @@ class BulkDataService {
 
     // Re-run the import
     await this._ensureRelatedLinksData();
+  }
+
+  async testOraclePatternAnalysis(cardName) {
+    console.log('[DEBUG] testOraclePatternAnalysis called with:', cardName);
+    if (!this.db || !this.initialized) {
+      console.log('[DEBUG] Database not initialized:', { db: !!this.db, initialized: !!this.initialized });
+      return { error: 'Database not initialized' };
+    }
+
+    try {
+      // Find the card by name
+      const card = await this.findCardByName(cardName);
+      console.log('[DEBUG] Card lookup result:', card);
+      if (!card) {
+        return { error: `Card not found: ${cardName}` };
+      }
+
+      // Get oracle text
+      const oracleText = card.oracle_text || card.text || '';
+      console.log('[DEBUG] Oracle text:', oracleText);
+      if (!oracleText) {
+        return { error: 'No oracle text available for this card' };
+      }
+
+      // Basic pattern analysis
+      const patterns = {
+        cardName: cardName,
+        oracleText: oracleText,
+        wordCount: oracleText.split(/\s+/).length,
+        sentenceCount: oracleText.split(/[.!?]+/).filter(s => s.trim()).length,
+        hasDraw: /draw\s+\d+\s+card/i.test(oracleText),
+        hasDestroy: /destroy\s+target/i.test(oracleText),
+        hasExile: /exile\s+target/i.test(oracleText),
+        hasCounter: /counter\s+target\s+spell/i.test(oracleText),
+        hasFlying: /\bflying\b/i.test(oracleText),
+        hasTrample: /\btrample\b/i.test(oracleText),
+        hasFirstStrike: /\bfirst\s+strike\b/i.test(oracleText),
+        hasDeathtouch: /\bdeathtouch\b/i.test(oracleText),
+        hasLifelink: /\blifelink\b/i.test(oracleText),
+        hasVigilance: /\bvigilance\b/i.test(oracleText),
+        hasHaste: /\bhaste\b/i.test(oracleText),
+        hasHexproof: /\bhexproof\b/i.test(oracleText),
+        hasShroud: /\bshroud\b/i.test(oracleText),
+        hasIndestructible: /\bindestructible\b/i.test(oracleText),
+        manaCost: card.mana_cost || card.manaCost || '',
+        manaValue: card.mana_value || card.cmc || 0,
+        power: card.power,
+        toughness: card.toughness,
+        type: card.type_line || card.type || '',
+        rarity: card.rarity,
+        colors: card.colors || [],
+        keywords: card.keywords || []
+      };
+
+      return {
+        success: true,
+        card: card,
+        patterns: patterns
+      };
+    } catch (error) {
+      console.error('Error in testOraclePatternAnalysis:', error);
+      return { error: error.message };
+    }
   }
 }
 

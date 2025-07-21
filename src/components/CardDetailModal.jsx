@@ -278,7 +278,7 @@ const CardDetailModal = ({
           <div className="modal-card-details">
             <h2>{card.name}</h2>
             <p>{(card.type || card.type_line || '').replace(/\?\?\?/g, '—')}</p>
-            <p><strong>Set:</strong> {card.setName}</p>
+            <p><strong>Set:</strong> {card.set_name}</p>
             <p><strong>Rarity:</strong> {card.rarity}</p>
             {ownedQty !== null && (
               <p><strong>Owned:</strong> {ownedQty} {ownedQty === 1 ? 'copy' : 'copies'}</p>

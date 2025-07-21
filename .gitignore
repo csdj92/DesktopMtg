@@ -41,3 +41,13 @@ electron/AI/Meta-Llama-3-8B-Instruct.Q4_K_M.gguf
 debug-card-data.js
 example-integration.js
 test-recommendations.js
+test-deck-modal.js
+*/.md
+*.md
+*.pyc
+scripts/cache/embeddings/
+scripts/cache/embeddings/**
+scripts/*
+cache/embeddings/9019568b05f339bf7965ce3b1c11430086d8deaf6b6f505878ac6783dc8b9cd4.pkl
+cache/embeddings/693df27de284faccace35e850f8859755b31859d582f4d2d66aec1de55cea0f2.pkl
+magic_cards.lance/259ea5a9-82bf-4c18-beb2-4b4284e6c1ee.lance

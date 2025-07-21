@@ -37,6 +37,7 @@ const CollectionManager = () => {
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [isUpdatingPrices, setIsUpdatingPrices] = useState(false);
 
   // Load collections on component mount
   useEffect(() => {
@@ -386,6 +387,32 @@ const CollectionManager = () => {
     }
   };
 
+  const handleUpdatePrices = async () => {
+    try {
+      setIsUpdatingPrices(true);
+      setImportProgress('Updating daily prices...');
+      
+      const result = await window.electronAPI.getDailyPrices();
+      
+      if (result.success) {
+        setImportProgress('✅ Daily prices updated successfully!');
+        // Reload collection stats to reflect new prices
+        if (selectedCollection) {
+          loadCollectionStats(selectedCollection.collection_name);
+        }
+      } else {
+        setImportProgress('❌ Failed to update daily prices');
+      }
+    } catch (error) {
+      console.error('Error updating daily prices:', error);
+      setImportProgress('❌ Error updating daily prices: ' + error.message);
+    } finally {
+      setIsUpdatingPrices(false);
+      // Clear the progress message after 3 seconds
+      setTimeout(() => setImportProgress(''), 3000);
+    }
+  };
+
   const formatPrice = (price, currency = 'USD') => {
     if (!price || price === 0) return '';
     return new Intl.NumberFormat('en-US', {
@@ -440,6 +467,14 @@ const CollectionManager = () => {
               style={{ backgroundColor: '#dc3545', color: 'white' }}
             >
               🗑️ Clear All
+            </button>
+            <button
+              onClick={handleUpdatePrices}
+              disabled={isUpdatingPrices || isImporting}
+              className="import-btn prices-btn"
+              style={{ backgroundColor: '#28a745', color: 'white' }}
+            >
+              💰 Update Prices
             </button>
           </div>
         </div>

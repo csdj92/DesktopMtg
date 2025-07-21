@@ -289,8 +289,13 @@
 }
 
 @keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 /* Trigger Type Specific Colors */
@@ -323,6 +328,52 @@
   color: #607D8B;
 }
 
+/* Library Manipulation Type Specific Colors */
+.library-library_viewing .pattern-icon {
+  color: #3F51B5;
+}
+
+.library-play_from_library .pattern-icon {
+  color: #FF5722;
+}
+
+/* Tribal Synergy Strength Styling */
+.tribal-synergy.strength-5 {
+  background: linear-gradient(90deg, rgba(255, 215, 0, 0.1), rgba(255, 215, 0, 0.2));
+  border-color: #FFD700;
+}
+
+.tribal-synergy.strength-4 {
+  background: linear-gradient(90deg, rgba(192, 192, 192, 0.1), rgba(192, 192, 192, 0.2));
+  border-color: #C0C0C0;
+}
+
+.tribal-synergy.strength-3 {
+  background: linear-gradient(90deg, rgba(205, 127, 50, 0.1), rgba(205, 127, 50, 0.2));
+  border-color: #CD7F32;
+}
+
+.strength-tag {
+  background: #FF5722;
+  color: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  margin-left: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Additional affect tag styles */
+.affect-tag.restriction {
+  background: #FF9800;
+}
+
+.affect-tag.scope {
+  background: #9C27B0;
+}
+
 /* Scrollbar for pattern content */
 .pattern-content::-webkit-scrollbar {
   width: 6px;
@@ -346,19 +397,19 @@
   .pattern-header h4 {
     font-size: 0.9rem;
   }
-  
+
   .pattern-content {
     padding: 12px;
     max-height: 400px;
   }
-  
+
   .pattern-item {
     padding: 8px;
   }
-  
+
   .keywords-grid,
   .resource-grid,
   .interaction-grid {
     gap: 4px;
   }
-} 
+}

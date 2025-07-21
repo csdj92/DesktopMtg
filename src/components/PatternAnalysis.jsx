@@ -18,7 +18,7 @@ const PatternAnalysis = ({ card, showSynergyWith = null, onPatternClick = null }
 
   const fetchPatterns = async () => {
     if (!card?.name) return;
-    
+
     setLoading(true);
     try {
       const result = await window.electronAPI.testOraclePatternAnalysis(card.name);
@@ -45,12 +45,12 @@ const PatternAnalysis = ({ card, showSynergyWith = null, onPatternClick = null }
     return null;
   }
 
-  const hasAnyPatterns = patterns.triggers?.length > 0 || 
-                        patterns.engines?.length > 0 || 
-                        patterns.typeSynergies?.tribal?.length > 0 ||
-                        patterns.typeSynergies?.equipment?.length > 0 ||
-                        patterns.keywords?.length > 0 ||
-                        Object.keys(patterns.resources || {}).length > 0;
+  const hasAnyPatterns = patterns.triggers?.length > 0 ||
+    patterns.engines?.length > 0 ||
+    patterns.typeSynergies?.tribal?.length > 0 ||
+    patterns.typeSynergies?.equipment?.length > 0 ||
+    patterns.keywords?.length > 0 ||
+    Object.keys(patterns.resources || {}).length > 0;
 
   if (!hasAnyPatterns) {
     return (
@@ -62,8 +62,8 @@ const PatternAnalysis = ({ card, showSynergyWith = null, onPatternClick = null }
 
   return (
     <div className="pattern-analysis">
-      <div 
-        className="pattern-header" 
+      <div
+        className="pattern-header"
         onClick={() => setExpanded(!expanded)}
       >
         <h4>⚙️ Mechanical Patterns</h4>
@@ -74,7 +74,7 @@ const PatternAnalysis = ({ card, showSynergyWith = null, onPatternClick = null }
 
       {expanded && (
         <div className="pattern-content">
-          
+
           {/* Triggered Abilities */}
           {patterns.triggers?.length > 0 && (
             <div className="pattern-section">
@@ -119,6 +119,8 @@ const PatternAnalysis = ({ card, showSynergyWith = null, onPatternClick = null }
                       {engine.type === 'discard_draw' && '🎴'}
                       {engine.type === 'sacrifice_engine' && '⚰️'}
                       {engine.type === 'tap_engine' && '🔃'}
+                      {engine.type === 'library_manipulation' && '📚'}
+                      {engine.type === 'play_from_library' && '🎯'}
                     </div>
                     <div className="pattern-details">
                       <span className="pattern-type">
@@ -139,20 +141,36 @@ const PatternAnalysis = ({ card, showSynergyWith = null, onPatternClick = null }
               <h5>🏰 Tribal Synergies</h5>
               <div className="pattern-items">
                 {patterns.typeSynergies.tribal.map((tribal, index) => (
-                  <div key={index} className="pattern-item tribal-synergy">
-                    <div className="pattern-icon">🛡️</div>
+                  <div key={index} className={`pattern-item tribal-synergy strength-${tribal.strength}`}>
+                    <div className="pattern-icon">
+                      {tribal.strength >= 5 ? '👑' :
+                        tribal.strength >= 4 ? '⭐' :
+                          tribal.strength >= 3 ? '🔥' : '🛡️'}
+                    </div>
                     <div className="pattern-details">
                       <span className="pattern-type">{tribal.type.toUpperCase()}</span>
                       <div className="synergy-strength">
                         <span className="strength-label">Strength:</span>
                         <div className="strength-bar">
-                          <div 
-                            className="strength-fill" 
+                          <div
+                            className="strength-fill"
                             style={{ width: `${(tribal.strength / 5) * 100}%` }}
                           ></div>
                         </div>
                         <span className="strength-value">{tribal.strength}/5</span>
+                        {tribal.strength >= 4 && <span className="strength-tag">POWERFUL</span>}
+                        {tribal.strength >= 5 && <span className="strength-tag">EXCEPTIONAL</span>}
                       </div>
+                      {tribal.matchCount > 1 && (
+                        <span className="modifier">{tribal.matchCount} synergies</span>
+                      )}
+                      {tribal.pattern && (
+                        <div className="affects-list">
+                          <span className="affect-tag tribal-pattern">
+                            {tribal.pattern}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -223,6 +241,47 @@ const PatternAnalysis = ({ card, showSynergyWith = null, onPatternClick = null }
                     <span>Lifegain {patterns.resources.lifegain}</span>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Library Manipulation */}
+          {patterns.libraryManipulation?.length > 0 && (
+            <div className="pattern-section">
+              <h5>📚 Library Manipulation</h5>
+              <div className="pattern-items">
+                {patterns.libraryManipulation.map((lib, index) => (
+                  <div key={index} className={`pattern-item library-${lib.type}`}>
+                    <div className="pattern-icon">
+                      {lib.type === 'library_viewing' && '👁️'}
+                      {lib.type === 'play_from_library' && '🎯'}
+                    </div>
+                    <div className="pattern-details">
+                      <span className="pattern-type">
+                        {lib.type.replace(/_/g, ' ').toUpperCase()}
+                      </span>
+                      {lib.continuous && <span className="modifier">Continuous</span>}
+                      {lib.restrictions?.length > 0 && (
+                        <div className="affects-list">
+                          {lib.restrictions.map((restriction, i) => (
+                            <span key={i} className="affect-tag restriction">
+                              {restriction.replace(/_/g, ' ')}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {lib.scope?.length > 0 && (
+                        <div className="affects-list">
+                          {lib.scope.map((scope, i) => (
+                            <span key={i} className="affect-tag scope">
+                              {scope.replace(/_/g, ' ')}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
