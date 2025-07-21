@@ -16,7 +16,7 @@ import RecommendationSettings from './RecommendationSettings';
 import StrategyTester from './StrategyTester';
 import PatternAnalysis from './PatternAnalysis';
 import useCardNavigation from '../hooks/useCardNavigation';
-import { Plus, Save, Trash2, X, AlertTriangle, CheckCircle, Settings, Brain } from 'lucide-react';
+import { Plus, Save, Trash2, X, AlertTriangle, CheckCircle, Settings, Brain, XCircle } from 'lucide-react';
 import AIPanel from './AIPanel';
 
 // ===================================================================================
@@ -32,7 +32,7 @@ const ALL_PANELS_CONFIG = {
   autoBuild: { id: 'autoBuild', title: 'Auto-Build Commander' },
   deckStats: { id: 'deckStats', title: 'Deck Statistics' },
   spellbookExport: { id: 'spellbookExport', title: 'Spellbook Export' },
-  aiPanel: { id: 'aiPanel', title: 'AI Assistant' },
+  // aiPanel: { id: 'aiPanel', title: 'AI Assistant' },
 };
 
 // ===================================================================================
@@ -50,7 +50,7 @@ const generateResponsiveLayouts = (panels) => {
     autoBuild: 10,
     deckStats: 12,
     spellbookExport: 8,
-    aiPanel: 14
+    // aiPanel: 14
   };
   const cols = 12; // Use 12 columns for all breakpoints like bootstrap
 
@@ -80,7 +80,7 @@ const getDefaultPanels = () => [
   ALL_PANELS_CONFIG.deckView,
   ALL_PANELS_CONFIG.deckInfo,
   ALL_PANELS_CONFIG.deckStats,
-  ALL_PANELS_CONFIG.aiPanel,
+  // ALL_PANELS_CONFIG.aiPanel,
 ];
 
 
@@ -452,10 +452,10 @@ const DeckBuilder = () => {
   // Helper for filtering collection via SearchControls
   const searchHelperRef = useRef(null);
 
-  // Initialize/refresh helper whenever ownedCards changes
+  // Initialize/refresh helper whenever ownedCards or format changes
   useEffect(() => {
-    searchHelperRef.current = new SearchFunctions(ownedCards, setCollectionSearchResults);
-  }, [ownedCards]);
+    searchHelperRef.current = new SearchFunctions(ownedCards, setCollectionSearchResults, format, isCardLegalInFormat);
+  }, [ownedCards, format]);
 
   const isCardCommander = (card) => {
     if (!card) return false;
@@ -503,6 +503,66 @@ const DeckBuilder = () => {
     if (!card) return false;
     const typeLine = (card.type || card.type_line || '').toLowerCase();
     return typeLine.includes('basic') && typeLine.includes('land');
+  };
+
+  // Helper function to get the maximum allowed copies of a card in the current format
+  const getMaxCopiesAllowed = (card) => {
+    if (format === 'commander') {
+      // Commander singleton rule: only basic lands can have multiple copies
+      return isBasicLand(card) ? 999 : 1; // Allow many basic lands, but only 1 of other cards
+    }
+    // Standard, Modern, Legacy, etc. allow up to 4 copies
+    return 4;
+  };
+
+  // Helper function to get the user's collection quantity for a card
+  const getCollectionQuantity = (card) => {
+    if (!card || !card.name) return 0;
+
+    // Check in ownedCards first (more detailed data)
+    const ownedEntry = ownedCards.find(entry => entry.card.name === card.name);
+    if (ownedEntry) {
+      return ownedEntry.quantity;
+    }
+
+    // Fallback to collectionCounts (simpler data)
+    const nameKey = card.name.toLowerCase();
+    return collectionCounts.get(nameKey) || 0;
+  };
+
+  // Helper function to check if we can add more copies of a card
+  const canAddMoreCopies = (card, currentQuantity = 0) => {
+    const maxAllowed = getMaxCopiesAllowed(card);
+    const collectionQuantity = getCollectionQuantity(card);
+
+    // Can't add more than format allows
+    if (currentQuantity >= maxAllowed) {
+      return { canAdd: false, reason: `Maximum ${maxAllowed} copies allowed in ${format} format` };
+    }
+
+    // Can't add more than user owns
+    if (currentQuantity >= collectionQuantity) {
+      return { canAdd: false, reason: `You only own ${collectionQuantity} copies of this card` };
+    }
+
+    return { canAdd: true };
+  };
+
+  // Helper function to check if a card is legal in the current format
+  const isCardLegalInFormat = (card) => {
+    if (!card || !format) return true; // Default to true if we can't determine
+
+    // Check if the card has legality information
+    if (card.legalities && typeof card.legalities === 'object') {
+      const formatKey = format.toLowerCase();
+      const legality = card.legalities[formatKey];
+
+      // Return true only for legal or restricted cards
+      return legality === 'legal' || legality === 'restricted';
+    }
+
+    // If no legality data, default to false for safety (cards should have legality data)
+    return false;
   };
 
   // Helper to extract primary card types for filtering
@@ -693,17 +753,34 @@ const DeckBuilder = () => {
   // Helper to aggregate collection counts by card name
   const buildCollectionCountMap = async () => {
     try {
+      // Use the same approach as the modal - get all unique card names and their quantities
       const collections = await window.electronAPI.collectionGetAll();
       const countMap = new Map();
+      
+      // Get all unique card names from all collections
+      const allCardNames = new Set();
       for (const coll of collections) {
         const records = await window.electronAPI.collectionGet(coll.collection_name, { limit: 10000, offset: 0 });
         records.forEach(rec => {
-          const nameKey = (rec.name || '').toLowerCase();
-          if (!nameKey) return;
-          const existing = countMap.get(nameKey) || 0;
-          countMap.set(nameKey, existing + (rec.quantity || 1));
+          if (rec.name) {
+            allCardNames.add(rec.name);
+          }
         });
       }
+      
+      // Get quantities for each unique card name using the same API as the modal
+      for (const cardName of allCardNames) {
+        try {
+          const res = await window.electronAPI.collectionGetCardQuantity(cardName);
+          const totalQuantity = res?.total || 0;
+          if (totalQuantity > 0) {
+            countMap.set(cardName.toLowerCase(), totalQuantity);
+          }
+        } catch (err) {
+          console.error(`Failed to get quantity for ${cardName}:`, err);
+        }
+      }
+      
       return countMap;
     } catch (err) {
       console.error('Unable to load collections from DB:', err);
@@ -743,15 +820,21 @@ const DeckBuilder = () => {
             }
             // The card IS the Scryfall data already - no need to look it up again
             const key = card.id || card.uuid;
+            // Use total_quantity from the database query result
+            const cardQuantity = card.total_quantity || card.quantity || 1;
+            
+
+            
             if (tempMap.has(key)) {
               const entry = tempMap.get(key);
-              entry.quantity += 1; // Each collected card counts as 1
+              entry.quantity += cardQuantity; // Add the actual quantity
             } else {
-              tempMap.set(key, { card: card, quantity: 1 });
+              tempMap.set(key, { card: card, quantity: cardQuantity });
             }
           }
         }
-        setOwnedCards(Array.from(tempMap.values()));
+        const ownedCardsArray = Array.from(tempMap.values());
+        setOwnedCards(ownedCardsArray);
       } catch (err) {
         console.error('Failed to load owned cards', err);
       } finally {
@@ -760,6 +843,8 @@ const DeckBuilder = () => {
     };
     loadOwned();
   }, []);
+
+
 
   const handleCardClick = useCallback((card, context = 'collection') => {
     setSelectedCard(card);
@@ -796,11 +881,13 @@ const DeckBuilder = () => {
       // Check for existing card by ID first
       const existingEntryById = prev.mainboard.find(entry => entry.card.id === card.id);
       if (existingEntryById) {
-        // Commander singleton rule: only basic lands can have multiple copies
-        if (format === 'commander' && !isBasicLand(card)) {
-          alert("In Commander format, you can only have one copy of each non-basic card.");
+        // Check if we can add more copies
+        const canAdd = canAddMoreCopies(card, existingEntryById.quantity);
+        if (!canAdd.canAdd) {
+          alert(canAdd.reason);
           return prev; // Don't modify the deck
         }
+
         // Increment quantity
         const newMainboard = prev.mainboard.map(entry =>
           entry.card.id === card.id
@@ -810,13 +897,35 @@ const DeckBuilder = () => {
         return { ...prev, mainboard: newMainboard };
       }
 
-      // Check for existing card by name (singleton rule for different printings)
-      if (format === 'commander' && !isBasicLand(card)) {
-        const existingEntryByName = prev.mainboard.find(entry => entry.card.name === card.name);
-        if (existingEntryByName) {
+      // Check for existing card by name (for Commander singleton rule and different printings)
+      const existingEntryByName = prev.mainboard.find(entry => entry.card.name === card.name);
+      if (existingEntryByName) {
+        if (format === 'commander' && !isBasicLand(card)) {
           alert(`In Commander format, you can only have one copy of "${card.name}". You already have this card in your deck.`);
           return prev; // Don't modify the deck
         }
+
+        // For other formats, check if we can add more copies
+        const canAdd = canAddMoreCopies(card, existingEntryByName.quantity);
+        if (!canAdd.canAdd) {
+          alert(canAdd.reason);
+          return prev; // Don't modify the deck
+        }
+
+        // Increment quantity of the existing card
+        const newMainboard = prev.mainboard.map(entry =>
+          entry.card.name === card.name
+            ? { ...entry, quantity: entry.quantity + 1 }
+            : entry
+        );
+        return { ...prev, mainboard: newMainboard };
+      }
+
+      // Check if we can add this new card
+      const canAdd = canAddMoreCopies(card, 0);
+      if (!canAdd.canAdd) {
+        alert(canAdd.reason);
+        return prev; // Don't modify the deck
       }
 
       // Add new card
@@ -829,9 +938,10 @@ const DeckBuilder = () => {
       const cardEntry = prev.mainboard.find(entry => entry.card.id === cardId);
       if (!cardEntry) return prev;
 
-      // Commander singleton rule: only basic lands can have multiple copies
-      if (format === 'commander' && !isBasicLand(cardEntry.card)) {
-        alert(`In Commander format, you can only have one copy of "${cardEntry.card.name}".`);
+      // Check if we can add more copies
+      const canAdd = canAddMoreCopies(cardEntry.card, cardEntry.quantity);
+      if (!canAdd.canAdd) {
+        alert(canAdd.reason);
         return prev;
       }
 
@@ -868,8 +978,32 @@ const DeckBuilder = () => {
   // Filter and sort cards based on commander rules and type filter
   const filteredSearchResults = useMemo(() => {
     let results = searchResults;
+    const originalCount = results.length;
 
-    // Apply type filter first
+    // Debug: Log what we're filtering
+    if (originalCount > 0) {
+      console.log(`🔍 Starting with ${originalCount} search results for ${format} format`);
+      console.log(`🔍 First few cards:`, results.slice(0, 3).map(c => ({
+        name: c.name,
+        legalities: c.legalities,
+        [format.toLowerCase()]: c.legalities?.[format.toLowerCase()]
+      })));
+    }
+
+    // Apply format legality filter first
+    results = results.filter(isCardLegalInFormat);
+    const filteredCount = results.length;
+
+    // Log filtering stats
+    if (originalCount > 0 && originalCount !== filteredCount) {
+      console.log(`🔍 Filtered ${originalCount - filteredCount} illegal cards from ${originalCount} total results for ${format} format`);
+      console.log(`🔍 Remaining cards:`, results.slice(0, 3).map(c => ({
+        name: c.name,
+        [format.toLowerCase()]: c.legalities?.[format.toLowerCase()]
+      })));
+    }
+
+    // Apply type filter
     if (cardTypeFilter !== 'all') {
       results = results.filter(card => matchesTypeFilter(card, cardTypeFilter));
     }
@@ -890,7 +1024,10 @@ const DeckBuilder = () => {
   const filteredOwnedCards = useMemo(() => {
     let results = ownedCards;
 
-    // Apply type filter first
+    // Apply format legality filter first
+    results = results.filter(entry => isCardLegalInFormat(entry.card));
+
+    // Apply type filter
     if (cardTypeFilter !== 'all') {
       results = results.filter(entry => matchesTypeFilter(entry.card, cardTypeFilter));
     }
@@ -1067,7 +1204,12 @@ const DeckBuilder = () => {
 
     setSearchLoading(true);
     try {
-      const results = await window.electronAPI.bulkDataSearch(params, { limit: 200 });
+      // Add format parameter to the search
+      const searchParamsWithFormat = {
+        ...params,
+        format: format
+      };
+      const results = await window.electronAPI.bulkDataSearch(searchParamsWithFormat, { limit: 200 });
       setSearchResults(results || []);
     } catch (err) {
       console.error('Error searching bulk data', err);
@@ -1075,7 +1217,7 @@ const DeckBuilder = () => {
     } finally {
       setSearchLoading(false);
     }
-  }, []);
+  }, [format]);
 
   // NEW: Fetch card recommendations for the current deck
   const handleGetRecommendations = useCallback(async () => {
@@ -1262,8 +1404,11 @@ const DeckBuilder = () => {
     if (!recommendations.length) return [];
 
     // Since recommendations now come pre-filtered from the backend to only include owned cards,
-    // we just need to apply UI-level filters (type filter and sorting)
+    // we just need to apply UI-level filters (format legality, type filter and sorting)
     let filteredRecs = recommendations;
+
+    // Apply format legality filter first
+    filteredRecs = filteredRecs.filter(isCardLegalInFormat);
 
     // Apply type filter
     if (cardTypeFilter !== 'all') {
@@ -1274,6 +1419,14 @@ const DeckBuilder = () => {
     return sortCards(filteredRecs, recommendationsSort, recommendationsSortDirection);
   }, [recommendations, cardTypeFilter, recommendationsSort, recommendationsSortDirection]);
 
+  // Filter token suggestions to only show legal cards
+  const filteredTokenSuggestions = useMemo(() => {
+    if (!tokenSuggestions.length) return [];
+
+    // Apply format legality filter
+    return tokenSuggestions.filter(isCardLegalInFormat);
+  }, [tokenSuggestions]);
+
   // Determine current card list for navigation based on context
   const currentCardList = useMemo(() => {
     switch (navigationContext) {
@@ -1282,12 +1435,15 @@ const DeckBuilder = () => {
       case 'recommendations':
         return displayRecommendations;
       case 'tokens':
-        return tokenSuggestions;
+        return filteredTokenSuggestions;
+      case 'deck':
+        // For deck view, flatten all cards from grouped mainboard
+        return Object.values(groupedMainboard).flat().map(entry => entry.card);
       case 'collection':
       default:
-        return displayCollectionCards;
+        return displayCollectionCards.map(entry => entry.card || entry);
     }
-  }, [navigationContext, filteredSearchResults, displayRecommendations, tokenSuggestions, displayCollectionCards]);
+  }, [navigationContext, filteredSearchResults, displayRecommendations, filteredTokenSuggestions, groupedMainboard, displayCollectionCards]);
 
   // Keyboard navigation using custom hook
   const navigation = useCardNavigation(
@@ -1400,13 +1556,18 @@ const DeckBuilder = () => {
   };
 
   const handleRemovePanel = (panelId) => {
-    // Remove from panels list
-    const newPanels = panels.filter(p => p.id !== panelId);
-    setPanels(newPanels);
+    const panelTitle = ALL_PANELS_CONFIG[panelId]?.title || 'Panel';
 
-    // Regenerate layouts using bootstrap-style algorithm
-    const newLayouts = generateResponsiveLayouts(newPanels);
-    setLayouts(newLayouts);
+    // Add confirmation to prevent accidental removals
+    if (window.confirm(`Are you sure you want to remove the "${panelTitle}" panel?`)) {
+      // Remove from panels list
+      const newPanels = panels.filter(p => p.id !== panelId);
+      setPanels(newPanels);
+
+      // Regenerate layouts using bootstrap-style algorithm
+      const newLayouts = generateResponsiveLayouts(newPanels);
+      setLayouts(newLayouts);
+    }
   };
 
   // ===================================================================================
@@ -1422,7 +1583,11 @@ const DeckBuilder = () => {
       // 🧪 Strategy Testing Props
       strategyComparison, availableStrategies, activeStrategy, handleStrategyChange,
       // 🔧 Pattern Analysis Props
-      showPatternAnalysis, setShowPatternAnalysis
+      showPatternAnalysis, setShowPatternAnalysis,
+      // Filtered token suggestions
+      filteredTokenSuggestions,
+      // Helper functions for quantity management
+      getMaxCopiesAllowed, getCollectionQuantity, canAddMoreCopies
     };
 
     switch (panel.id) {
@@ -1434,7 +1599,7 @@ const DeckBuilder = () => {
       case 'autoBuild': return <AutoBuildPanel {...panelProps} />;
       case 'deckStats': return <DeckStatsPanel {...panelProps} />;
       case 'spellbookExport': return <SpellbookExportPanel {...panelProps} />;
-      case 'aiPanel': return <AIPanelComponent {...panelProps} />;
+      // case 'aiPanel': return <AIPanelComponent {...panelProps} />;
       default: return <div>Unknown Panel</div>;
     }
   };
@@ -1495,8 +1660,18 @@ const DeckBuilder = () => {
               <div key={panel.id} className="panel">
                 <div className="drag-handle panel-drag-bar">
                   <span>⋮⋮ {ALL_PANELS_CONFIG[panel.id]?.title || 'Panel'}</span>
-                  <button onClick={() => handleRemovePanel(panel.id)} className="remove-panel-button" title="Remove Panel">
-                    <X size={16} />
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      handleRemovePanel(panel.id);
+                    }}
+                    className="remove-panel-button"
+                    title="Remove Panel"
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onMouseUp={(e) => e.stopPropagation()}
+                  >
+                    <XCircle size={18} />
                   </button>
                 </div>
                 {renderPanelContent(panel)}
@@ -1520,7 +1695,7 @@ const DeckBuilder = () => {
 // ===================================================================================
 
 const CollectionSearchPanel = (props) => {
-  const { deck, filteredSearchResults, bulkDataStats, searchResults, searchLoading, deckBulkSearch, cardTypeFilter, setCardTypeFilter, collectionSort, setCollectionSort, sortDirection, setSortDirection, addCardToDeck, removeCardFromDeck, handleCardClick, ownedLoading, displayCollectionCards, searchHelperRef } = props;
+  const { deck, format, filteredSearchResults, bulkDataStats, searchResults, searchLoading, deckBulkSearch, cardTypeFilter, setCardTypeFilter, collectionSort, setCollectionSort, sortDirection, setSortDirection, addCardToDeck, removeCardFromDeck, handleCardClick, ownedLoading, displayCollectionCards, searchHelperRef, getMaxCopiesAllowed, getCollectionQuantity, canAddMoreCopies } = props;
   const [activeView, setActiveView] = useState('collection'); // 'collection' | 'search'
 
   return (
@@ -1532,6 +1707,14 @@ const CollectionSearchPanel = (props) => {
 
       {activeView === 'search' && (
         <div className="search-view">
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '4px 0 8px 0', fontStyle: 'italic' }}>
+            Search results filtered to show only cards legal in {format} format
+            {searchResults.length > 0 && filteredSearchResults.length !== searchResults.length && (
+              <span style={{ color: 'var(--accent-secondary)' }}>
+                {' '}({searchResults.length - filteredSearchResults.length} illegal cards hidden)
+              </span>
+            )}
+          </p>
           <SearchControls
             onSearch={deckBulkSearch}
             bulkDataStats={bulkDataStats}
@@ -1550,14 +1733,67 @@ const CollectionSearchPanel = (props) => {
           </div>
           <div className="search-results-grid">
             {searchLoading && <p>Searching...</p>}
+            {!searchLoading && (
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '8px 0' }}>
+                Showing {filteredSearchResults.length} of {searchResults.length} results
+              </div>
+            )}
             {!searchLoading && filteredSearchResults.map(card => {
               const isInDeck = deck.mainboard.some(entry => entry.card.id === card.id);
+              const deckQuantity = isInDeck ? deck.mainboard.find(entry => entry.card.id === card.id).quantity : 0;
+              const collectionQuantity = getCollectionQuantity(card);
+              const maxAllowed = getMaxCopiesAllowed(card);
+              const canAdd = canAddMoreCopies(card, deckQuantity);
+
               return (
                 <div key={card.id} className="card-grid-item">
                   <Card card={card} onCardClick={(card) => handleCardClick(card, 'search')} />
-                  <button className={isInDeck ? 'remove-from-deck' : ''} onClick={(e) => { e.stopPropagation(); if (isInDeck) { removeCardFromDeck(card.id); } else { addCardToDeck(card); } }}>
-                    {isInDeck ? 'Remove from Deck' : 'Add to Deck'}
-                  </button>
+                  <div className="card-info">
+                    <div className="quantity-info">
+                      <span>Owned: {collectionQuantity}</span>
+                      <span>Max: {maxAllowed}</span>
+                      {isInDeck && <span>In Deck: {deckQuantity}</span>}
+                    </div>
+                    <div className="deck-actions">
+                      {isInDeck ? (
+                        <>
+                          <button
+                            className="remove-from-deck"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeCardFromDeck(card.id);
+                            }}
+                            title="Remove from deck"
+                          >
+                            Remove
+                          </button>
+                          {canAdd.canAdd && (
+                            <button
+                              className="add-more"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                addCardToDeck(card);
+                              }}
+                              title="Add another copy"
+                            >
+                              Add More
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <button
+                          disabled={!canAdd.canAdd}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            addCardToDeck(card);
+                          }}
+                          title={!canAdd.canAdd ? canAdd.reason : 'Add to deck'}
+                        >
+                          Add to Deck
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               );
             })}
@@ -1568,6 +1804,9 @@ const CollectionSearchPanel = (props) => {
       {activeView === 'collection' && (
         <div className="collection-view">
           <h3>My Collection ({displayCollectionCards.length} unique)</h3>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '4px 0 8px 0', fontStyle: 'italic' }}>
+            Showing only cards legal in {format} format
+          </p>
           <div className="collection-controls">
             <SearchControls onSearch={(params) => searchHelperRef.current?.handleCollectionSearch(params)} bulkDataStats={bulkDataStats} />
             <select value={cardTypeFilter} onChange={(e) => setCardTypeFilter(e.target.value)} title="Filter by card type">
@@ -1584,12 +1823,59 @@ const CollectionSearchPanel = (props) => {
             {ownedLoading && <p>Loading collection...</p>}
             {!ownedLoading && displayCollectionCards.map(entry => {
               const isInDeck = deck.mainboard.some(deckEntry => deckEntry.card.id === entry.card.id);
+              const deckQuantity = isInDeck ? deck.mainboard.find(deckEntry => deckEntry.card.id === entry.card.id).quantity : 0;
+              const maxAllowed = getMaxCopiesAllowed(entry.card);
+              const canAdd = canAddMoreCopies(entry.card, deckQuantity);
+
               return (
                 <div key={entry.card.id} className="card-grid-item">
                   <Card card={entry.card} quantity={entry.quantity} onCardClick={(card) => handleCardClick(card, 'collection')} />
-                  <button className={isInDeck ? 'remove-from-deck' : ''} onClick={(e) => { e.stopPropagation(); if (isInDeck) { removeCardFromDeck(entry.card.id); } else { addCardToDeck(entry.card); } }}>
-                    {isInDeck ? 'Remove from Deck' : 'Add to Deck'}
-                  </button>
+                  <div className="card-info">
+                    <div className="quantity-info">
+                      <span>Owned: {entry.quantity}</span>
+                      <span>Max: {maxAllowed}</span>
+                      {isInDeck && <span>In Deck: {deckQuantity}</span>}
+                    </div>
+                    <div className="deck-actions">
+                      {isInDeck ? (
+                        <>
+                          <button
+                            className="remove-from-deck"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeCardFromDeck(entry.card.id);
+                            }}
+                            title="Remove from deck"
+                          >
+                            Remove
+                          </button>
+                          {canAdd.canAdd && (
+                            <button
+                              className="add-more"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                addCardToDeck(entry.card);
+                              }}
+                              title="Add another copy"
+                            >
+                              Add More
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <button
+                          disabled={!canAdd.canAdd}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            addCardToDeck(entry.card);
+                          }}
+                          title={!canAdd.canAdd ? canAdd.reason : 'Add to deck'}
+                        >
+                          Add to Deck
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               );
             })}
@@ -1623,7 +1909,7 @@ const DeckViewPanel = (props) => {
               {deck.commanders.length > 0 ? (
                 deck.commanders.map(c => (
                   <div key={c.id} className="card-grid-item-deck">
-                    <Card card={c} onCardClick={handleCardClick} />
+                    <Card card={c} onCardClick={(card) => handleCardClick(card, 'deck')} />
                     <div className="deck-card-actions"><button className="remove-button" onClick={() => removeCommander(c.id)}>Remove</button></div>
                   </div>
                 ))
@@ -1656,7 +1942,7 @@ const DeckViewPanel = (props) => {
                 <div className={`category-content ${!isExpanded ? 'collapsed' : ''}`}>
                   {cards.map(entry => (
                     <div key={entry.card.id} className="card-grid-item-deck">
-                      <Card card={entry.card} quantity={entry.quantity} onCardClick={handleCardClick} />
+                      <Card card={entry.card} quantity={entry.quantity} onCardClick={(card) => handleCardClick(card, 'deck')} />
                       <div className="deck-card-actions">
                         <button onClick={() => incrementQty(entry.card.id)} disabled={format === 'commander' && !isBasicLand(entry.card)} title={format === 'commander' && !isBasicLand(entry.card) ? 'Commander format allows only one copy' : ''}>+</button>
                         <button onClick={() => decrementQty(entry.card.id)}>-</button>
@@ -1817,15 +2103,15 @@ const DeckValidation = ({ results }) => {
 
 
 const TokenSuggestionsPanel = (props) => {
-  const { deck, tokenLoading, handleGetTokenSuggestions, tokenSuggestions, handleCardClick, addCardToDeck, removeCardFromDeck } = props;
+  const { deck, tokenLoading, handleGetTokenSuggestions, filteredTokenSuggestions, handleCardClick, addCardToDeck, removeCardFromDeck } = props;
   return (
     <div className="recommendations-view">
       <button onClick={handleGetTokenSuggestions} disabled={tokenLoading}>{tokenLoading ? 'Analyzing...' : 'Find Tokens'}</button>
       <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', margin: '8px 0' }}>Suggestions based on cards in your deck.</p>
       <div className="search-results-grid">
         {tokenLoading && <p>Analyzing deck for token patterns...</p>}
-        {!tokenLoading && tokenSuggestions.length === 0 && <p>No token suggestions found.</p>}
-        {!tokenLoading && tokenSuggestions.map(token => {
+        {!tokenLoading && filteredTokenSuggestions.length === 0 && <p>No token suggestions found.</p>}
+        {!tokenLoading && filteredTokenSuggestions.map(token => {
           const isInDeck = deck.mainboard.some(entry => entry.card.id === token.id);
           return (
             <div key={token.id} className="card-grid-item">
@@ -1934,49 +2220,49 @@ const SpellbookExportPanel = (props) => {
   );
 };
 
-const AIPanelComponent = (props) => {
-  const {
-    deck,
-    searchTerm,
-    setSearchTerm,
-    handleCardClick,
-    recommendations,
-    deckArchetype,
-    deckAnalysis,
-    format
-  } = props;
+// const AIPanelComponent = (props) => {
+//   const {
+//     deck,
+//     searchTerm,
+//     setSearchTerm,
+//     handleCardClick,
+//     recommendations,
+//     deckArchetype,
+//     deckAnalysis,
+//     format
+//   } = props;
 
-  const handleCardSuggestion = (cardName) => {
-    // Set the search term to the suggested card name
-    setSearchTerm(cardName);
+//   const handleCardSuggestion = (cardName) => {
+//     // Set the search term to the suggested card name
+//     setSearchTerm(cardName);
 
-    // Optionally trigger a search or other action
-    console.log('AI suggested card:', cardName);
-  };
+//     // Optionally trigger a search or other action
+//     console.log('AI suggested card:', cardName);
+//   };
 
-  // Get the current commander from the deck
-  const commander = deck.commanders.length > 0 ? deck.commanders[0].card : null;
+//   // Get the current commander from the deck
+//   const commander = deck.commanders.length > 0 ? deck.commanders[0].card : null;
 
-  // Convert deck format for AI analysis
-  const deckForAI = deck.mainboard.map(entry => ({
-    name: entry.card.name,
-    quantity: entry.quantity,
-    ...entry.card
-  }));
+//   // Convert deck format for AI analysis
+//   const deckForAI = deck.mainboard.map(entry => ({
+//     name: entry.card.name,
+//     quantity: entry.quantity,
+//     ...entry.card
+//   }));
 
-  return (
-    <div className="ai-panel-view">
-      <AIPanel
-        deck={deckForAI}
-        commander={commander}
-        onCardSuggestion={handleCardSuggestion}
-        recommendations={recommendations}
-        deckArchetype={deckArchetype}
-        deckAnalysis={deckAnalysis}
-        format={format}
-      />
-    </div>
-  );
-};
+//   return (
+//     <div className="ai-panel-view">
+//       <AIPanel
+//         deck={deckForAI}
+//         commander={commander}
+//         onCardSuggestion={handleCardSuggestion}
+//         recommendations={recommendations}
+//         deckArchetype={deckArchetype}
+//         deckAnalysis={deckAnalysis}
+//         format={format}
+//       />
+//     </div>
+//   );
+// };
 
 export default DeckBuilder;

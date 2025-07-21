@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import Card from './Card'
 import SearchControls from './components/SearchControls';
 import CollectionManager from './components/CollectionManager';
@@ -6,6 +6,8 @@ import SemanticSearchV2 from './components/SemanticSearchV2';
 import DeckBuilder from './components/DeckBuilder';
 import HandSimulator from './components/HandSimulator';
 import CollectionView from './components/CollectionView';
+import CardDetailModal from './components/CardDetailModal';
+import useCardNavigation from './hooks/useCardNavigation';
 import './App.css'
 import './components/SearchControls.css';
 import SetBrowser from './components/SetBrowser';
@@ -47,6 +49,10 @@ function App() {
   const [activeTab, setActiveTab] = useState('collections') // 'collections', 'search', 'semantic-search', 'deckbuilder', 'hand-simulator', 'import', or 'synergy'
   const [selectedSet, setSelectedSet] = useState(null);
   const [isSetBrowserOpen, setIsSetBrowserOpen] = useState(false);
+
+  // Navigation state
+  const [selectedCard, setSelectedCard] = useState(null);
+  const [navigationContext, setNavigationContext] = useState('collection'); // 'collection' | 'search' | 'individual-collection'
 
   useEffect(() => {
     loadUserCollections()
@@ -208,8 +214,6 @@ function App() {
               collectionCard.collectorNumber
             )
 
-            console.log(scryfallCard)
-
             // Fix for prices not showing correctly
             if (scryfallCard && (!scryfallCard.prices || !scryfallCard.prices.usd)) {
               if (!scryfallCard.prices) {
@@ -224,8 +228,10 @@ function App() {
               name: collectionCard.cardName,
               setCode: collectionCard.setCode || '',
               collectorNumber: collectionCard.collectorNumber || '',
-              quantity: collectionCard.quantity || 1,
-              isFoil: collectionCard.foil === 'foil',
+              quantity: collectionCard.total_quantity || 1,
+              foil_quantity: collectionCard.foil_quantity || 0,
+              normal_quantity: collectionCard.normal_quantity || 0,
+              isFoil: false, // This will be handled differently now
               scryfallData: scryfallCard
             }
           } catch (error) {
@@ -234,8 +240,10 @@ function App() {
               name: collectionCard.cardName,
               setCode: collectionCard.setCode || '',
               collectorNumber: collectionCard.collectorNumber || '',
-              quantity: collectionCard.quantity || 1,
-              isFoil: collectionCard.foil === 'foil',
+              quantity: collectionCard.total_quantity || 1,
+              foil_quantity: collectionCard.foil_quantity || 0,
+              normal_quantity: collectionCard.normal_quantity || 0,
+              isFoil: false, // This will be handled differently now
               scryfallData: null
             }
           }
@@ -311,140 +319,16 @@ function App() {
   }
 
 
-  const handleCollectionSemanticSearch = async (query) => {
-    if (!query) {
+  const handleCollectionSemanticSearch = async (results) => {
+    if (!results || !Array.isArray(results)) {
       setCollectionSemanticResults([]);
       return;
     }
 
     setCollectionSemanticLoading(true);
     try {
-      // Check if the query is asking for specific power/toughness values
-      const powerMatch = query.match(/(\d+)\s*power/i);
-      const toughnessMatch = query.match(/(\d+)\s*toughness/i);
-
-      let results = [];
-
-      if (powerMatch || toughnessMatch) {
-        // For power/toughness queries, use regular filtering on collection
-        console.log('Detected power/toughness query, using regular filtering');
-
-        results = collectionCards.filter(card => {
-          const scryfallData = card.scryfallData;
-
-          // Check power
-          if (powerMatch) {
-            const requestedPower = powerMatch[1];
-            if (!scryfallData.power || scryfallData.power !== requestedPower) {
-              return false;
-            }
-          }
-
-          // Check toughness
-          if (toughnessMatch) {
-            const requestedToughness = toughnessMatch[1];
-            if (!scryfallData.toughness || scryfallData.toughness !== requestedToughness) {
-              return false;
-            }
-          }
-
-          return true;
-        });
-
-        console.log(`Found ${results.length} cards with specified power/toughness in collection`);
-      } else {
-        // Hybrid approach: Combine semantic search with text search
-        console.log('Using hybrid search for query:', query);
-
-        // Step 1: Get semantic search results
-        let semanticMatches = [];
-        try {
-          const semanticResults = await window.electronAPI.searchCardsSemantic(query);
-          const cardIds = semanticResults.map(r => r.id);
-
-          semanticMatches = collectionCards.filter(collectionCard =>
-            cardIds.includes(collectionCard.scryfallData.id)
-          );
-
-          console.log(`Semantic search found ${semanticMatches.length} matches in collection`);
-        } catch (error) {
-          console.error('Semantic search failed:', error);
-        }
-
-        // Step 2: Perform text-based search on collection for better coverage
-        const textMatches = collectionCards.filter(card => {
-          const scryfallData = card.scryfallData;
-          const searchText = query.toLowerCase();
-
-          // Search in multiple fields
-          const searchFields = [
-            scryfallData.name || '',
-            scryfallData.text || scryfallData.oracle_text || '',
-            scryfallData.type || scryfallData.type_line || '',
-            // Also search card faces for double-faced cards
-            ...(scryfallData.card_faces || []).map(face => face.oracle_text || ''),
-            ...(scryfallData.card_faces || []).map(face => face.name || ''),
-            ...(scryfallData.card_faces || []).map(face => face.type_line || '')
-          ];
-
-          // Check if any field contains relevant keywords
-          return searchFields.some(field =>
-            field.toLowerCase().includes(searchText) ||
-            // Handle common semantic search terms
-            (searchText.includes('counter') && (
-              field.toLowerCase().includes('counter') ||
-              field.toLowerCase().includes('+1/+1') ||
-              field.toLowerCase().includes('-1/-1') ||
-              field.toLowerCase().includes('charge') ||
-              field.toLowerCase().includes('loyalty')
-            )) ||
-            (searchText.includes('draw') && field.toLowerCase().includes('draw')) ||
-            (searchText.includes('life') && (
-              field.toLowerCase().includes('life') ||
-              field.toLowerCase().includes('gain') ||
-              field.toLowerCase().includes('lose')
-            )) ||
-            (searchText.includes('damage') && field.toLowerCase().includes('damage')) ||
-            (searchText.includes('destroy') && field.toLowerCase().includes('destroy')) ||
-            (searchText.includes('exile') && field.toLowerCase().includes('exile')) ||
-            (searchText.includes('token') && field.toLowerCase().includes('token'))
-          );
-        });
-
-        console.log(`Text search found ${textMatches.length} matches in collection`);
-
-        // Step 3: Combine and deduplicate results
-        const combinedResults = new Map();
-
-        // Add semantic matches first (higher priority)
-        semanticMatches.forEach((card, index) => {
-          combinedResults.set(card.cardKey, { card, priority: 1, semanticIndex: index });
-        });
-
-        // Add text matches
-        textMatches.forEach(card => {
-          if (!combinedResults.has(card.cardKey)) {
-            combinedResults.set(card.cardKey, { card, priority: 2 });
-          }
-        });
-
-        // Sort by priority (semantic first) then by name
-        results = Array.from(combinedResults.values())
-          .sort((a, b) => {
-            if (a.priority !== b.priority) {
-              return a.priority - b.priority;
-            }
-            if (a.priority === 1 && b.priority === 1) {
-              return (a.semanticIndex || 0) - (b.semanticIndex || 0);
-            }
-            return a.card.name.localeCompare(b.card.name);
-          })
-          .map(item => item.card);
-
-        console.log(`Combined search found ${results.length} total matches`);
-      }
-
-      console.log('Final results:', results.length);
+      // Results are already processed by SemanticSearchV2, just set them
+      console.log('Setting collection semantic results:', results.length);
       setCollectionSemanticResults(results);
     } catch (error) {
       console.error('Error during collection semantic search:', error);
@@ -643,7 +527,9 @@ function App() {
             }
           }
 
-          totalValue += priceUsd;
+          // Use total_quantity for value calculation
+          const cardQuantity = card.total_quantity || card.quantity || 1;
+          totalValue += priceUsd * cardQuantity;
         } else {
           // Create prices object if it doesn't exist
           card.prices = { usd: '0.00', usd_foil: '0.00' };
@@ -653,8 +539,10 @@ function App() {
           name: card.name,
           setCode: card.setCode || card.set_code || card.set || '',
           collectorNumber: card.number || card.collector_number || '',
-          isFoil: false,
-          quantity: card.quantity || 1,
+          quantity: card.total_quantity || card.quantity || 1,
+          foil_quantity: card.foil_quantity || 0,
+          normal_quantity: card.normal_quantity || 0,
+          isFoil: false, // This will be handled differently now
           scryfallData: card,
           cardKey: `${card.name}|${card.setCode || card.set_code || ''}|${card.number || card.collector_number || ''
             }|false`,
@@ -713,8 +601,53 @@ function App() {
     }
   };
 
+  // Navigation handlers
+  const handleCardClick = useCallback((card, context = 'collection') => {
+    setSelectedCard(card);
+    setNavigationContext(context);
+  }, []);
+
+  const handleCloseModal = useCallback(() => {
+    setSelectedCard(null);
+  }, []);
+
+  // Get current card list for navigation
+  const currentCardList = useMemo(() => {
+    switch (navigationContext) {
+      case 'search':
+        return searchResults;
+      case 'individual-collection':
+        return fileCards.map(card => card.scryfallData);
+      case 'collection':
+      default:
+        return filteredCollectionCards; // Return the full collection card objects
+    }
+  }, [navigationContext, searchResults, fileCards, filteredCollectionCards]);
+
+  // Keyboard navigation using custom hook
+  const navigation = useCardNavigation(
+    currentCardList,
+    selectedCard,
+    setSelectedCard,
+    !!selectedCard // Modal is open when selectedCard exists
+  );
+
   return (
     <div className={`app ${activeTab === 'deckbuilder' ? 'deckbuilder-active' : ''} ${activeTab === 'hand-simulator' ? 'simulator-active' : ''}`}>
+      {/* Card Detail Modal with Navigation */}
+      {selectedCard && (
+        <CardDetailModal
+          card={selectedCard}
+          onClose={handleCloseModal}
+          onNavigatePrevious={navigation.navigateToPrevious}
+          onNavigateNext={navigation.navigateToNext}
+          hasPrevious={navigation.hasPrevious}
+          hasNext={navigation.hasNext}
+          currentIndex={navigation.currentIndex}
+          totalCards={navigation.totalCards}
+        />
+      )}
+
       <header className="app-header">
         <h1>🃏 MTG Desktop Collection</h1>
         <div className="tab-controls">
@@ -829,6 +762,7 @@ function App() {
                         key={`${card.name}-${index}`}
                         card={card.scryfallData}
                         quantity={card.quantity}
+                        onCardClick={(card) => handleCardClick(card, 'individual-collection')}
                       />
                     ))}
                   </div>
@@ -879,6 +813,7 @@ function App() {
                       <Card
                         key={card.id}
                         card={card}
+                        onCardClick={(card) => handleCardClick(card, 'search')}
                       />
                     ))}
                   </div>
@@ -927,7 +862,9 @@ function App() {
         <footer className="app-footer">
           <small>
             Database: {bulkDataStats.cardCount?.toLocaleString()} cards •
-            Last updated: {new Date(bulkDataStats.lastUpdate).toLocaleDateString()}
+            Last updated: {bulkDataStats.lastUpdate ? new Date(bulkDataStats.lastUpdate).toLocaleDateString() : 'Unknown'} •
+            Built: {bulkDataStats.databaseBuiltAt ? new Date(bulkDataStats.databaseBuiltAt).toLocaleDateString() : 'Unknown'}
+            {bulkDataStats.version && ` • Version: ${bulkDataStats.version}`}
           </small>
         </footer>
       )}

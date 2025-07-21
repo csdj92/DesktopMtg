@@ -702,7 +702,31 @@ class CollectionImporter {
 
     try {
       let query = `
-        SELECT * FROM user_collections 
+        SELECT 
+          cardName,
+          setCode,
+          setName,
+          collectorNumber,
+          rarity,
+          scryfallId,
+          -- Aggregate foil quantities
+          SUM(CASE WHEN foil = 'foil' THEN quantity ELSE 0 END) as foil_quantity,
+          SUM(CASE WHEN foil = 'normal' THEN quantity ELSE 0 END) as normal_quantity,
+          -- Total quantity
+          SUM(quantity) as total_quantity,
+          -- Other aggregated fields (take the first non-null value)
+          MAX(condition) as condition,
+          MAX(language) as language,
+          MAX(notes) as notes,
+          MAX(purchasePrice) as purchasePrice,
+          MAX(currency) as currency,
+          MAX(binderName) as binderName,
+          MAX(binderType) as binderType,
+          MAX(manaboxId) as manaboxId,
+          MAX(misprint) as misprint,
+          MAX(altered) as altered,
+          MAX(importedAt) as importedAt
+        FROM user_collections 
         WHERE collectionName = ?
       `;
       const params = [collectionName];
@@ -712,6 +736,7 @@ class CollectionImporter {
         params.push(`%${search}%`);
       }
 
+      query += ` GROUP BY cardName, setCode, collectorNumber`;
       query += ` ORDER BY cardName LIMIT ? OFFSET ?`;
       params.push(limit, offset);
 

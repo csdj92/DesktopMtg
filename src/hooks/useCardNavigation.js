@@ -13,10 +13,14 @@ const useCardNavigation = (cardList, currentCard, onCardChange, isModalOpen = fa
     const currentIndex = useMemo(() => {
         if (!cardList || !currentCard) return -1;
 
-        // Handle both direct card objects and card entries with .card property
+        // Handle different card structures:
+        // 1. Direct card objects (search results)
+        // 2. Card entries with .card property
+        // 3. Collection cards with .scryfallData property
         return cardList.findIndex(item => {
-            const card = item.card || item;
-            return card.id === currentCard.id;
+            const card = item.card || item.scryfallData || item;
+            const currentCardData = currentCard.scryfallData || currentCard;
+            return card.id === currentCardData.id;
         });
     }, [cardList, currentCard]);
 
@@ -33,7 +37,9 @@ const useCardNavigation = (cardList, currentCard, onCardChange, isModalOpen = fa
         if (!navigationState.hasPrevious || !onCardChange) return;
 
         const previousItem = cardList[currentIndex - 1];
-        const previousCard = previousItem.card || previousItem;
+        // For collection cards, pass the full item (with scryfallData)
+        // For other contexts, pass just the card data
+        const previousCard = previousItem.scryfallData ? previousItem : (previousItem.card || previousItem);
         onCardChange(previousCard);
     }, [cardList, currentIndex, navigationState.hasPrevious, onCardChange]);
 
@@ -41,7 +47,9 @@ const useCardNavigation = (cardList, currentCard, onCardChange, isModalOpen = fa
         if (!navigationState.hasNext || !onCardChange) return;
 
         const nextItem = cardList[currentIndex + 1];
-        const nextCard = nextItem.card || nextItem;
+        // For collection cards, pass the full item (with scryfallData)
+        // For other contexts, pass just the card data
+        const nextCard = nextItem.scryfallData ? nextItem : (nextItem.card || nextItem);
         onCardChange(nextCard);
     }, [cardList, currentIndex, navigationState.hasNext, onCardChange]);
 

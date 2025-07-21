@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Card from '../Card';
 import CardDetailModal from './CardDetailModal';
+import useCardNavigation from '../hooks/useCardNavigation';
 import './SearchControls.css';
 import './SemanticSearchV2.css';
 
@@ -18,6 +19,9 @@ function SemanticSearchV2({
   const [cardDetailLoading, setCardDetailLoading] = useState(false);
   const [fullCardCache, setFullCardCache] = useState(new Map());
   const [modelProgress, setModelProgress] = useState(null);
+
+  // Navigation state
+  const [navigationContext, setNavigationContext] = useState('semantic-search');
 
   useEffect(() => {
     if (window.electronAPI?.onSemanticModelProgress) {
@@ -171,6 +175,7 @@ function SemanticSearchV2({
         fullCard._similarity = 1 - partialCard.distance;
         setFullCardCache(prev => new Map(prev).set(cacheKey, fullCard));
         setSelectedCard(fullCard);
+        setNavigationContext('semantic-search');
       }
     } catch (e) {
       console.error('Error fetching full card data', e);
@@ -180,6 +185,14 @@ function SemanticSearchV2({
   };
 
   const closeModal = () => setSelectedCard(null);
+
+  // Keyboard navigation using custom hook
+  const navigation = useCardNavigation(
+    results,
+    selectedCard,
+    setSelectedCard,
+    !!selectedCard // Modal is open when selectedCard exists
+  );
 
   return (
     <div className="semantic-search-v2">
@@ -312,7 +325,17 @@ function SemanticSearchV2({
       )}
 
       {selectedCard && (
-        <CardDetailModal card={selectedCard} onClose={closeModal} loading={cardDetailLoading} />
+        <CardDetailModal 
+          card={selectedCard} 
+          onClose={closeModal} 
+          loading={cardDetailLoading}
+          onNavigatePrevious={navigation.navigateToPrevious}
+          onNavigateNext={navigation.navigateToNext}
+          hasPrevious={navigation.hasPrevious}
+          hasNext={navigation.hasNext}
+          currentIndex={navigation.currentIndex}
+          totalCards={navigation.totalCards}
+        />
       )}
     </div>
   );

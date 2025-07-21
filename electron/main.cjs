@@ -201,7 +201,8 @@ ipcMain.handle('collection-get-all', () => {
 
 ipcMain.handle('collection-get', async (event, collectionName, options) => {
   // Get collected cards from main database
-  return await bulkDataService.getCollectedCards(options);
+  const { limit, offset } = options || {};
+  return await bulkDataService.getCollectedCards({ ...options, limit, offset });
 });
 
 // NEW: Simple direct method to get collected cards without any complex logic

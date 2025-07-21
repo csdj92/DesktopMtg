@@ -253,26 +253,43 @@
       var(--border-color) 80%,
       transparent 100%);
   opacity: 0.7;
+  pointer-events: none; /* Ensure it doesn't interfere with button clicks */
 }
 
 .panel-drag-bar .remove-panel-button {
-  background: transparent;
-  border: none;
-  color: var(--text-secondary);
+  background: rgba(220, 38, 38, 0.1);
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  color: #dc2626;
   cursor: pointer;
-  padding: 2px;
+  padding: 6px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: all 0.2s ease;
-  z-index: 2; /* Ensure it's clickable */
+  z-index: 10; /* Higher z-index to ensure it's clickable */
+  position: relative; /* Ensure proper stacking context */
+  min-width: 28px;
+  min-height: 28px;
+  user-select: none; /* Prevent text selection */
+  pointer-events: auto; /* Ensure clicks are captured */
+  margin-left: auto; /* Push to the right */
 }
 
 .panel-drag-bar .remove-panel-button:hover {
-  background-color: var(--danger-color);
+  background-color: #dc2626;
   color: white;
   transform: scale(1.1);
+  border-color: #dc2626;
+}
+
+.panel-drag-bar .remove-panel-button:active {
+  transform: scale(0.95);
+}
+
+.panel-drag-bar .remove-panel-button:focus {
+  outline: 2px solid #dc2626;
+  outline-offset: 2px;
 }
 
 .deck-builder-left-panel,
@@ -644,6 +661,89 @@
 .card-grid-item button:disabled:hover,
 .card-grid-item-deck button:disabled:hover {
   background-color: #444;
+}
+
+/* NEW: Card info and quantity display */
+.card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.quantity-info {
+  display: flex;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.quantity-info span {
+  background-color: var(--bg-tertiary);
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border-color);
+}
+
+.deck-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.deck-actions button {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 0.8rem;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-widget);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.deck-actions button:hover {
+  background-color: var(--bg-primary);
+  border-color: var(--accent-primary);
+}
+
+.deck-actions button.remove-from-deck {
+  background-color: var(--danger-color);
+  color: white;
+  border-color: var(--danger-color);
+}
+
+.deck-actions button.remove-from-deck:hover {
+  background-color: #e63946;
+  border-color: #e63946;
+}
+
+.deck-actions button.add-more {
+  background-color: var(--accent-secondary);
+  color: var(--bg-primary);
+  border-color: var(--accent-secondary);
+}
+
+.deck-actions button.add-more:hover {
+  background-color: #00e676;
+  border-color: #00e676;
+}
+
+.deck-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: var(--bg-tertiary);
+  border-color: var(--border-color);
+  color: var(--text-secondary);
+}
+
+.deck-actions button:disabled:hover {
+  background-color: var(--bg-tertiary);
+  border-color: var(--border-color);
+  color: var(--text-secondary);
 }
 
 .collection-view h3 {

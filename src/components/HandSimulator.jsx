@@ -1,39 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import Card from '../Card';
+import CardDetailModal from './CardDetailModal';
+import useCardNavigation from '../hooks/useCardNavigation';
 import './HandSimulator.css';
 import useImageCache from '../hooks/useImageCache';
-
-// Card component for displaying cards in hand
-const Card = ({ card, onCardClick }) => {
-  const getImageUrl = (cardData) => {
-    if (!cardData) return null;
-
-    // Handle double-faced cards
-    if (cardData.card_faces && cardData.card_faces.length > 0 && cardData.card_faces[0].image_uris) {
-      return cardData.card_faces[0].image_uris.normal;
-    }
-
-    // Handle single-faced cards
-    if (cardData.image_uris) {
-      return cardData.image_uris.normal;
-    }
-
-    return null;
-  };
-
-  const rawImageUrl = getImageUrl(card);
-  const { imageUrl, isLoading } = useImageCache(rawImageUrl);
-
-  return (
-    <div className="simulator-card" onClick={() => onCardClick && onCardClick(card)}>
-      <img 
-        src={imageUrl} 
-        alt={card?.name || 'Card Image'} 
-        loading="lazy"
-        className={isLoading ? 'loading' : ''}
-      />
-    </div>
-  );
-};
 
 // Fisher-Yates shuffle algorithm
 const shuffleArray = (array) => {
@@ -112,6 +82,9 @@ const HandSimulator = () => {
   const [mulliganCount, setMulliganCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [selectedCard, setSelectedCard] = useState(null);
+
+  // Navigation state
+  const [navigationContext, setNavigationContext] = useState('hand-simulator');
 
   // Load saved decks on component mount
   useEffect(() => {
@@ -247,6 +220,24 @@ const HandSimulator = () => {
       avgCmc: validCards.length > 0 ? validCards.reduce((sum, card) => sum + (card.manaValue ?? card.cmc ?? card.mana_value ?? 0), 0) / validCards.length : 0
     };
   }, [deckData]);
+
+  // Navigation handlers
+  const handleCardClick = useCallback((card) => {
+    setSelectedCard(card);
+    setNavigationContext('hand-simulator');
+  }, []);
+
+  const handleCloseModal = useCallback(() => {
+    setSelectedCard(null);
+  }, []);
+
+  // Keyboard navigation using custom hook
+  const navigation = useCardNavigation(
+    currentHand.filter(card => card), // Filter out any null cards
+    selectedCard,
+    setSelectedCard,
+    !!selectedCard // Modal is open when selectedCard exists
+  );
 
   return (
     <div className="hand-simulator">
@@ -384,7 +375,7 @@ const HandSimulator = () => {
                   <Card
                     key={`${card.id}-${index}`}
                     card={card}
-                    onCardClick={setSelectedCard}
+                    onCardClick={handleCardClick}
                   />
                 ))}
               </div>
@@ -395,18 +386,16 @@ const HandSimulator = () => {
 
       {/* Card Detail Modal */}
       {selectedCard && (
-        <div className="card-modal-overlay" onClick={() => setSelectedCard(null)}>
-          <div className="card-modal" onClick={e => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setSelectedCard(null)}>×</button>
-            <img src={selectedCard.image_uris?.large || selectedCard.image_uris?.normal} alt={selectedCard.name} />
-            <div className="card-details">
-              <h3>{selectedCard.name}</h3>
-              <p><strong>Type:</strong> {selectedCard.type_line}</p>
-              <p><strong>CMC:</strong> {selectedCard.cmc}</p>
-              {selectedCard.oracle_text && <p><strong>Text:</strong> {selectedCard.oracle_text.replace(/\?\?\?/g, '—')}</p>}
-            </div>
-          </div>
-        </div>
+        <CardDetailModal
+          card={selectedCard}
+          onClose={handleCloseModal}
+          onNavigatePrevious={navigation.navigateToPrevious}
+          onNavigateNext={navigation.navigateToNext}
+          hasPrevious={navigation.hasPrevious}
+          hasNext={navigation.hasNext}
+          currentIndex={navigation.currentIndex}
+          totalCards={navigation.totalCards}
+        />
       )}
     </div>
   );

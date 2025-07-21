@@ -376,8 +376,23 @@ class MTGRulesEngine {
       return { legal: false, reason: 'Banned in format' };
     }
 
-    // Check set legality
-    if (formatRules.allowedSets && formatRules.allowedSets !== 'all') {
+    // Check card format legality using the legalities field
+    if (card.legalities && typeof card.legalities === 'object') {
+      const formatKey = format.toLowerCase();
+      const legality = card.legalities[formatKey];
+      
+      if (legality === 'banned') {
+        return { legal: false, reason: 'Banned in format' };
+      } else if (legality === 'not_legal') {
+        return { legal: false, reason: 'Not legal in format' };
+      } else if (legality === 'restricted') {
+        return { legal: true, restricted: true, reason: 'Restricted to 1 copy' };
+      }
+      // If legality is 'legal', we continue to other checks
+    }
+
+    // Fallback: Check set legality only if we don't have format legality data
+    if (!card.legalities && formatRules.allowedSets && formatRules.allowedSets !== 'all') {
       const cardSet = card.set || card.set_code;
       if (cardSet && !formatRules.allowedSets.has(cardSet.toUpperCase())) {
         return { legal: false, reason: 'Set not legal in format' };
@@ -392,7 +407,7 @@ class MTGRulesEngine {
       }
     }
 
-    // Check if card is restricted
+    // Check if card is restricted (from our internal restricted list)
     if (this.restrictedCards.has(format.toLowerCase()) && 
         this.restrictedCards.get(format.toLowerCase()).has(cardName)) {
       return { legal: true, restricted: true, reason: 'Restricted to 1 copy' };

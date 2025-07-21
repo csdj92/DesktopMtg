@@ -104,9 +104,37 @@
   gap: 20px;
 }
 
+.modal-card-image {
+  position: relative;
+}
+
 .modal-card-image img {
   max-width: 300px;
   border-radius: 10px;
+}
+
+.modal-flip-button {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background-color: rgba(0, 0, 0, 0.7);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  cursor: pointer;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+
+.modal-flip-button:hover {
+  background-color: rgba(0, 0, 0, 0.9);
+  transform: scale(1.1);
 }
 
 .modal-card-details {
@@ -118,6 +146,37 @@
 .modal-card-details h2 {
   margin-top: 0;
   font-size: 1.5rem;
+}
+
+.owned-quantity {
+  margin: 10px 0;
+}
+
+.foil-breakdown-details {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.quantity-item {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.quantity-item.normal {
+  background-color: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border: 1px solid #3b82f6;
+}
+
+.quantity-item.foil {
+  background-color: rgba(255, 215, 0, 0.2);
+  color: #fbbf24;
+  border: 1px solid #f59e0b;
 }
 
 .legalities {

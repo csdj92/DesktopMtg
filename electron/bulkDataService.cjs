@@ -67,7 +67,7 @@ class BulkDataService {
     } catch (error) {
       console.error('[bulkDataService] Failed to initialize bulk data service:', error);
       console.error('Database file path:', DATABASE_FILE);
-      
+
       // Broadcast error to UI
       this._broadcast('bulk-data-error', {
         message: 'Failed to initialize database. Please restart the application.',
@@ -83,7 +83,7 @@ class BulkDataService {
     }
 
     console.log(`Opening database at: ${DATABASE_FILE}`);
-    
+
     this.db = await open({
       filename: DATABASE_FILE,
       driver: sqlite3.Database
@@ -239,7 +239,12 @@ class BulkDataService {
             )
             FROM daily_prices AS dp2
             WHERE dp2.uuid = c.uuid
-          ) AS prices_json
+          ) AS prices_json,
+
+          /* Aggregate quantities from user_collections */
+          COALESCE(uc.foil_quantity, 0) as foil_quantity,
+          COALESCE(uc.normal_quantity, 0) as normal_quantity,
+          COALESCE(uc.total_quantity, 0) as total_quantity
 
         FROM cards AS c
         LEFT JOIN cardIdentifiers   AS ci  ON ci.uuid       = c.uuid
@@ -247,6 +252,19 @@ class BulkDataService {
         LEFT JOIN sets              AS s   ON s.code        = c.setCode
         LEFT JOIN cardPurchaseUrls  AS cpu ON cpu.uuid      = c.uuid
         LEFT JOIN cardRelatedLinks  AS crl ON crl.uuid      = c.uuid
+        LEFT JOIN (
+          SELECT 
+            cardName,
+            setCode,
+            collectorNumber,
+            SUM(CASE WHEN foil = 'foil' THEN quantity ELSE 0 END) as foil_quantity,
+            SUM(CASE WHEN foil = 'normal' THEN quantity ELSE 0 END) as normal_quantity,
+            SUM(quantity) as total_quantity
+          FROM user_collections 
+          GROUP BY cardName, setCode, collectorNumber
+        ) uc ON lower(uc.cardName) = lower(c.name) 
+           AND lower(uc.setCode) = lower(c.setCode) 
+           AND uc.collectorNumber = c.number
 
         WHERE c.collected >= 1
         
@@ -357,14 +375,72 @@ class BulkDataService {
 
   async loadMetadata() {
     try {
+      // First try to load from database meta table
+      const dbMetadata = await this.loadMetadataFromDatabase();
+      if (dbMetadata) {
+        this.metadata = dbMetadata;
+        console.log('✅ Loaded metadata from database meta table');
+        return;
+      }
+
+      // Fallback to JSON file if no database meta table exists
       const metadataExists = await this.fileExists(METADATA_FILE);
       if (metadataExists) {
         const metadataContent = await fs.readFile(METADATA_FILE, 'utf-8');
         this.metadata = JSON.parse(metadataContent);
+        console.log('📄 Loaded metadata from JSON file (fallback)');
       }
     } catch (error) {
       console.error('Error loading metadata:', error);
       this.metadata = null;
+    }
+  }
+
+  async loadMetadataFromDatabase() {
+    if (!this.db) return null;
+
+    try {
+      // Check if meta table exists
+      const tableExists = await this.db.get(`
+        SELECT name FROM sqlite_master 
+        WHERE type='table' AND name='meta'
+      `);
+
+      if (!tableExists) {
+        console.log('📋 No meta table found in database');
+        return null;
+      }
+
+      // Get the latest metadata row using the date column
+      const metaRow = await this.db.get(`
+        SELECT * FROM meta 
+        ORDER BY date DESC 
+        LIMIT 1
+      `);
+
+      if (!metaRow) {
+        console.log('📋 No metadata rows found in meta table');
+        return null;
+      }
+
+      console.log('📋 Found metadata from database:', metaRow);
+
+      // Convert database row to metadata object format
+      // Since your table only has date and version, we'll create a minimal metadata object
+      return {
+        id: 'database_meta',
+        type: 'all_cards',
+        name: 'MTG Database',
+        description: 'Magic: The Gathering card database',
+        updated_at: metaRow.date,
+        version: metaRow.version,
+        card_count: this.cardCount, // Use the actual card count from the database
+        database_built_at: metaRow.date, // Use the date as build date
+        built_with: `Database v${metaRow.version || '1.0'}`
+      };
+    } catch (error) {
+      console.error('Error loading metadata from database:', error);
+      return null;
     }
   }
 
@@ -905,7 +981,7 @@ class BulkDataService {
       searchParams = { name: searchParams };
     }
 
-    const { name, text, type, colors, manaCost, manaValue, power, toughness, rarity, types, subTypes, superTypes } = searchParams;
+    const { name, text, type, colors, manaCost, manaValue, power, toughness, rarity, types, subTypes, superTypes, format } = searchParams;
     const { limit = 50 } = options;
 
     // Build query to return card data directly from columns, joining with related tables
@@ -1005,6 +1081,17 @@ class BulkDataService {
       params.push(rarity);
     }
 
+    // Format legality filter
+    if (format) {
+      const formatColumn = format.toLowerCase();
+      // Only include cards that are legal in the specified format
+      // Use parameterized query to prevent SQL injection, but we need to build the column name dynamically
+      const validFormats = ['standard', 'modern', 'legacy', 'vintage', 'commander', 'pauper', 'pioneer', 'historic', 'brawl', 'alchemy', 'explorer', 'timeless'];
+      if (validFormats.includes(formatColumn)) {
+        query += ` AND cl.${formatColumn} IN ('legal', 'restricted')`;
+      }
+    }
+
     // Add ordering and limit - prioritize English cards
     if (name) {
       // Sort by relevance (exact name matches first), then prioritize English language
@@ -1018,7 +1105,23 @@ class BulkDataService {
     query += ` LIMIT ${limit}`;
 
     try {
+      // Debug: Log the query and format filter
+      if (format) {
+        console.log(`🔍 Backend search with format filter: ${format}`);
+        console.log(`🔍 Query includes format filter: ${query.includes('cl.' + format.toLowerCase())}`);
+      }
+
       const rows = await this.db.all(query, params);
+
+      // Debug: Log results count
+      if (format && rows.length > 0) {
+        console.log(`🔍 Backend returned ${rows.length} cards for format ${format}`);
+        console.log(`🔍 First few results:`, rows.slice(0, 3).map(r => ({
+          name: r.name,
+          [format.toLowerCase()]: r[format.toLowerCase()]
+        })));
+      }
+
       // Convert database rows to card format expected by the UI
       return Promise.all(rows.map(row => this.convertDbRowToCard(row)));
     } catch (error) {
@@ -1052,7 +1155,6 @@ class BulkDataService {
   }
 
   possibleLayouts = [
-    'normal',
     'saga',
     'adventure',
     'class',
@@ -1085,6 +1187,50 @@ class BulkDataService {
     if (!canonicalScryfallId) {
       console.warn(`Cannot build image URLs for "${cardRow.name}" without a scryfallId on the main card row.`);
       return null;
+    }
+
+    // Special handling for reversible_card layouts
+    if (cardRow.layout === 'reversible_card') {
+      // For reversible cards, create both faces manually since they don't have separate database records
+      const frontFace = {
+        name: cardRow.name,
+        mana_cost: cardRow.manaCost || '',
+        type_line: cardRow.type || '',
+        oracle_text: cardRow.text || '',
+        power: cardRow.power,
+        toughness: cardRow.toughness,
+        loyalty: cardRow.loyalty,
+        colors: this.parseJsonSafely(cardRow.colors) || [],
+        image_uris: {
+          small: `https://cards.scryfall.io/small/front/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
+          normal: `https://cards.scryfall.io/normal/front/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
+          large: `https://cards.scryfall.io/large/front/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
+          png: `https://cards.scryfall.io/png/front/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
+          art_crop: `https://cards.scryfall.io/art_crop/front/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
+          border_crop: `https://cards.scryfall.io/border_crop/front/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`
+        }
+      };
+
+      const backFace = {
+        name: cardRow.name,
+        mana_cost: cardRow.manaCost || '',
+        type_line: cardRow.type || '',
+        oracle_text: cardRow.text || '',
+        power: cardRow.power,
+        toughness: cardRow.toughness,
+        loyalty: cardRow.loyalty,
+        colors: this.parseJsonSafely(cardRow.colors) || [],
+        image_uris: {
+          small: `https://cards.scryfall.io/small/back/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
+          normal: `https://cards.scryfall.io/normal/back/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
+          large: `https://cards.scryfall.io/large/back/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
+          png: `https://cards.scryfall.io/png/back/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
+          art_crop: `https://cards.scryfall.io/art_crop/back/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`,
+          border_crop: `https://cards.scryfall.io/border_crop/back/${canonicalScryfallId.charAt(0)}/${canonicalScryfallId.charAt(1)}/${canonicalScryfallId}.jpg`
+        }
+      };
+
+      return [frontFace, backFace];
     }
 
     try {
@@ -1226,7 +1372,7 @@ class BulkDataService {
 
         // 3) find USD entries for different card types
         const validVendors = ['tcgplayer', 'cardmarket', 'cardkingdom'];
-        
+
         // Find foil price
         const foilEntry = priceArray.find(
           p =>
@@ -1345,10 +1491,13 @@ class BulkDataService {
       tcgplayer_id: row.tcgplayerId,
       cardmarket_id: row.cardmarketId,
       object: 'card',
-      
+
       // Collection-related fields
       collected: row.collected || 0,
-      
+      foil_quantity: parseInt(row.foil_quantity || 0),
+      normal_quantity: parseInt(row.normal_quantity || 0),
+      total_quantity: parseInt(row.total_quantity || 0),
+
       // Ensure numeric fields are properly typed
       cmc: parseFloat(row.manaValue || row.cmc || 0),
       mana_value: parseFloat(row.manaValue || row.cmc || 0),
@@ -1495,7 +1644,7 @@ class BulkDataService {
             FROM daily_prices AS dp2
             WHERE dp2.uuid = c.uuid
           ) AS prices_json
-           
+
         FROM cards c
         LEFT JOIN cardIdentifiers ci ON c.uuid = ci.uuid
         LEFT JOIN cardLegalities cl ON c.uuid = cl.uuid
@@ -1508,7 +1657,6 @@ class BulkDataService {
           AND (c.language = "English" OR c.language IS NULL)
         LIMIT 1
       `, [name, setCode, collectorNumber]);
-      console.log(exactMatch)
       if (exactMatch) {
         const cardData = await this.convertDbRowToCard(exactMatch);
         // console.log(`Found exact match for ${name} (${setCode}) #${collectorNumber} - Language: ${cardData.lang || 'en'}`);
@@ -1667,6 +1815,9 @@ class BulkDataService {
       lastUpdate: this.metadata?.updated_at,
       downloadedAt: this.metadata?.downloaded_at,
       dataSize: this.metadata?.size,
+      databaseBuiltAt: this.metadata?.database_built_at,
+      builtWith: this.metadata?.built_with,
+      version: this.metadata?.version,
       initialized: this.initialized,
       databaseFile: DATABASE_FILE
     };
@@ -1684,19 +1835,19 @@ class BulkDataService {
       console.warn('Bulk data service not ready for semantic search.');
       return [];
     }
-    
+
     // Enhance the query for better MTG-specific results
     const enhancedQuery = this.enhanceSemanticQuery(query);
     console.log(`🔍 Enhanced query: "${query}" → "${enhancedQuery}"`);
-    
+
     return await semanticSearchService.search(enhancedQuery, options);
   }
 
   enhanceSemanticQuery(query) {
     if (!query || typeof query !== 'string') return query;
-    
+
     let enhanced = query.toLowerCase();
-    
+
     // MTG-specific term expansions
     const termExpansions = {
       // Creature types and tribal
@@ -1708,7 +1859,7 @@ class BulkDataService {
       'vampires': 'vampire vampires tribal',
       'humans': 'human humans tribal',
       'artifacts': 'artifact artifacts metalcraft affinity',
-      
+
       // Mechanics and strategies
       'counterspells': 'counter target spell instant',
       'card draw': 'draw cards card advantage',
@@ -1720,25 +1871,25 @@ class BulkDataService {
       'graveyard': 'graveyard flashback unearth dredge recursion',
       'combo': 'infinite combo tutor search library',
       'protection': 'hexproof shroud indestructible protection',
-      
+
       // Card types
       'instants': 'instant spells flash speed',
       'sorceries': 'sorcery spells main phase',
       'enchantments': 'enchantment permanent aura',
       'planeswalkers': 'planeswalker loyalty ultimate',
       'lands': 'land mana base fixing',
-      
+
       // Power/toughness patterns
       'big creatures': 'high power large toughness',
       'small creatures': 'low mana cost efficient creatures',
       'flying creatures': 'flying creature evasion',
       'trample creatures': 'trample creature damage',
-      
+
       // Format-specific
       'commander': 'legendary creature command zone',
       'edh': 'commander multiplayer legendary',
       'multiplayer': 'each opponent all opponents',
-      
+
       // Colors and identity
       'white cards': 'white mana cost plains',
       'blue cards': 'blue mana cost island',
@@ -1748,16 +1899,16 @@ class BulkDataService {
       'multicolor': 'multicolored hybrid mana',
       'colorless': 'colorless artifact eldrazi'
     };
-    
+
     // Apply term expansions
     Object.entries(termExpansions).forEach(([term, expansion]) => {
       if (enhanced.includes(term)) {
         enhanced = enhanced.replace(new RegExp(term, 'g'), expansion);
       }
     });
-    
+
     // Handle specific patterns
-    
+
     // Power/toughness queries
     const powerMatch = enhanced.match(/(\d+)\s*power/);
     const toughnessMatch = enhanced.match(/(\d+)\s*toughness/);
@@ -1767,13 +1918,13 @@ class BulkDataService {
     if (toughnessMatch) {
       enhanced += ` ${toughnessMatch[1]}/${toughnessMatch[1]} power toughness creature`;
     }
-    
+
     // Mana cost queries
     const manaMatch = enhanced.match(/(\d+)\s*mana(?:\s+cost)?/);
     if (manaMatch) {
       enhanced += ` converted mana cost ${manaMatch[1]} cmc`;
     }
-    
+
     // Color combination queries
     const colorCombos = {
       'azorius': 'white blue',
@@ -1787,18 +1938,18 @@ class BulkDataService {
       'boros': 'red white',
       'simic': 'green blue'
     };
-    
+
     Object.entries(colorCombos).forEach(([guild, colors]) => {
       if (enhanced.includes(guild)) {
         enhanced = enhanced.replace(new RegExp(guild, 'g'), colors);
       }
     });
-    
+
     // Add context for better semantic understanding
     if (!enhanced.includes('magic') && !enhanced.includes('mtg')) {
       enhanced = `${enhanced}`;
     }
-    
+
     return enhanced.trim();
   }
 

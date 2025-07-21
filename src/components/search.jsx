@@ -1,16 +1,38 @@
 class SearchFunctions {
-  constructor(collectionCards = [], setFilteredCollectionCards = () => {}) {
+  constructor(collectionCards = [], setFilteredCollectionCards = () => { }, format = null, isCardLegalInFormat = null) {
     this.collectionCards = collectionCards;
     this.setFilteredCollectionCards = setFilteredCollectionCards;
+    this.format = format;
+    this.isCardLegalInFormat = isCardLegalInFormat;
   }
 
   filterCollectionCards = (cards, searchParams) => {
-    if (!searchParams || Object.values(searchParams).every(value => {
+    const hasSearchParams = searchParams && !Object.values(searchParams).every(value => {
       if (Array.isArray(value)) {
         return value.length === 0;
       }
       return !value || value.trim() === '';
-    })) {
+    });
+
+    // If no search params but we have format filtering, still apply format filter
+    if (!hasSearchParams && this.format && this.isCardLegalInFormat) {
+      const formatFiltered = cards.filter(cardEntry => {
+        const baseCard = cardEntry.card || cardEntry;
+        return baseCard && this.isCardLegalInFormat(baseCard);
+      });
+
+      try {
+        if (typeof this.setFilteredCollectionCards === 'function') {
+          this.setFilteredCollectionCards(formatFiltered);
+        }
+      } catch (err) {
+        // ignore
+      }
+      return;
+    }
+
+    // If no search params and no format filtering, return all cards
+    if (!hasSearchParams) {
       try {
         if (typeof this.setFilteredCollectionCards === 'function') {
           this.setFilteredCollectionCards(cards);
@@ -23,10 +45,17 @@ class SearchFunctions {
 
     const { name, text, type, colors, manaCost, manaValue, power, toughness, rarity, types, subTypes, superTypes } = searchParams;
 
+    const originalCount = cards.length;
+
     const filtered = cards.filter(cardEntry => {
       // Support two shapes: direct card or { card, quantity }
       const baseCard = cardEntry.card || cardEntry; // prefer nested .card if present
       if (!baseCard) return false;
+
+      // Apply format legality filter first if available
+      if (this.format && this.isCardLegalInFormat && !this.isCardLegalInFormat(baseCard)) {
+        return false;
+      }
 
       const scryfallData = baseCard.scryfallData || baseCard;
 
@@ -73,7 +102,7 @@ class SearchFunctions {
           return false;
         }
       }
-      
+
       // Colors (must include all selected colors)
       if (colors && colors.length > 0) {
         if (!scryfallData.colors || !colors.every(c => scryfallData.colors.includes(c))) {
@@ -89,7 +118,7 @@ class SearchFunctions {
           return false;
         }
       }
-      
+
       // Power
       if (power && (!scryfallData.power || scryfallData.power !== power)) {
         return false;
@@ -99,7 +128,7 @@ class SearchFunctions {
       if (toughness && (!scryfallData.toughness || scryfallData.toughness !== toughness)) {
         return false;
       }
-      
+
       // Mana value (converted mana cost)
       if (manaValue) {
         const cardManaValue = scryfallData.cmc || scryfallData.convertedManaCost || scryfallData.mana_value;
@@ -139,7 +168,13 @@ class SearchFunctions {
 
       return true;
     })
-    
+
+    // Debug logging
+    if (this.format && originalCount > 0) {
+      console.log(`🔍 Collection search filtered ${originalCount - filtered.length} illegal cards from ${originalCount} total for ${this.format} format`);
+      console.log(`🔍 Remaining cards: ${filtered.length}`);
+    }
+
     // Push results to callback if provided
     try {
       if (typeof this.setFilteredCollectionCards === 'function') {
@@ -151,6 +186,8 @@ class SearchFunctions {
   }
 
   handleCollectionSearch = (searchParams) => {
+    console.log(`🔍 Collection search with format: ${this.format}`);
+    console.log(`🔍 Search params:`, searchParams);
     this.filterCollectionCards(this.collectionCards, searchParams);
   }
 }

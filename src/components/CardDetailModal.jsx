@@ -18,7 +18,10 @@ const CardDetailModal = ({
   onAddToDeck,
   onRemoveFromDeck,
   deckFormat = 'commander',
-  commanderColorIdentity = null
+  commanderColorIdentity = null,
+  // Collection quantities
+  foil_quantity = 0,
+  normal_quantity = 0
 }) => {
   if (!card) return null;
 
@@ -31,9 +34,75 @@ const CardDetailModal = ({
   const [showRulings, setShowRulings] = useState(false);
   const [showLegalities, setShowLegalities] = useState(false);
   const [collectionNames, setCollectionNames] = useState([]);
+  const [currentFace, setCurrentFace] = useState(0);
 
   // Deck management state
   const [deckActionStatus, setDeckActionStatus] = useState('idle'); // 'idle' | 'adding' | 'removing' | 'success' | 'error'
+
+  // Helper function to detect double-faced cards
+  const isDoubleFaced = (card) => {
+    // Check for Scryfall format (card_faces array)
+    if (card && card.card_faces && Array.isArray(card.card_faces) && card.card_faces.length > 1) {
+      return true;
+    }
+    
+    // Check for new database format (layout indicates double-faced)
+    if (card && card.layout) {
+      const doubleFacedLayouts = [        
+        'saga',
+        'adventure',
+        'class',
+        'aftermath',
+        'split',
+        'flip',
+        'transform',
+        'prototype',
+        'meld',
+        'leveler',
+        'mutate',
+        'vanguard',
+        'planar',
+        'scheme',
+        'modal_dfc',
+        'case',
+        'reversible_card',
+        'augment',
+        'host',
+      ];
+      if (doubleFacedLayouts.includes(card.layout)) {
+        return true;
+      }
+    }
+    
+    // Check if there are face-specific fields indicating multiple faces
+    if (card && card.faceName && card.faceName !== card.name) {
+      return true;
+    }
+    
+    return false;
+  };
+
+  // Helper function to get current face data
+  const getCurrentFace = () => {
+    if (isDoubleFaced(card)) {
+      // Handle Scryfall format with card_faces array
+      if (card.card_faces && Array.isArray(card.card_faces) && card.card_faces.length > 1) {
+        const faceIndex = Math.max(0, Math.min(currentFace, card.card_faces.length - 1));
+        return card.card_faces[faceIndex];
+      }
+      
+      // Handle new database format - for now, return the card itself
+      // TODO: Implement proper face switching for new database format
+      return card;
+    }
+    return card;
+  };
+
+  const handleFlip = (e) => {
+    e.stopPropagation(); // Prevent card click events when flipping
+    const newFaceIndex = currentFace === 0 ? 1 : 0;
+    setCurrentFace(newFaceIndex);
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -56,7 +125,6 @@ const CardDetailModal = ({
               (c.id === card.id || c.uuid === card.uuid) && c.collected
             );
 
-            console.log(`Card ${card.name} collected status:`, isCollected);
 
             // If there's a mismatch (0 quantity but still marked as collected), fix it
             if ((res?.total === 0 || !res?.total) && isCollected && (card.id || card.uuid)) {
@@ -87,7 +155,6 @@ const CardDetailModal = ({
         const names = await window.electronAPI.getCollectionNames();
         if (isMounted) {
           setCollectionNames(names);
-          console.log('Available collections:', names);
         }
       } catch (err) {
         console.error('Failed to load collection names:', err);
@@ -116,7 +183,7 @@ const CardDetailModal = ({
     return null;
   };
 
-  const cardFace = card.card_faces ? card.card_faces[0] : card;
+  const cardFace = getCurrentFace();
   const rawImageUrl = getImageUrl(cardFace);
   const { imageUrl, isLoading } = useImageCache(rawImageUrl);
 
@@ -450,10 +517,20 @@ const CardDetailModal = ({
           <div className="modal-card-image">
             <img
               src={imageUrl}
-              alt={card.name}
+              alt={cardFace.name || card.name}
               className={isLoading ? 'loading' : ''}
               loading="lazy"
             />
+            {isDoubleFaced(card) && (
+              <button 
+                className="flip-button modal-flip-button" 
+                onClick={handleFlip} 
+                title={`Flip to ${currentFace === 0 ? 'back' : 'front'} face`}
+                aria-label={`Flip card to show ${currentFace === 0 ? 'back' : 'front'} face`}
+              >
+                🔄
+              </button>
+            )}
             <div className="legalities">
               <button onClick={() => setShowLegalities(!showLegalities)} className="legalities-toggle-btn">
                 {showLegalities ? 'Hide' : 'Show'} Legalities ({Object.keys(legalities).length})
@@ -471,12 +548,28 @@ const CardDetailModal = ({
             </div>
           </div>
           <div className="modal-card-details">
-            <h2>{card.name}</h2>
-            <p>{(card.type || card.type_line || '').replace(/\?\?\?/g, '—')}</p>
+            <h2>{cardFace.name || card.name}</h2>
+            <p>{(cardFace.type || cardFace.type_line || card.type || card.type_line || '').replace(/\?\?\?/g, '—')}</p>
             <p><strong>Set:</strong> {card.set_name}</p>
             <p><strong>Rarity:</strong> {card.rarity}</p>
             {ownedQty !== null && (
-              <p><strong>Owned:</strong> {ownedQty} {ownedQty === 1 ? 'copy' : 'copies'}</p>
+              <div className="owned-quantity">
+                <p><strong>Owned:</strong> {ownedQty} {ownedQty === 1 ? 'copy' : 'copies'}</p>
+                {(foil_quantity > 0 || normal_quantity > 0) && (
+                  <div className="foil-breakdown-details">
+                    {normal_quantity > 0 && (
+                      <span className="quantity-item normal">
+                        {normal_quantity} Normal
+                      </span>
+                    )}
+                    {foil_quantity > 0 && (
+                      <span className="quantity-item foil">
+                        {foil_quantity} Foil ★
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
             <p><strong>Collector Number:</strong> {card.number}</p>
 

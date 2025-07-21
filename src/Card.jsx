@@ -3,7 +3,7 @@ import './Card.css'; // Import the dedicated stylesheet
 import CardDetailModal from './components/CardDetailModal';
 import useImageCache from './hooks/useImageCache';
 
-const Card = ({ card, quantity = 1, disableModal = false, showFlipButton = true, onFlip, onCardClick, showSynergyScore = false }) => {
+const Card = ({ card, quantity = 1, foil_quantity = 0, normal_quantity = 0, disableModal = false, showFlipButton = true, onFlip, onCardClick, showSynergyScore = false }) => {
   const [currentFace, setCurrentFace] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
@@ -21,8 +21,26 @@ const Card = ({ card, quantity = 1, disableModal = false, showFlipButton = true,
     
     // Check for new database format (layout indicates double-faced)
     if (card && card.layout) {
-      const doubleFacedLayouts = [
-        'transform', 'modal_dfc', 'double_faced_token', 'art_series', 'double_sided'
+      const doubleFacedLayouts = [        
+    'saga',
+    'adventure',
+    'class',
+    'aftermath',
+    'split',
+    'flip',
+    'transform',
+    'prototype',
+    'meld',
+    'leveler',
+    'mutate',
+    'vanguard',
+    'planar',
+    'scheme',
+    'modal_dfc',
+    'case',
+    'reversible_card',
+    'augment',
+    'host',
       ];
       if (doubleFacedLayouts.includes(card.layout)) {
         return true;
@@ -150,7 +168,11 @@ const Card = ({ card, quantity = 1, disableModal = false, showFlipButton = true,
             </button>
           )}
           <div className="badges">
-            {quantity > 1 && <span className="quantity-badge">{quantity}x</span>}
+            {quantity > 1 && (
+              <span className="quantity-badge">
+                {quantity}x
+              </span>
+            )}
             {showSynergyScore && card.synergy_score !== undefined && (
               <span 
                 className={`synergy-badge ${getSynergyScoreClass(card.synergy_score)}`}
@@ -174,7 +196,14 @@ const Card = ({ card, quantity = 1, disableModal = false, showFlipButton = true,
         )}
       </div>
 
-      {showDetails && <CardDetailModal card={card} onClose={handleCloseModal} />}
+      {showDetails && (
+        <CardDetailModal 
+          card={card} 
+          onClose={handleCloseModal}
+          foil_quantity={foil_quantity}
+          normal_quantity={normal_quantity}
+        />
+      )}
     </>
   );
 };
