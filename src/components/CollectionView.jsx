@@ -213,7 +213,7 @@ const CollectionView = React.memo(function CollectionView({
                         </div>
                         <div className="stat-item">
                             <span className="stat-value">
-                                {Object.keys(collectionStats.setBreakdown).length}
+                                {Object.keys(collectionStats.setBreakdown || {}).length}
                             </span>
                             <span className="stat-label">Sets</span>
                         </div>

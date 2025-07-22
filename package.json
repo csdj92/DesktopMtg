@@ -1,6 +1,6 @@
 {
   "name": "desktopmtg",
-  "description": "Desktop Magic: The Gathering collection manager and deck builder",
+  "description": "Desktop Magic The Gathering collection manager and deck builder",
   "author": "C.J Davis",
   "private": true,
   "version": "1.9.0",
@@ -82,6 +82,7 @@
     "eslint-plugin-react-refresh": "^0.4.19",
     "fs-extra": "^11.3.0",
     "globals": "^16.0.0",
+    "png-to-ico": "^2.1.8",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.10",
     "tw-animate-css": "^1.3.4",
@@ -92,11 +93,11 @@
   "build": {
     "appId": "com.cjdavis.desktopmtg",
     "productName": "DesktopMTG",
+    "icon": "public/icon.ico",
     "asar": false,
     "asarUnpack": [
       "Database/**/*",
-      "vectordb/**/*",
-      "cache/**/*"
+      "vectordb/**/*"
     ],
     "directories": {
       "output": "dist-electron"
@@ -106,15 +107,10 @@
       "electron/**/*",
       "Database/**/*",
       "vectordb/**/*",
-      "cache/**/*",
       "app-update.yml",
       "package.json"
     ],
     "extraResources": [
-      {
-        "from": "dist",
-        "to": "dist"
-      },
       {
         "from": "Database",
         "to": "Database"
@@ -126,22 +122,12 @@
       {
         "from": "app-update.yml",
         "to": "app-update.yml"
-      },
-      {
-        "from": "cache",
-        "to": "cache"
       }
     ],
     "win": {
       "target": [
         {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "zip",
+          "target": "nsis-web",
           "arch": [
             "x64"
           ]
@@ -198,6 +184,15 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
+    },
+    "nsisWeb": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "installerIcon": "public/icon.ico",
+      "uninstallerIcon": "public/icon.ico",
+      "installerHeaderIcon": "public/icon.ico"
     }
   }
 }

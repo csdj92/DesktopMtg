@@ -11,7 +11,7 @@ const { buildGreedyCommanderDeck } = require('./reranker/deckGenerator.cjs');
 const rulesEngine = require('./rulesEngine.cjs');
 const { weights } = require('./reranker/weights.cjs');
 const settingsManager = require('./settingsManager.cjs');
-const { loadElectronLlm } = require('@electron/llm');
+const DailyPrices = require('./databaseService/getDailyPrices.cjs');
 const {
   isCardInColorIdentity,
   rerankCardsByDeckSynergy,
@@ -1176,6 +1176,16 @@ ipcMain.handle('search-cards', async (event, searchTerm) => {
 // Card Count
 ipcMain.handle('get-card-count', async () => {
   return bulkDataService.getCardCount();
+});
+
+// Daily Prices
+ipcMain.handle('get-daily-prices', async () => {
+  try {
+    return await DailyPrices.getDailyPrices();
+  } catch (error) {
+    console.error('Error updating daily prices:', error);
+    return { success: false, error: error.message };
+  }
 });
 
 // Set browsing

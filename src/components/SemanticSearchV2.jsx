@@ -206,7 +206,7 @@ function SemanticSearchV2({
             min={1}
             max={1000}
             className="limit-input"
-            placeholder="Max results"
+            placeholder="Limit"
             title="Max results"
           />
           <input
@@ -214,7 +214,6 @@ function SemanticSearchV2({
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
-              // Ensure input keeps focus
               e.target.focus();
             }}
             onKeyDown={handleKeyDown}
@@ -228,7 +227,7 @@ function SemanticSearchV2({
             disabled={isLoading || !query.trim()}
             className="search-button"
           >
-            {isLoading ? 'Searching...' : 'Search'}
+            {isLoading ? '...' : 'Search'}
           </button>
           {query && (
             <button
@@ -236,16 +235,12 @@ function SemanticSearchV2({
               className="clear-button"
               disabled={isLoading}
             >
-              Clear
+              ×
             </button>
           )}
         </div>
-
-        <div className="search-info">
-          <p className="semantic-search-hint">
-            🧠 <strong>Semantic Search</strong><br />
-            Describe what the card does, not just keywords. Try: "creatures that gain life", "instant spells that counter", "artifacts that draw cards"
-          </p>
+        <div className="search-hint">
+          🧠 Describe card effects, not just keywords
         </div>
       </div>
 
@@ -267,9 +262,11 @@ function SemanticSearchV2({
       {displayResults && !isLoading && results.length > 0 && (
         <div className="results-container">
           <div className="results-header">
-            <h3>Search Results</h3>
+            <div className="results-title-section">
+              <h3>Search Results</h3>
+              <span className="results-count">({results.length} cards)</span>
+            </div>
             <div className="results-info">
-              <span>Showing {results.length} unique cards</span>
               <small>Ranked by semantic similarity</small>
             </div>
           </div>
