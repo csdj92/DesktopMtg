@@ -86,24 +86,24 @@ ipcMain.handle('get-available-strategies', () => {
 // IPC Handlers
 // =================================================================
 
-  // User Collections Operations
-  ipcMain.handle('get-user-collections', async () => {
-    try {
-      return await collectionImporter.getCollections();
-    } catch (error) {
-      console.error('Error getting user collections:', error);
-      return [];
-    }
-  });
+// User Collections Operations
+ipcMain.handle('get-user-collections', async () => {
+  try {
+    return await collectionImporter.getCollections();
+  } catch (error) {
+    console.error('Error getting user collections:', error);
+    return [];
+  }
+});
 
-  ipcMain.handle('get-collection-names', async () => {
-    try {
-      return await collectionImporter.getCollectionNames();
-    } catch (error) {
-      console.error('Error getting collection names:', error);
-      return [];
-    }
-  });
+ipcMain.handle('get-collection-names', async () => {
+  try {
+    return await collectionImporter.getCollectionNames();
+  } catch (error) {
+    console.error('Error getting collection names:', error);
+    return [];
+  }
+});
 
 ipcMain.handle('get-user-collection-cards', async (event, collectionName, options = {}) => {
   try {
@@ -1470,23 +1470,7 @@ app.whenReady().then(async () => {
   // Initialize settings
   await settingsManager.initialize();
 
-  // 🤖 Load @electron/llm for AI features
-  // try {
-  //   console.log('🤖 Loading @electron/llm...');
-  //   await loadElectronLlm({
-  //     // Map the model alias used in renderers to the actual GGUF file we
-  //     // ship inside the electron/AI folder. Returning `null` will make
-  //     // @electron/llm fall back to its default logic, so we only override
-  //     // when the file exists.
-  //     getModelPath: (modelAlias) => {
-  //       const resolved = path.resolve(__dirname, 'AI', modelAlias);
-  //       return fsSync.existsSync(resolved) ? resolved : null;
-  //     }
-  //   });
-  //   console.log('✅ @electron/llm loaded successfully');
-  // } catch (error) {
-  //   console.error('❌ Failed to load @electron/llm:', error);
-  // }
+
 
   // Auto-updater setup
   if (process.env.NODE_ENV === 'production') {
@@ -1732,25 +1716,9 @@ ipcMain.handle('rules-analyze-color-balance', (event, cards) => {
 
 
 
-// 🤖 LLM availability check
-// Note: @electron/llm automatically injects window.electronAi into renderer
-// These handlers are kept for backwards compatibility but could be removed
-ipcMain.handle('llm-initialize', async () => {
-  // @electron/llm is already loaded in app.ready
-  return { success: true };
-});
 
-// Simple handler to check if LLM is available
-ipcMain.handle('llm-check-availability', async () => {
-  return {
-    success: true,
-    available: true,
-    modelPath: path.join(__dirname, 'AI', 'Meta-Llama-3-8B-Instruct.Q4_K_M.gguf')
-  };
-});
 
 app.on('before-quit', async () => {
   // Clean up resources
-  // Note: @electron/llm cleanup is handled automatically
   console.log('🔄 App shutting down...');
 }); 

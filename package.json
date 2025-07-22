@@ -26,7 +26,6 @@
     "electron:publish:win": "npm run build && electron-builder build --win --publish=always"
   },
   "dependencies": {
-    "@electron/llm": "^1.0.0",
     "@huggingface/transformers": "^3.6.3",
     "@lancedb/lancedb": "^0.21.0",
     "@radix-ui/react-accordion": "^1.2.11",
@@ -94,19 +93,13 @@
     "appId": "com.cjdavis.desktopmtg",
     "productName": "DesktopMTG",
     "icon": "public/icon.ico",
-    "asar": false,
-    "asarUnpack": [
-      "Database/**/*",
-      "vectordb/**/*"
-    ],
+    "asar": true,
     "directories": {
       "output": "dist-electron"
     },
     "files": [
       "dist/**/*",
       "electron/**/*",
-      "Database/**/*",
-      "vectordb/**/*",
       "app-update.yml",
       "package.json"
     ],
@@ -127,7 +120,7 @@
     "win": {
       "target": [
         {
-          "target": "nsis-web",
+          "target": "nsis",
           "arch": [
             "x64"
           ]
