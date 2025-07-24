@@ -994,7 +994,23 @@ class BulkDataService {
              cl.standardbrawl, cl.timeless, cl.vintage,
              s.name as setName,
              cpu.cardKingdom, cpu.cardmarket, cpu.tcgplayer,
-             crl.gatherer, crl.edhrec
+             crl.gatherer, crl.edhrec,
+
+             /* JSON array of all price records for this card */
+             (
+               SELECT json_group_array(
+                 json_object(
+                   'vendor',           dp2.vendor,
+                   'price',            dp2.price,
+                   'transaction_type', dp2.transaction_type,
+                   'card_type',        dp2.card_type,
+                   'date',             dp2.date,
+                   'currency',         dp2.currency
+                 )
+               )
+               FROM daily_prices AS dp2
+               WHERE dp2.uuid = c.uuid
+             ) AS prices_json
       FROM cards c
       LEFT JOIN cardIdentifiers ci ON c.uuid = ci.uuid
       LEFT JOIN cardLegalities cl ON c.uuid = cl.uuid
@@ -2036,7 +2052,23 @@ class BulkDataService {
                cl.standardbrawl, cl.timeless, cl.vintage,
                s.name as setName,
                cpu.cardKingdom, cpu.cardmarket, cpu.tcgplayer,
-               crl.gatherer, crl.edhrec
+               crl.gatherer, crl.edhrec,
+
+               /* JSON array of all price records for this card */
+          (
+            SELECT json_group_array(
+              json_object(
+                'vendor',           dp2.vendor,
+                'price',            dp2.price,
+                'transaction_type', dp2.transaction_type,
+                'card_type',        dp2.card_type,
+                'date',             dp2.date,
+                'currency',         dp2.currency
+              )
+            )
+            FROM daily_prices AS dp2
+            WHERE dp2.uuid = c.uuid
+          ) AS prices_json
         FROM cards c
         LEFT JOIN cardIdentifiers ci ON c.uuid = ci.uuid
         LEFT JOIN cardLegalities cl ON c.uuid = cl.uuid

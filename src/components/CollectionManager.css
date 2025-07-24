@@ -320,6 +320,26 @@
   padding: 2rem;
 }
 
+.no-selection-content {
+  display: flex;
+  gap: 2rem;
+  align-items: flex-start;
+  justify-content: center;
+  width: 100%;
+  max-width: 1200px;
+}
+
+.import-help {
+  flex: 1;
+  max-width: 600px;
+}
+
+.price-status-panel {
+  flex: 0 0 350px;
+  min-width: 350px;
+  margin-top: 2.8rem;
+}
+
 .no-selection h2 {
   color: var(--color-text-primary);
   margin-bottom: 0.5rem;
@@ -404,6 +424,19 @@
   
   .format-examples {
     grid-template-columns: 1fr;
+  }
+  
+  .no-selection-content {
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5rem;
+  }
+  
+  .price-status-panel {
+    flex: none;
+    min-width: auto;
+    width: 100%;
+    max-width: 400px;
   }
 }
 

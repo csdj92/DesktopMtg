@@ -211,6 +211,18 @@ const CollectionView = React.memo(function CollectionView({
                             <span className="stat-value">${collectionStats.totalValue.toFixed(2)}</span>
                             <span className="stat-label">Est. Value</span>
                         </div>
+                        {collectionStats.regularValue > 0 && (
+                            <div className="stat-item">
+                                <span className="stat-value">${collectionStats.regularValue.toFixed(2)}</span>
+                                <span className="stat-label">Regular Value</span>
+                            </div>
+                        )}
+                        {collectionStats.foilValue > 0 && (
+                            <div className="stat-item">
+                                <span className="stat-value">${collectionStats.foilValue.toFixed(2)}</span>
+                                <span className="stat-label">Foil Value</span>
+                            </div>
+                        )}
                         <div className="stat-item">
                             <span className="stat-value">
                                 {Object.keys(collectionStats.setBreakdown || {}).length}

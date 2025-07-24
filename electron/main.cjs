@@ -12,6 +12,34 @@ const rulesEngine = require('./rulesEngine.cjs');
 const { weights } = require('./reranker/weights.cjs');
 const settingsManager = require('./settingsManager.cjs');
 const DailyPrices = require('./databaseService/getDailyPrices.cjs');
+
+// Daily Price Update Scheduler
+let dailyPriceUpdateInterval = null;
+
+const scheduleDailyPriceUpdates = () => {
+  console.log('💰 Setting up daily price update scheduler...');
+  
+  // Run initial price update check
+  const runPriceUpdate = async () => {
+    try {
+      console.log('💰 Running scheduled daily price update...');
+      await DailyPrices.getDailyPrices();
+      console.log('💰 Daily price update completed successfully');
+    } catch (error) {
+      console.error('💰 Daily price update failed:', error);
+      log.error('Daily price update failed:', error);
+    }
+  };
+
+  // Run immediately on startup
+  runPriceUpdate();
+
+  // Schedule to run every 24 hours (86400000 milliseconds)
+  dailyPriceUpdateInterval = setInterval(runPriceUpdate, 24 * 60 * 60 * 1000);
+  
+  console.log('💰 Daily price update scheduler initialized - will run every 24 hours');
+};
+
 const {
   isCardInColorIdentity,
   rerankCardsByDeckSynergy,
@@ -1188,6 +1216,48 @@ ipcMain.handle('get-daily-prices', async () => {
   }
 });
 
+// Manual trigger for daily price updates
+ipcMain.handle('trigger-daily-price-update', async () => {
+  try {
+    console.log('💰 Manual daily price update triggered');
+    const result = await DailyPrices.getDailyPrices();
+    return { success: true, message: 'Daily price update completed', result };
+  } catch (error) {
+    console.error('Error in manual daily price update:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Get daily price update status
+ipcMain.handle('get-daily-price-status', async () => {
+  try {
+    const instance = await DailyPrices.create();
+    const needsUpdate = await instance.needsUpdate();
+    const lastUpdateDate = await instance.getLastUpdateDate();
+    await instance.close();
+    
+    const lastUpdate = lastUpdateDate ? 
+      (needsUpdate ? lastUpdateDate : 'Today') : 
+      'Never';
+    
+    return { 
+      needsUpdate, 
+      lastUpdate,
+      lastUpdateDate,
+      schedulerActive: dailyPriceUpdateInterval !== null 
+    };
+  } catch (error) {
+    console.error('Error getting daily price status:', error);
+    return { 
+      needsUpdate: true, 
+      lastUpdate: 'Unknown',
+      lastUpdateDate: null,
+      schedulerActive: dailyPriceUpdateInterval !== null,
+      error: error.message 
+    };
+  }
+});
+
 // Set browsing
 ipcMain.handle('list-sets', async () => {
   return await bulkDataService.listSets();
@@ -1534,11 +1604,23 @@ app.whenReady().then(async () => {
   // console.log('Auto-import finished.');
 
   console.log('All initializations complete.');
+
+  // Start daily price update scheduler
+  scheduleDailyPriceUpdates();
 });
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
+  }
+});
+
+// Cleanup daily price update scheduler on app quit
+app.on('before-quit', () => {
+  if (dailyPriceUpdateInterval) {
+    console.log('💰 Cleaning up daily price update scheduler...');
+    clearInterval(dailyPriceUpdateInterval);
+    dailyPriceUpdateInterval = null;
   }
 });
 

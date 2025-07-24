@@ -54,3 +54,4 @@ magic_cards.lance/259ea5a9-82bf-4c18-beb2-4b4284e6c1ee.lance
 vectordb/magic_cards.lance/_indices/*
 vectordb/magic_cards.lance/_transactions/*
 vectordb/magic_cards.lance/_versions/*
+cache/embeddings/*

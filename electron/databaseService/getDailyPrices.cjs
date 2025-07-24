@@ -100,6 +100,19 @@ class DailyPrices {
     return !row || row.date < today;
   }
 
+  /** Public method to check if daily prices need updating */
+  async needsUpdate() {
+    return await this._needsDownload();
+  }
+
+  /** Public method to get the last update date */
+  async getLastUpdateDate() {
+    const row = await this.db.get(
+      `SELECT date FROM daily_prices_meta ORDER BY date DESC LIMIT 1`
+    );
+    return row ? row.date : null;
+  }
+
   /** Download + save, with retry on transient errors */
   async downloadDailyPrices() {
     let lastErr;

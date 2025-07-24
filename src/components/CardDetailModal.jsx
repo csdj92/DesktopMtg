@@ -45,10 +45,10 @@ const CardDetailModal = ({
     if (card && card.card_faces && Array.isArray(card.card_faces) && card.card_faces.length > 1) {
       return true;
     }
-    
+
     // Check for new database format (layout indicates double-faced)
     if (card && card.layout) {
-      const doubleFacedLayouts = [        
+      const doubleFacedLayouts = [
         'saga',
         'adventure',
         'class',
@@ -73,12 +73,12 @@ const CardDetailModal = ({
         return true;
       }
     }
-    
+
     // Check if there are face-specific fields indicating multiple faces
     if (card && card.faceName && card.faceName !== card.name) {
       return true;
     }
-    
+
     return false;
   };
 
@@ -90,7 +90,7 @@ const CardDetailModal = ({
         const faceIndex = Math.max(0, Math.min(currentFace, card.card_faces.length - 1));
         return card.card_faces[faceIndex];
       }
-      
+
       // Handle new database format - for now, return the card itself
       // TODO: Implement proper face switching for new database format
       return card;
@@ -522,9 +522,9 @@ const CardDetailModal = ({
               loading="lazy"
             />
             {isDoubleFaced(card) && (
-              <button 
-                className="flip-button modal-flip-button" 
-                onClick={handleFlip} 
+              <button
+                className="flip-button modal-flip-button"
+                onClick={handleFlip}
                 title={`Flip to ${currentFace === 0 ? 'back' : 'front'} face`}
                 aria-label={`Flip card to show ${currentFace === 0 ? 'back' : 'front'} face`}
               >
@@ -573,7 +573,9 @@ const CardDetailModal = ({
             )}
             <p><strong>Collector Number:</strong> {card.number}</p>
 
-            {card.prices?.usd && <p><strong>Price:</strong> ${card.prices.usd}</p>}
+            {(card.prices?.usd_regular || card.prices?.usd) && (
+              <p><strong>Regular Price:</strong> ${card.prices?.usd_regular || card.prices?.usd}</p>
+            )}
             {card.prices?.usd_foil && <p><strong>Foil Price:</strong> ${card.prices.usd_foil}</p>}
 
             <p><strong>Artist:</strong> {card.artist}</p>

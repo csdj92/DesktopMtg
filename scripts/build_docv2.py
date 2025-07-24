@@ -15,7 +15,7 @@ import torch  # GPU detection
 
 
 class MagicCard(LanceModel):
-    # Existing fields
+    uuid: str
     name: str
     mana_cost: str | None = None
     mana_value: float
@@ -1338,10 +1338,31 @@ def main():
     model = OptimizedSentenceTransformer("all-MiniLM-L6-v2", device)
     doc_processor = EnhancedDocumentProcessor()
 
+    # Connect to LanceDB and get existing card UUIDs
+    db = lancedb.connect("C:/Users/csdj9/AppData/Roaming/desktopmtg/vectordb")
+    table_names = db.table_names()
+    existing_uuids = set()
+    table_exists = "magic_cards" in table_names
+
+    if table_exists:
+        print("Found existing 'magic_cards' table. Checking for new cards...")
+        table = db.open_table("magic_cards")
+        try:
+            # Efficiently get all UUIDs from the table
+            uuids_df = table.to_pandas(columns=["uuid"])
+            if not uuids_df.empty:
+                existing_uuids = set(uuids_df["uuid"].tolist())
+            print(f"Found {len(existing_uuids)} existing cards in LanceDB.")
+        except Exception as e:
+            print(f"Could not read UUIDs from existing table, rebuilding. Error: {e}")
+            table_exists = False # Force a rebuild
+    else:
+        print("No existing 'magic_cards' table found. A new one will be created.")
+
     # Load data from database
     from pathlib import Path
 
-    DB_PATH = Path(__file__).resolve().parent.parent / "Database" / "database.sqlite"
+    DB_PATH = r"C:\Users\csdj9\AppData\Roaming\desktopmtg\Database\database.sqlite"
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -1349,7 +1370,19 @@ def main():
     rows = cursor.fetchall()
     conn.close()
 
-    print(f"Loaded {len(rows)} cards from database")
+    print(f"Loaded {len(rows)} cards from database. Filtering for new cards...")
+    
+    new_cards = []
+    for row in rows:
+        card = dict(row)
+        if card.get('uuid') not in existing_uuids:
+            new_cards.append(card)
+
+    if not new_cards:
+        print("No new cards to add to the vector database. Exiting.")
+        return
+
+    print(f"Found {len(new_cards)} new cards to process.")
 
     # Prepare documents and records
     primary_docs: List[str] = []
@@ -1357,11 +1390,9 @@ def main():
     context_docs: List[str] = []
     records: List[dict] = []
 
-    print("Processing cards and creating document representations...")
+    print("Processing new cards and creating document representations...")
 
-    for row in rows:
-        card = dict(row)
-
+    for card in new_cards:
         # Parse string fields that might contain multiple values
         if isinstance(card.get("keywords"), str):
             card["keywords"] = (
@@ -1400,6 +1431,7 @@ def main():
 
         # Build record for LanceDB with enhanced fields
         record = {
+            "uuid": card.get("uuid"),
             "name": card.get("name", ""),
             "mana_cost": card.get("manaCost") or "",
             "mana_value": card.get("manaValue") or 0,
@@ -1443,9 +1475,9 @@ def main():
     )
 
     # Extract embeddings from results
-    primary_embeddings = embedding_results["primary"]
-    keyword_embeddings = embedding_results["keyword"]
-    context_embeddings = embedding_results["context"]
+    primary_embeddings = embedding_results.get("primary", [])
+    keyword_embeddings = embedding_results.get("keyword", [])
+    context_embeddings = embedding_results.get("context", [])
 
     # Validate embedding quality
     primary_quality = validate_embedding_quality(
@@ -1479,9 +1511,7 @@ def main():
 
     # Combine embeddings with records
     print("Combining embeddings with card records...")
-    for i, (record, primary_vec, keyword_vec, context_vec) in enumerate(
-        zip(records, primary_embeddings, keyword_embeddings, context_embeddings)
-    ):
+    for i, record in enumerate(records):
         # Convert numpy arrays to lists for LanceDB
         def to_list(vec):
             if isinstance(vec, np.ndarray):
@@ -1490,64 +1520,69 @@ def main():
                 return list(vec) if hasattr(vec, "__iter__") else [vec]
 
         # Add all vector fields
-        record["vector"] = to_list(
-            primary_vec
-        )  # Legacy field for backward compatibility
-        record["primary_vector"] = to_list(primary_vec)
-        record["keyword_vector"] = to_list(keyword_vec)
-        record["context_vector"] = to_list(context_vec)
+        record["vector"] = to_list(primary_embeddings[i])
+        record["primary_vector"] = to_list(primary_embeddings[i])
+        record["keyword_vector"] = to_list(keyword_embeddings[i])
+        record["context_vector"] = to_list(context_embeddings[i])
 
-    # Create LanceDB table with enhanced schema
-    print("Creating LanceDB table...")
-    db = lancedb.connect("C:/Users/csdj9/AppData/Roaming/desktopmtg/vectordb")
-    table = db.create_table(
-        "magic_cards",
-        schema=MagicCard,
-        mode="overwrite",
-    )
 
-    # Add records to table
-    print("Adding records to database...")
-    table.add(records)
+    if not table_exists:
+        # Create LanceDB table with enhanced schema
+        print("Creating new LanceDB table 'magic_cards'...")
+        table = db.create_table(
+            "magic_cards",
+            schema=MagicCard,
+            mode="overwrite",
+        )
+        # Add records to table
+        print("Adding records to database...")
+        table.add(records)
 
-    # Create indexes for all vector fields
-    print("Creating vector indexes...")
+        # Create indexes for all vector fields
+        print("Creating vector indexes...")
 
-    # Primary vector index (main semantic search)
-    table.create_index(
-        metric="cosine",
-        vector_column_name="primary_vector",
-        m=96,
-        ef_construction=1000,
-        accelerator="cuda" if torch.cuda.is_available() else None,
-    )
+        # Primary vector index (main semantic search)
+        table.create_index(
+            metric="cosine",
+            vector_column_name="primary_vector",
+            m=96,
+            ef_construction=1000,
+            accelerator="cuda" if torch.cuda.is_available() else None,
+        )
 
-    # Keyword vector index (exact matching)
-    table.create_index(
-        metric="cosine",
-        vector_column_name="keyword_vector",
-        m=96,
-        ef_construction=1000,
-        accelerator="cuda" if torch.cuda.is_available() else None,
-    )
+        # Keyword vector index (exact matching)
+        table.create_index(
+            metric="cosine",
+            vector_column_name="keyword_vector",
+            m=96,
+            ef_construction=1000,
+            accelerator="cuda" if torch.cuda.is_available() else None,
+        )
 
-    # Context vector index (contextual search)
-    table.create_index(
-        metric="cosine",
-        vector_column_name="context_vector",
-        m=96,
-        ef_construction=1000,
-        accelerator="cuda" if torch.cuda.is_available() else None,
-    )
+        # Context vector index (contextual search)
+        table.create_index(
+            metric="cosine",
+            vector_column_name="context_vector",
+            m=96,
+            ef_construction=1000,
+            accelerator="cuda" if torch.cuda.is_available() else None,
+        )
 
-    # Legacy vector index for backward compatibility
-    table.create_index(
-        metric="cosine",
-        vector_column_name="vector",
-        m=96,
-        ef_construction=1000,
-        accelerator="cuda" if torch.cuda.is_available() else None,
-    )
+        # Legacy vector index for backward compatibility
+        table.create_index(
+            metric="cosine",
+            vector_column_name="vector",
+            m=96,
+            ef_construction=1000,
+            accelerator="cuda" if torch.cuda.is_available() else None,
+        )
+    else:
+        # Table exists, so just add the new records
+        print(f"Adding {len(records)} new records to existing 'magic_cards' table...")
+        table = db.open_table("magic_cards")
+        table.add(records)
+        print("Indexes will be updated automatically by LanceDB.")
+
 
     print(f"Successfully populated LanceDB with {len(records)} enhanced card records")
     print("Multiple embedding types generated:")

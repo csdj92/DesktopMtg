@@ -31,7 +31,7 @@ const ALL_PANELS_CONFIG = {
   tokenSuggestions: { id: 'tokenSuggestions', title: 'Token Suggestions' },
   autoBuild: { id: 'autoBuild', title: 'Auto-Build Commander' },
   deckStats: { id: 'deckStats', title: 'Deck Statistics' },
-  spellbookExport: { id: 'spellbookExport', title: 'Spellbook Export' },
+  spellbookExport: { id: 'spellbookExport', title: 'Spellbook Combo Finder' },
   // aiPanel: { id: 'aiPanel', title: 'AI Assistant' },
 };
 
@@ -519,15 +519,26 @@ const DeckBuilder = () => {
   const getCollectionQuantity = (card) => {
     if (!card || !card.name) return 0;
 
-    // Check in ownedCards first (more detailed data)
+    // Use collectionCounts as primary source (aggregates quantities by card name)
+    const nameKey = card.name.toLowerCase();
+    const totalQuantity = collectionCounts.get(nameKey) || 0;
+    
+    if (totalQuantity > 0) {
+      return totalQuantity;
+    }
+
+    // Fallback to ownedCards if not found in collectionCounts
     const ownedEntry = ownedCards.find(entry => entry.card.name === card.name);
     if (ownedEntry) {
       return ownedEntry.quantity;
     }
 
-    // Fallback to collectionCounts (simpler data)
-    const nameKey = card.name.toLowerCase();
-    return collectionCounts.get(nameKey) || 0;
+    // Debug logging for missing cards
+    if (collectionCounts.size > 0) {
+      console.warn(`⚠️ Card "${card.name}" not found in collectionCounts (${collectionCounts.size} total cards)`);
+    }
+
+    return 0;
   };
 
   // Helper function to check if we can add more copies of a card
@@ -540,7 +551,13 @@ const DeckBuilder = () => {
       return { canAdd: false, reason: `Maximum ${maxAllowed} copies allowed in ${format} format` };
     }
 
-    // Can't add more than user owns
+    // For lands, allow unlimited copies (especially basic lands)
+    const isLand = (card.type || card.type_line || '').toLowerCase().includes('land');
+    if (isLand) {
+      return { canAdd: true };
+    }
+
+    // Can't add more than user owns (only for non-land cards)
     if (currentQuantity >= collectionQuantity) {
       return { canAdd: false, reason: `You only own ${collectionQuantity} copies of this card` };
     }
@@ -768,6 +785,8 @@ const DeckBuilder = () => {
         });
       }
       
+      console.log(`🔍 Building collection count map for ${allCardNames.size} unique card names`);
+      
       // Get quantities for each unique card name using the same API as the modal
       for (const cardName of allCardNames) {
         try {
@@ -781,6 +800,7 @@ const DeckBuilder = () => {
         }
       }
       
+      console.log(`✅ Collection count map built with ${countMap.size} cards`);
       return countMap;
     } catch (err) {
       console.error('Unable to load collections from DB:', err);
@@ -797,6 +817,7 @@ const DeckBuilder = () => {
         setBulkDataStats(stats);
         const map = await buildCollectionCountMap();
         setCollectionCounts(map);
+        console.log(`📊 Collection counts loaded: ${map.size} cards`);
       } catch (err) {
         console.error('Failed to load initial data', err);
       }
@@ -2214,7 +2235,7 @@ const SpellbookExportPanel = (props) => {
 
   return (
     <div className="spellbook-export-view">
-      <h3>Spellbook Export</h3>
+      <h3>Find a Combo courtesy of Spellbook</h3>
       <SpellbookExport deck={deck} />
     </div>
   );

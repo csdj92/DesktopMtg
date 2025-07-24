@@ -88,4 +88,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Pattern Analysis
   testOraclePatternAnalysis: (cardName) => ipcRenderer.invoke('test-oracle-pattern-analysis', cardName),
+
+  // Daily Price Updates
+  triggerDailyPriceUpdate: () => ipcRenderer.invoke('trigger-daily-price-update'),
+  getDailyPriceStatus: () => ipcRenderer.invoke('get-daily-price-status'),
 }); 

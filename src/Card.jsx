@@ -3,7 +3,21 @@ import './Card.css'; // Import the dedicated stylesheet
 import CardDetailModal from './components/CardDetailModal';
 import useImageCache from './hooks/useImageCache';
 
-const Card = ({ card, quantity = 1, foil_quantity = 0, normal_quantity = 0, disableModal = false, showFlipButton = true, onFlip, onCardClick, showSynergyScore = false }) => {
+const Card = ({
+  card,
+  quantity = 1,
+  foil_quantity = 0,
+  normal_quantity = 0,
+  disableModal = false,
+  showFlipButton = true,
+  onFlip,
+  onCardClick,
+  showSynergyScore = false,
+  isDraggable = false,
+  onDragStart,
+  onDragEnd,
+  dragSource = 'hand'
+}) => {
   const [currentFace, setCurrentFace] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
@@ -18,40 +32,40 @@ const Card = ({ card, quantity = 1, foil_quantity = 0, normal_quantity = 0, disa
     if (card && card.card_faces && Array.isArray(card.card_faces) && card.card_faces.length > 1) {
       return true;
     }
-    
+
     // Check for new database format (layout indicates double-faced)
     if (card && card.layout) {
-      const doubleFacedLayouts = [        
-    'saga',
-    'adventure',
-    'class',
-    'aftermath',
-    'split',
-    'flip',
-    'transform',
-    'prototype',
-    'meld',
-    'leveler',
-    'mutate',
-    'vanguard',
-    'planar',
-    'scheme',
-    'modal_dfc',
-    'case',
-    'reversible_card',
-    'augment',
-    'host',
+      const doubleFacedLayouts = [
+        'saga',
+        'adventure',
+        'class',
+        'aftermath',
+        'split',
+        'flip',
+        'transform',
+        'prototype',
+        'meld',
+        'leveler',
+        'mutate',
+        'vanguard',
+        'planar',
+        'scheme',
+        'modal_dfc',
+        'case',
+        'reversible_card',
+        'augment',
+        'host',
       ];
       if (doubleFacedLayouts.includes(card.layout)) {
         return true;
       }
     }
-    
+
     // Check if there are face-specific fields indicating multiple faces
     if (card && card.faceName && card.faceName !== card.name) {
       return true;
     }
-    
+
     return false;
   };
 
@@ -63,7 +77,7 @@ const Card = ({ card, quantity = 1, foil_quantity = 0, normal_quantity = 0, disa
         const faceIndex = Math.max(0, Math.min(currentFace, card.card_faces.length - 1));
         return card.card_faces[faceIndex];
       }
-      
+
       // Handle new database format - for now, return the card itself
       // TODO: Implement proper face switching for new database format
       return card;
@@ -88,12 +102,12 @@ const Card = ({ card, quantity = 1, foil_quantity = 0, normal_quantity = 0, disa
 
   const rawImageUrl = getImageUrl(cardFace);
   const { imageUrl, isLoading } = useImageCache(rawImageUrl);
-  
+
   const handleFlip = (e) => {
     e.stopPropagation(); // Prevent card click events when flipping
     const newFaceIndex = currentFace === 0 ? 1 : 0;
     setCurrentFace(newFaceIndex);
-    
+
     // Call optional flip callback if provided
     if (onFlip) {
       onFlip(card, newFaceIndex);
@@ -107,6 +121,18 @@ const Card = ({ card, quantity = 1, foil_quantity = 0, normal_quantity = 0, disa
     }
     if (disableModal) return;
     setShowDetails(true);
+  };
+
+  const handleDragStart = (e) => {
+    if (isDraggable && onDragStart) {
+      onDragStart(card, dragSource, e);
+    }
+  };
+
+  const handleDragEnd = (e) => {
+    if (isDraggable && onDragEnd) {
+      onDragEnd(e);
+    }
   };
 
   const handleCloseModal = () => {
@@ -138,19 +164,37 @@ const Card = ({ card, quantity = 1, foil_quantity = 0, normal_quantity = 0, disa
     return 'Fair Synergy';
   };
 
-  const price = card.prices?.usd ? `$${card.prices.usd}` : (card.prices?.usd_foil ? `$${card.prices.usd_foil} (Foil)`: null);
+  const getPriceDisplay = () => {
+    const regularPrice = card.prices?.usd_regular || card.prices?.usd;
+    const foilPrice = card.prices?.usd_foil;
+
+    if (regularPrice && foilPrice) {
+      return `$${regularPrice} / $${foilPrice} (F)`;
+    } else if (regularPrice) {
+      return `$${regularPrice}`;
+    } else if (foilPrice) {
+      return `$${foilPrice} (Foil)`;
+    }
+    return null;
+  };
+
+  const price = getPriceDisplay();
 
   return (
     <>
-      <div 
-        className="card-container"
+      <div
+        className={`card-container ${isDraggable ? 'draggable' : ''}`}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         onClick={handleCardClick}
+        draggable={isDraggable}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        style={{ cursor: isDraggable ? 'grab' : 'pointer' }}
       >
-        <img 
-          src={imageUrl} 
-          alt={cardFace.name || card.name} 
+        <img
+          src={imageUrl}
+          alt={cardFace.name || card.name}
           className={`card-image-background ${isLoading ? 'loading' : ''}`}
           loading="lazy"
         />
@@ -158,9 +202,9 @@ const Card = ({ card, quantity = 1, foil_quantity = 0, normal_quantity = 0, disa
         {/* Header for badges and flip button */}
         <div className="card-header">
           {isDoubleFaced(card) && showFlipButton && (
-            <button 
-              className="flip-button" 
-              onClick={handleFlip} 
+            <button
+              className="flip-button"
+              onClick={handleFlip}
               title={`Flip to ${currentFace === 0 ? 'back' : 'front'} face`}
               aria-label={`Flip card to show ${currentFace === 0 ? 'back' : 'front'} face`}
             >
@@ -174,7 +218,7 @@ const Card = ({ card, quantity = 1, foil_quantity = 0, normal_quantity = 0, disa
               </span>
             )}
             {showSynergyScore && card.synergy_score !== undefined && (
-              <span 
+              <span
                 className={`synergy-badge ${getSynergyScoreClass(card.synergy_score)}`}
                 title={getSynergyScoreLabel(card.synergy_score)}
               >
@@ -183,22 +227,22 @@ const Card = ({ card, quantity = 1, foil_quantity = 0, normal_quantity = 0, disa
             )}
           </div>
         </div>
-        
+
         {/* Footer with name, type, and price */}
         {!isHovered && (
-            <div className="card-footer">
-                <div className="name-and-type">
-                <p className="footer-card-name">{cardFace.name || card.name}</p>
-                <p className="footer-type-line">{(cardFace.type || cardFace.type_line || card.type || card.type_line || '').replace(/\?\?\?/g, '—')}</p>
-                </div>
-                {price && <div className="footer-price">{price}</div>}
+          <div className="card-footer">
+            <div className="name-and-type">
+              <p className="footer-card-name">{cardFace.name || card.name}</p>
+              <p className="footer-type-line">{(cardFace.type || cardFace.type_line || card.type || card.type_line || '').replace(/\?\?\?/g, '—')}</p>
             </div>
+            {price && <div className="footer-price">{price}</div>}
+          </div>
         )}
       </div>
 
       {showDetails && (
-        <CardDetailModal 
-          card={card} 
+        <CardDetailModal
+          card={card}
           onClose={handleCloseModal}
           foil_quantity={foil_quantity}
           normal_quantity={normal_quantity}

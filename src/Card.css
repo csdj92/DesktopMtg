@@ -292,3 +292,33 @@ img {
 img.loading {
   opacity: 0.6;
 }
+
+/* Drag an
+d Drop Styles */
+.card-container.draggable {
+  cursor: grab;
+}
+
+.card-container.draggable:active {
+  cursor: grabbing;
+}
+
+.card-container.dragging {
+  transform: scale(1.1) rotate(5deg);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+  z-index: 1000;
+  opacity: 0.9;
+  transition: none;
+}
+
+.drag-preview {
+  position: fixed;
+  pointer-events: none;
+  z-index: 1000;
+  transform: rotate(5deg) scale(0.9);
+  opacity: 0.8;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
+  transition: none;
+  display: none;
+}

@@ -12,6 +12,7 @@ import './App.css'
 import './components/SearchControls.css';
 import SetBrowser from './components/SetBrowser';
 import TaskProgressOverlay from './components/TaskProgressOverlay';
+import DailyPriceStatus from './components/DailyPriceStatus';
 
 function App() {
   // File-based state
@@ -156,11 +157,13 @@ function App() {
     }
   }
 
-  const generateCollectionStats = (cards, totalValue) => {
+  const generateCollectionStats = (cards, totalValue, foilValue = 0, regularValue = 0) => {
     const stats = {
       totalCards: cards.reduce((sum, card) => sum + card.quantity, 0),
       uniqueCards: cards.length,
       totalValue: totalValue,
+      foilValue: foilValue,
+      regularValue: regularValue,
       rarityBreakdown: {},
       setBreakdown: {},
       colorBreakdown: {}
@@ -495,44 +498,65 @@ function App() {
       }
 
       let totalValue = 0;
+      let totalFoilValue = 0;
+      let totalRegularValue = 0;
 
       // Single pass: map each card and track total price
       const processedCards = collectedCards.map((card) => {
-        let priceUsd = 0;
+        let regularPrice = 0;
+        let foilPrice = 0;
 
         // Fix for prices not showing correctly
         if (card.prices) {
-          // Try to parse prices if they're strings
-          if (typeof card.prices.usd === 'string') {
-            priceUsd = parseFloat(card.prices.usd) || 0;
-          } else if (typeof card.prices.usd === 'number') {
-            priceUsd = card.prices.usd;
+          // Parse regular price
+          if (card.prices.usd_regular) {
+            if (typeof card.prices.usd_regular === 'string') {
+              regularPrice = parseFloat(card.prices.usd_regular) || 0;
+            } else if (typeof card.prices.usd_regular === 'number') {
+              regularPrice = card.prices.usd_regular;
+            }
+          } else if (card.prices.usd) {
+            // Fallback to usd if usd_regular not available
+            if (typeof card.prices.usd === 'string') {
+              regularPrice = parseFloat(card.prices.usd) || 0;
+            } else if (typeof card.prices.usd === 'number') {
+              regularPrice = card.prices.usd;
+            }
+          }
+
+          // Parse foil price
+          if (card.prices.usd_foil) {
+            if (typeof card.prices.usd_foil === 'string') {
+              foilPrice = parseFloat(card.prices.usd_foil) || 0;
+            } else if (typeof card.prices.usd_foil === 'number') {
+              foilPrice = card.prices.usd_foil;
+            }
           }
 
           // Ensure prices are properly formatted in the card object
-          if (!card.prices.usd && priceUsd > 0) {
-            card.prices.usd = priceUsd.toFixed(2);
+          if (!card.prices.usd && regularPrice > 0) {
+            card.prices.usd = regularPrice.toFixed(2);
+          }
+          if (!card.prices.usd_regular && regularPrice > 0) {
+            card.prices.usd_regular = regularPrice.toFixed(2);
+          }
+          if (!card.prices.usd_foil && foilPrice > 0) {
+            card.prices.usd_foil = foilPrice.toFixed(2);
           }
 
-          // If we have usd_regular but not usd, use that
-          if (!priceUsd && card.prices.usd_regular) {
-            if (typeof card.prices.usd_regular === 'string') {
-              priceUsd = parseFloat(card.prices.usd_regular) || 0;
-            } else if (typeof card.prices.usd_regular === 'number') {
-              priceUsd = card.prices.usd_regular;
-            }
+          // Calculate value based on foil and regular quantities
+          const normalQuantity = card.normal_quantity || 0;
+          const foilQuantity = card.foil_quantity || 0;
 
-            if (!card.prices.usd && priceUsd > 0) {
-              card.prices.usd = priceUsd.toFixed(2);
-            }
-          }
+          const cardRegularValue = regularPrice * normalQuantity;
+          const cardFoilValue = foilPrice * foilQuantity;
 
-          // Use total_quantity for value calculation
-          const cardQuantity = card.total_quantity || card.quantity || 1;
-          totalValue += priceUsd * cardQuantity;
+          totalRegularValue += cardRegularValue;
+          totalFoilValue += cardFoilValue;
+          totalValue += cardRegularValue + cardFoilValue;
         } else {
           // Create prices object if it doesn't exist
-          card.prices = { usd: '0.00', usd_foil: '0.00' };
+          card.prices = { usd: '0.00', usd_foil: '0.00', usd_regular: '0.00' };
         }
 
         return {
@@ -550,7 +574,7 @@ function App() {
         };
       });
 
-      const stats = generateCollectionStats(processedCards, totalValue);
+      const stats = generateCollectionStats(processedCards, totalValue, totalFoilValue, totalRegularValue);
 
       // Cache the results
       const cacheData = {
@@ -861,9 +885,7 @@ function App() {
       {bulkDataStats && (
         <footer className="app-footer">
           <small>
-            Database: {bulkDataStats.cardCount?.toLocaleString()} cards •
-            Last updated: {bulkDataStats.lastUpdate ? new Date(bulkDataStats.lastUpdate).toLocaleDateString() : 'Unknown'} •
-            Built: {bulkDataStats.databaseBuiltAt ? new Date(bulkDataStats.databaseBuiltAt).toLocaleDateString() : 'Unknown'}
+            Database: {bulkDataStats.cardCount?.toLocaleString()} cards
             {bulkDataStats.version && ` • Version: ${bulkDataStats.version}`}
           </small>
         </footer>

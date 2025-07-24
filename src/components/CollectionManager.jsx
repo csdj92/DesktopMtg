@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './CollectionManager.css';
+import DailyPriceStatus from './DailyPriceStatus';
 
 // Some browser environments (e.g., Electron with certain sandbox policies) may
 // disable the blocking `window.prompt`/`window.confirm` APIs. Provide safe
@@ -595,34 +596,40 @@ const CollectionManager = () => {
           <div className="no-selection">
             <h2>Select a Collection</h2>
             <p>Choose a collection from the sidebar to view its cards.</p>
-            <div className="import-help">
-              <h3>Supported File Formats:</h3>
-              <div className="format-examples">
-                <div className="format">
-                  <h4>📁 CSV Files</h4>
-                  <p>ManaBox exports, custom CSV files with headers like:</p>
-                  <code>Name,Set code,Collector number,Quantity,Foil,Rarity</code>
+            <div className="no-selection-content">
+              <div className="import-help">
+                <h3>Supported File Formats:</h3>
+                <div className="format-examples">
+                  <div className="format">
+                    <h4>📁 CSV Files</h4>
+                    <p>ManaBox exports, custom CSV files with headers like:</p>
+                    <code>Name,Set code,Collector number,Quantity,Foil,Rarity</code>
+                  </div>
+                  <div className="format">
+                    <h4>📄 TXT Files</h4>
+                    <p>Multiple formats supported:</p>
+                    <ul>
+                      <li><strong>Simple:</strong> <code>Lightning Bolt</code></li>
+                      <li><strong>MTGO:</strong> <code>4x Lightning Bolt</code></li>
+                      <li><strong>Detailed:</strong> <code>4 Lightning Bolt (M10) 123 [foil]</code></li>
+                      <li><strong>Deckbox:</strong> <code>1x Lightning Bolt [M10]</code></li>
+                    </ul>
+                  </div>
+                  <div className="format">
+                    <h4>🎴 Deck Files</h4>
+                    <p>Import complete decks with sections:</p>
+                    <ul>
+                      <li><strong>Mainboard:</strong> Standard deck cards</li>
+                      <li><strong>Sideboard:</strong> Sideboard cards</li>
+                      <li><strong>Commander:</strong> Commander/general cards</li>
+                    </ul>
+                    <p>Creates both a deck for the Deck Builder and adds cards to your collection.</p>
+                  </div>
                 </div>
-                <div className="format">
-                  <h4>📄 TXT Files</h4>
-                  <p>Multiple formats supported:</p>
-                  <ul>
-                    <li><strong>Simple:</strong> <code>Lightning Bolt</code></li>
-                    <li><strong>MTGO:</strong> <code>4x Lightning Bolt</code></li>
-                    <li><strong>Detailed:</strong> <code>4 Lightning Bolt (M10) 123 [foil]</code></li>
-                    <li><strong>Deckbox:</strong> <code>1x Lightning Bolt [M10]</code></li>
-                  </ul>
-                </div>
-                <div className="format">
-                  <h4>🎴 Deck Files</h4>
-                  <p>Import complete decks with sections:</p>
-                  <ul>
-                    <li><strong>Mainboard:</strong> Standard deck cards</li>
-                    <li><strong>Sideboard:</strong> Sideboard cards</li>
-                    <li><strong>Commander:</strong> Commander/general cards</li>
-                  </ul>
-                  <p>Creates both a deck for the Deck Builder and adds cards to your collection.</p>
-                </div>
+              </div>
+              
+              <div className="price-status-panel">
+                <DailyPriceStatus />
               </div>
             </div>
           </div>
