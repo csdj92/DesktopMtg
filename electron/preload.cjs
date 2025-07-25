@@ -92,4 +92,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Daily Price Updates
   triggerDailyPriceUpdate: () => ipcRenderer.invoke('trigger-daily-price-update'),
   getDailyPriceStatus: () => ipcRenderer.invoke('get-daily-price-status'),
+
+  // Collection Stats
+  getRarityBreakdown: () => ipcRenderer.invoke('get-rarity-breakdown'),
+  getCardTypeDistribution: () => ipcRenderer.invoke('get-card-type-distribution'),
+  getManaCurveData: () => ipcRenderer.invoke('get-mana-curve-data'),
 }); 

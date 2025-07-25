@@ -2301,6 +2301,385 @@ class BulkDataService {
       return { error: error.message };
     }
   }
+
+  /**
+   * Get rarity breakdown of collected cards with foil vs normal tracking
+   * @returns {Promise<Object>} Rarity breakdown with counts and percentages
+   */
+  async getRarityBreakdown() {
+    if (!this.db || !this.initialized) {
+      return null;
+    }
+
+    try {
+      const query = `
+        SELECT 
+          c.rarity,
+          COUNT(*) as unique_count,
+          SUM(uc.total_quantity) as total_quantity,
+          SUM(uc.foil_quantity) as foil_quantity,
+          SUM(uc.normal_quantity) as normal_quantity
+        FROM cards c
+        JOIN (
+          SELECT 
+            cardName,
+            setCode,
+            collectorNumber,
+            SUM(CASE WHEN foil = 'foil' THEN quantity ELSE 0 END) as foil_quantity,
+            SUM(CASE WHEN foil = 'normal' THEN quantity ELSE 0 END) as normal_quantity,
+            SUM(quantity) as total_quantity
+          FROM user_collections 
+          GROUP BY cardName, setCode, collectorNumber
+        ) uc ON lower(uc.cardName) = lower(c.name) 
+           AND lower(uc.setCode) = lower(c.setCode) 
+           AND uc.collectorNumber = c.number
+        GROUP BY c.rarity
+        ORDER BY 
+          CASE c.rarity 
+            WHEN 'mythic' THEN 1
+            WHEN 'rare' THEN 2
+            WHEN 'uncommon' THEN 3
+            WHEN 'common' THEN 4
+            ELSE 5
+          END
+      `;
+
+      const results = await this.db.all(query);
+
+      // Calculate totals for percentages
+      const totalCards = results.reduce((sum, row) => sum + row.unique_count, 0);
+      const totalQuantity = results.reduce((sum, row) => sum + row.total_quantity, 0);
+
+      // Format results with percentages
+      const breakdown = results.map(row => ({
+        rarity: row.rarity,
+        unique_count: row.unique_count,
+        total_quantity: row.total_quantity,
+        foil_quantity: row.foil_quantity,
+        normal_quantity: row.normal_quantity,
+        unique_percentage: totalCards > 0 ? ((row.unique_count / totalCards) * 100).toFixed(2) : '0.00',
+        quantity_percentage: totalQuantity > 0 ? ((row.total_quantity / totalQuantity) * 100).toFixed(2) : '0.00'
+      }));
+
+      return {
+        breakdown,
+        totals: {
+          unique_cards: totalCards,
+          total_quantity: totalQuantity,
+          foil_quantity: results.reduce((sum, row) => sum + row.foil_quantity, 0),
+          normal_quantity: results.reduce((sum, row) => sum + row.normal_quantity, 0)
+        }
+      };
+    } catch (error) {
+      console.error('Error getting rarity breakdown:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get card type distribution of collected cards including legendary vs non-legendary creatures
+   * @returns {Promise<Object>} Card type distribution with counts and percentages
+   */
+  async getCardTypeDistribution() {
+    if (!this.db || !this.initialized) {
+      return null;
+    }
+
+    try {
+      const query = `
+        SELECT 
+          CASE 
+            WHEN c.type LIKE '%Creature%' THEN 'Creature'
+            WHEN c.type LIKE '%Instant%' THEN 'Instant'
+            WHEN c.type LIKE '%Sorcery%' THEN 'Sorcery'
+            WHEN c.type LIKE '%Enchantment%' THEN 'Enchantment'
+            WHEN c.type LIKE '%Artifact%' THEN 'Artifact'
+            WHEN c.type LIKE '%Planeswalker%' THEN 'Planeswalker'
+            WHEN c.type LIKE '%Land%' THEN 'Land'
+            WHEN c.type LIKE '%Battle%' THEN 'Battle'
+            ELSE 'Other'
+          END as card_type,
+          COUNT(*) as unique_count,
+          SUM(uc.total_quantity) as total_quantity
+        FROM cards c
+        JOIN (
+          SELECT 
+            cardName,
+            setCode,
+            collectorNumber,
+            SUM(quantity) as total_quantity
+          FROM user_collections 
+          GROUP BY cardName, setCode, collectorNumber
+        ) uc ON lower(uc.cardName) = lower(c.name) 
+           AND lower(uc.setCode) = lower(c.setCode) 
+           AND uc.collectorNumber = c.number
+        GROUP BY card_type
+        ORDER BY total_quantity DESC
+      `;
+
+      const results = await this.db.all(query);
+
+      // Get legendary vs non-legendary creature breakdown
+      const creatureQuery = `
+        SELECT 
+          CASE 
+            WHEN c.type LIKE '%Legendary%' AND c.type LIKE '%Creature%' THEN 'Legendary Creature'
+            WHEN c.type LIKE '%Creature%' THEN 'Non-Legendary Creature'
+            ELSE NULL
+          END as creature_type,
+          COUNT(*) as unique_count,
+          SUM(uc.total_quantity) as total_quantity
+        FROM cards c
+        JOIN (
+          SELECT 
+            cardName,
+            setCode,
+            collectorNumber,
+            SUM(quantity) as total_quantity
+          FROM user_collections 
+          GROUP BY cardName, setCode, collectorNumber
+        ) uc ON lower(uc.cardName) = lower(c.name) 
+           AND lower(uc.setCode) = lower(c.setCode) 
+           AND uc.collectorNumber = c.number
+        WHERE c.type LIKE '%Creature%'
+        GROUP BY creature_type
+        HAVING creature_type IS NOT NULL
+      `;
+
+      const creatureResults = await this.db.all(creatureQuery);
+
+      // Calculate totals for percentages
+      const totalCards = results.reduce((sum, row) => sum + row.unique_count, 0);
+      const totalQuantity = results.reduce((sum, row) => sum + row.total_quantity, 0);
+
+      // Format main type distribution
+      const typeDistribution = results.map(row => ({
+        type: row.card_type,
+        unique_count: row.unique_count,
+        total_quantity: row.total_quantity,
+        unique_percentage: totalCards > 0 ? ((row.unique_count / totalCards) * 100).toFixed(2) : '0.00',
+        quantity_percentage: totalQuantity > 0 ? ((row.total_quantity / totalQuantity) * 100).toFixed(2) : '0.00'
+      }));
+
+      // Format creature breakdown
+      const creatureBreakdown = creatureResults.map(row => ({
+        type: row.creature_type,
+        unique_count: row.unique_count,
+        total_quantity: row.total_quantity
+      }));
+
+      return {
+        type_distribution: typeDistribution,
+        creature_breakdown: creatureBreakdown,
+        totals: {
+          unique_cards: totalCards,
+          total_quantity: totalQuantity
+        }
+      };
+    } catch (error) {
+      console.error('Error getting card type distribution:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get mana curve analysis of collected cards with color distribution
+   * @returns {Promise<Object>} Mana curve data with average CMC and color statistics
+   */
+  async getManaCurveData() {
+    if (!this.db || !this.initialized) {
+      return null;
+    }
+
+    try {
+      // Get mana curve distribution
+      const manaCurveQuery = `
+        SELECT 
+          CASE 
+            WHEN c.manaValue IS NULL OR c.manaValue = '' THEN 'X'
+            WHEN CAST(c.manaValue AS INTEGER) >= 10 THEN '10+'
+            ELSE CAST(c.manaValue AS TEXT)
+          END as cmc,
+          COUNT(*) as unique_count,
+          SUM(uc.total_quantity) as total_quantity
+        FROM cards c
+        JOIN (
+          SELECT 
+            cardName,
+            setCode,
+            collectorNumber,
+            SUM(quantity) as total_quantity
+          FROM user_collections 
+          GROUP BY cardName, setCode, collectorNumber
+        ) uc ON lower(uc.cardName) = lower(c.name) 
+           AND lower(uc.setCode) = lower(c.setCode) 
+           AND uc.collectorNumber = c.number
+        WHERE c.type NOT LIKE '%Land%'  -- Exclude lands from mana curve
+        GROUP BY cmc
+        ORDER BY 
+          CASE 
+            WHEN cmc = 'X' THEN 999
+            WHEN cmc = '10+' THEN 10
+            ELSE CAST(cmc AS INTEGER)
+          END
+      `;
+
+      const manaCurveResults = await this.db.all(manaCurveQuery);
+
+      // Calculate average CMC (excluding X costs and lands)
+      const avgCmcQuery = `
+        SELECT 
+          AVG(CAST(c.manaValue AS REAL)) as average_cmc,
+          COUNT(*) as card_count
+        FROM cards c
+        JOIN (
+          SELECT 
+            cardName,
+            setCode,
+            collectorNumber,
+            SUM(quantity) as total_quantity
+          FROM user_collections 
+          GROUP BY cardName, setCode, collectorNumber
+        ) uc ON lower(uc.cardName) = lower(c.name) 
+           AND lower(uc.setCode) = lower(c.setCode) 
+           AND uc.collectorNumber = c.number
+        WHERE c.type NOT LIKE '%Land%' 
+          AND c.manaValue IS NOT NULL 
+          AND c.manaValue != '' 
+          AND c.manaValue NOT LIKE '%X%'
+      `;
+
+      const avgCmcResult = await this.db.get(avgCmcQuery);
+
+      // Get color distribution
+      const colorQuery = `
+        SELECT 
+          CASE 
+            WHEN c.colors IS NULL OR c.colors = '[]' OR c.colors = '' THEN 'Colorless'
+            WHEN (c.colors LIKE '%"W"%' AND c.colors LIKE '%"U"%') OR
+                 (c.colors LIKE '%"W"%' AND c.colors LIKE '%"B"%') OR
+                 (c.colors LIKE '%"W"%' AND c.colors LIKE '%"R"%') OR
+                 (c.colors LIKE '%"W"%' AND c.colors LIKE '%"G"%') OR
+                 (c.colors LIKE '%"U"%' AND c.colors LIKE '%"B"%') OR
+                 (c.colors LIKE '%"U"%' AND c.colors LIKE '%"R"%') OR
+                 (c.colors LIKE '%"U"%' AND c.colors LIKE '%"G"%') OR
+                 (c.colors LIKE '%"B"%' AND c.colors LIKE '%"R"%') OR
+                 (c.colors LIKE '%"B"%' AND c.colors LIKE '%"G"%') OR
+                 (c.colors LIKE '%"R"%' AND c.colors LIKE '%"G"%') THEN 'Multicolor'
+            WHEN c.colors LIKE '%"W"%' THEN 'White'
+            WHEN c.colors LIKE '%"U"%' THEN 'Blue'
+            WHEN c.colors LIKE '%"B"%' THEN 'Black'
+            WHEN c.colors LIKE '%"R"%' THEN 'Red'
+            WHEN c.colors LIKE '%"G"%' THEN 'Green'
+            ELSE 'Other'
+          END as color_category,
+          COUNT(*) as unique_count,
+          SUM(uc.total_quantity) as total_quantity
+        FROM cards c
+        JOIN (
+          SELECT 
+            cardName,
+            setCode,
+            collectorNumber,
+            SUM(quantity) as total_quantity
+          FROM user_collections 
+          GROUP BY cardName, setCode, collectorNumber
+        ) uc ON lower(uc.cardName) = lower(c.name) 
+           AND lower(uc.setCode) = lower(c.setCode) 
+           AND uc.collectorNumber = c.number
+        GROUP BY color_category
+        ORDER BY total_quantity DESC
+      `;
+
+      const colorResults = await this.db.all(colorQuery);
+
+      // Calculate average CMC by color
+      const avgCmcByColorQuery = `
+        SELECT 
+          CASE 
+            WHEN c.colors IS NULL OR c.colors = '[]' OR c.colors = '' THEN 'Colorless'
+            WHEN (c.colors LIKE '%"W"%' AND c.colors LIKE '%"U"%') OR
+                 (c.colors LIKE '%"W"%' AND c.colors LIKE '%"B"%') OR
+                 (c.colors LIKE '%"W"%' AND c.colors LIKE '%"R"%') OR
+                 (c.colors LIKE '%"W"%' AND c.colors LIKE '%"G"%') OR
+                 (c.colors LIKE '%"U"%' AND c.colors LIKE '%"B"%') OR
+                 (c.colors LIKE '%"U"%' AND c.colors LIKE '%"R"%') OR
+                 (c.colors LIKE '%"U"%' AND c.colors LIKE '%"G"%') OR
+                 (c.colors LIKE '%"B"%' AND c.colors LIKE '%"R"%') OR
+                 (c.colors LIKE '%"B"%' AND c.colors LIKE '%"G"%') OR
+                 (c.colors LIKE '%"R"%' AND c.colors LIKE '%"G"%') THEN 'Multicolor'
+            WHEN c.colors LIKE '%"W"%' THEN 'White'
+            WHEN c.colors LIKE '%"U"%' THEN 'Blue'
+            WHEN c.colors LIKE '%"B"%' THEN 'Black'
+            WHEN c.colors LIKE '%"R"%' THEN 'Red'
+            WHEN c.colors LIKE '%"G"%' THEN 'Green'
+            ELSE 'Other'
+          END as color_category,
+          AVG(CAST(c.manaValue AS REAL)) as average_cmc,
+          COUNT(*) as card_count
+        FROM cards c
+        JOIN (
+          SELECT 
+            cardName,
+            setCode,
+            collectorNumber,
+            SUM(quantity) as total_quantity
+          FROM user_collections 
+          GROUP BY cardName, setCode, collectorNumber
+        ) uc ON lower(uc.cardName) = lower(c.name) 
+           AND lower(uc.setCode) = lower(c.setCode) 
+           AND uc.collectorNumber = c.number
+        WHERE c.type NOT LIKE '%Land%' 
+          AND c.manaValue IS NOT NULL 
+          AND c.manaValue != '' 
+          AND c.manaValue NOT LIKE '%X%'
+        GROUP BY color_category
+        HAVING card_count > 0
+        ORDER BY average_cmc DESC
+      `;
+
+      const avgCmcByColorResults = await this.db.all(avgCmcByColorQuery);
+
+      // Calculate colorless vs colored ratio
+      const colorlessCount = colorResults.find(r => r.color_category === 'Colorless')?.total_quantity || 0;
+      const coloredCount = colorResults.filter(r => r.color_category !== 'Colorless')
+        .reduce((sum, r) => sum + r.total_quantity, 0);
+      const totalNonLands = colorlessCount + coloredCount;
+
+      return {
+        mana_curve: manaCurveResults.map(row => ({
+          cmc: row.cmc,
+          unique_count: row.unique_count,
+          total_quantity: row.total_quantity
+        })),
+        average_cmc: avgCmcResult?.average_cmc ? parseFloat(avgCmcResult.average_cmc.toFixed(2)) : 0,
+        color_distribution: colorResults.map(row => ({
+          color: row.color_category,
+          unique_count: row.unique_count,
+          total_quantity: row.total_quantity,
+          percentage: totalNonLands > 0 ? ((row.total_quantity / totalNonLands) * 100).toFixed(2) : '0.00'
+        })),
+        average_cmc_by_color: avgCmcByColorResults.map(row => ({
+          color: row.color_category,
+          average_cmc: parseFloat(row.average_cmc.toFixed(2)),
+          card_count: row.card_count
+        })),
+        colorless_vs_colored: {
+          colorless_count: colorlessCount,
+          colored_count: coloredCount,
+          colorless_percentage: totalNonLands > 0 ? ((colorlessCount / totalNonLands) * 100).toFixed(2) : '0.00',
+          colored_percentage: totalNonLands > 0 ? ((coloredCount / totalNonLands) * 100).toFixed(2) : '0.00'
+        },
+        totals: {
+          non_land_cards: totalNonLands,
+          analyzed_for_avg_cmc: avgCmcResult?.card_count || 0
+        }
+      };
+    } catch (error) {
+      console.error('Error getting mana curve data:', error);
+      return null;
+    }
+  }
 }
 
 // Export singleton instance

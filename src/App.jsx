@@ -6,6 +6,7 @@ import SemanticSearchV2 from './components/SemanticSearchV2';
 import DeckBuilder from './components/DeckBuilder';
 import HandSimulator from './components/HandSimulator';
 import CollectionView from './components/CollectionView';
+import CollectionStatsPage from './components/CollectionStatsPage';
 import CardDetailModal from './components/CardDetailModal';
 import useCardNavigation from './hooks/useCardNavigation';
 import './App.css'
@@ -681,6 +682,11 @@ function App() {
             My Collection
           </button>
           <button
+            className={`tab-button ${activeTab === 'stats' ? 'active' : ''}`}
+            onClick={() => setActiveTab('stats')}>
+            Stats
+          </button>
+          <button
             className={`tab-button ${activeTab === 'search' ? 'active' : ''}`}
             onClick={() => setActiveTab('search')}>
             Card Search
@@ -802,6 +808,12 @@ function App() {
               )}
             </div>
           </div>
+        ) : activeTab === 'stats' ? (
+          <CollectionStatsPage
+            collectionCards={collectionCards}
+            collectionStats={collectionStats}
+            onRefreshStats={refreshCollection}
+          />
         ) : activeTab === 'search' ? (
           <div className="search-view">
             <div className="search-header">

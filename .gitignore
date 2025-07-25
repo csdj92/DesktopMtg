@@ -55,3 +55,4 @@ vectordb/magic_cards.lance/_indices/*
 vectordb/magic_cards.lance/_transactions/*
 vectordb/magic_cards.lance/_versions/*
 cache/embeddings/*
+collection-stats-comparison-test.cjs

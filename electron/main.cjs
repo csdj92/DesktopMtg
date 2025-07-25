@@ -18,7 +18,7 @@ let dailyPriceUpdateInterval = null;
 
 const scheduleDailyPriceUpdates = () => {
   console.log('💰 Setting up daily price update scheduler...');
-  
+
   // Run initial price update check
   const runPriceUpdate = async () => {
     try {
@@ -36,7 +36,7 @@ const scheduleDailyPriceUpdates = () => {
 
   // Schedule to run every 24 hours (86400000 milliseconds)
   dailyPriceUpdateInterval = setInterval(runPriceUpdate, 24 * 60 * 60 * 1000);
-  
+
   console.log('💰 Daily price update scheduler initialized - will run every 24 hours');
 };
 
@@ -1235,26 +1235,54 @@ ipcMain.handle('get-daily-price-status', async () => {
     const needsUpdate = await instance.needsUpdate();
     const lastUpdateDate = await instance.getLastUpdateDate();
     await instance.close();
-    
-    const lastUpdate = lastUpdateDate ? 
-      (needsUpdate ? lastUpdateDate : 'Today') : 
+
+    const lastUpdate = lastUpdateDate ?
+      (needsUpdate ? lastUpdateDate : 'Today') :
       'Never';
-    
-    return { 
-      needsUpdate, 
+
+    return {
+      needsUpdate,
       lastUpdate,
       lastUpdateDate,
-      schedulerActive: dailyPriceUpdateInterval !== null 
+      schedulerActive: dailyPriceUpdateInterval !== null
     };
   } catch (error) {
     console.error('Error getting daily price status:', error);
-    return { 
-      needsUpdate: true, 
+    return {
+      needsUpdate: true,
       lastUpdate: 'Unknown',
       lastUpdateDate: null,
       schedulerActive: dailyPriceUpdateInterval !== null,
-      error: error.message 
+      error: error.message
     };
+  }
+});
+
+// Collection Stats Handlers
+ipcMain.handle('get-rarity-breakdown', async () => {
+  try {
+    return await bulkDataService.getRarityBreakdown();
+  } catch (error) {
+    console.error('Error getting rarity breakdown:', error);
+    return null;
+  }
+});
+
+ipcMain.handle('get-card-type-distribution', async () => {
+  try {
+    return await bulkDataService.getCardTypeDistribution();
+  } catch (error) {
+    console.error('Error getting card type distribution:', error);
+    return null;
+  }
+});
+
+ipcMain.handle('get-mana-curve-data', async () => {
+  try {
+    return await bulkDataService.getManaCurveData();
+  } catch (error) {
+    console.error('Error getting mana curve data:', error);
+    return null;
   }
 });
 
