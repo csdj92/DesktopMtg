@@ -369,6 +369,12 @@ const HandSimulator = () => {
     clearDropTarget();
   }, [clearDropTarget]);
 
+  // Handle card tapping/untapping
+  const handleCardTap = useCallback((card, isTapped) => {
+    console.log(`Card ${card.name} ${isTapped ? 'tapped' : 'untapped'}`);
+    // This could be extended to track tapped state in game state if needed
+  }, []);
+
   // Move card between zones
   const moveCard = useCallback((card, source, target) => {
     console.log('Moving card:', card.name, 'from', source, 'to', target);
@@ -635,6 +641,7 @@ const HandSimulator = () => {
                 onDropZoneLeave={handleDropZoneLeave}
                 onDrop={onDrop}
                 dragState={dragState}
+                onCardTap={handleCardTap}
               />
             </div>
           )}

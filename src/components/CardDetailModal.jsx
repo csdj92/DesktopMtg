@@ -30,6 +30,7 @@ const CardDetailModal = ({
   const [actionMode, setActionMode] = useState(null); // 'add' | 'update' | 'delete'
   const [collectionInput, setCollectionInput] = useState('My Collection');
   const [quantityInput, setQuantityInput] = useState(1);
+  const [foilType, setFoilType] = useState('normal'); // 'normal' | 'foil'
   const [deleteMode, setDeleteMode] = useState('specific'); // 'specific' | 'all'
   const [showRulings, setShowRulings] = useState(false);
   const [showLegalities, setShowLegalities] = useState(false);
@@ -190,6 +191,7 @@ const CardDetailModal = ({
   const resetForm = () => {
     setCollectionInput('My Collection');
     setQuantityInput(1);
+    setFoilType('normal');
     setActionMode(null);
     setDeleteMode('specific');
   };
@@ -203,7 +205,7 @@ const CardDetailModal = ({
         set_code: card.set_code || card.setCode || card.set,
         set_name: card.set_name || card.setName,
         collector_number: card.collector_number || card.collectorNumber || card.number,
-        foil: 'normal',
+        foil: foilType,
         rarity: card.rarity,
         quantity
       });
@@ -713,6 +715,35 @@ const CardDetailModal = ({
                     </option>
                   ))}
                 </select>
+                {actionMode === 'add' && (
+                  <div style={{ marginBottom: '8px' }}>
+                    <label style={{ display: 'block', marginBottom: '4px', fontWeight: 'bold' }}>
+                      Card Type:
+                    </label>
+                    <div style={{ display: 'flex', gap: '16px' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <input
+                          type="radio"
+                          name="foilType"
+                          value="normal"
+                          checked={foilType === 'normal'}
+                          onChange={(e) => setFoilType(e.target.value)}
+                        />
+                        Normal
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <input
+                          type="radio"
+                          name="foilType"
+                          value="foil"
+                          checked={foilType === 'foil'}
+                          onChange={(e) => setFoilType(e.target.value)}
+                        />
+                        Foil
+                      </label>
+                    </div>
+                  </div>
+                )}
                 {actionMode === 'delete' && (
                   <div className="delete-mode-selector">
                     <label>

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import Card from '../Card';
 
 const BattlefieldArea = ({
@@ -6,8 +6,10 @@ const BattlefieldArea = ({
     onDropZoneEnter,
     onDropZoneLeave,
     onDrop,
-    dragState
+    dragState,
+    onCardTap
 }) => {
+    const [tappedCards, setTappedCards] = useState(new Set());
     const handleDragOver = (e, zone) => {
         e.preventDefault();
         onDropZoneEnter(zone);
@@ -35,6 +37,48 @@ const BattlefieldArea = ({
         return `${baseClass} ${isDropTarget ? 'drop-target' : ''}`;
     };
 
+    const handleCardTap = (card) => {
+        const cardKey = `${card.id}-${card.instanceId}`;
+        setTappedCards(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(cardKey)) {
+                newSet.delete(cardKey);
+            } else {
+                newSet.add(cardKey);
+            }
+            return newSet;
+        });
+
+        // Call parent handler if provided
+        if (onCardTap) {
+            onCardTap(card, !tappedCards.has(cardKey));
+        }
+    };
+
+    const isCardTapped = (card) => {
+        const cardKey = `${card.id}-${card.instanceId}`;
+        return tappedCards.has(cardKey);
+    };
+
+    const renderBattlefieldCard = (card, index, zone) => {
+        const isTapped = isCardTapped(card);
+        return (
+            <div
+                key={`${zone}-${card.id}-${index}`}
+                className={`battlefield-card ${isTapped ? 'tapped' : ''}`}
+                onClick={() => handleCardTap(card)}
+                title={isTapped ? 'Click to untap' : 'Click to tap'}
+            >
+                <Card
+                    card={card}
+                    disableModal={false}
+                    showFlipButton={true}
+                />
+                {isTapped && <div className="tap-indicator">⟲</div>}
+            </div>
+        );
+    };
+
     return (
         <div className={`battlefield-area ${dragState.isDragging ? 'drag-active' : ''}`}>
             <h3>⚔️ Battlefield</h3>
@@ -56,15 +100,9 @@ const BattlefieldArea = ({
                         {gameState.battlefield.lands.length === 0 ? (
                             <div className="drop-indicator">Drop lands here</div>
                         ) : (
-                            gameState.battlefield.lands.map((card, index) => (
-                                <div key={`land-${card.id}-${index}`} className="battlefield-card">
-                                    <Card
-                                        card={card}
-                                        disableModal={false}
-                                        showFlipButton={true}
-                                    />
-                                </div>
-                            ))
+                            gameState.battlefield.lands.map((card, index) =>
+                                renderBattlefieldCard(card, index, 'lands')
+                            )
                         )}
                     </div>
                 </div>
@@ -81,15 +119,9 @@ const BattlefieldArea = ({
                         {gameState.battlefield.creatures.length === 0 ? (
                             <div className="drop-indicator">Drop creatures here</div>
                         ) : (
-                            gameState.battlefield.creatures.map((card, index) => (
-                                <div key={`creature-${card.id}-${index}`} className="battlefield-card">
-                                    <Card
-                                        card={card}
-                                        disableModal={false}
-                                        showFlipButton={true}
-                                    />
-                                </div>
-                            ))
+                            gameState.battlefield.creatures.map((card, index) =>
+                                renderBattlefieldCard(card, index, 'creatures')
+                            )
                         )}
                     </div>
                 </div>
@@ -106,15 +138,9 @@ const BattlefieldArea = ({
                         {gameState.battlefield.other.length === 0 ? (
                             <div className="drop-indicator">Drop artifacts, enchantments, etc. here</div>
                         ) : (
-                            gameState.battlefield.other.map((card, index) => (
-                                <div key={`other-${card.id}-${index}`} className="battlefield-card">
-                                    <Card
-                                        card={card}
-                                        disableModal={false}
-                                        showFlipButton={true}
-                                    />
-                                </div>
-                            ))
+                            gameState.battlefield.other.map((card, index) =>
+                                renderBattlefieldCard(card, index, 'other')
+                            )
                         )}
                     </div>
                 </div>
@@ -130,7 +156,11 @@ const BattlefieldArea = ({
                     onDrop={(e) => handleDrop(e, 'graveyard')}
                 >
                     <h4>Graveyard</h4>
-                    <div className="zone-stack">
+                    <div
+                        className="zone-stack"
+                        onClick={() => gameState.graveyard.length > 0 && alert(`Graveyard contains ${gameState.graveyard.length} cards:\n${gameState.graveyard.map(c => c.name).join('\n')}`)}
+                        title={gameState.graveyard.length > 0 ? 'Click to view all cards in graveyard' : 'Graveyard is empty'}
+                    >
                         {gameState.graveyard.length === 0 ? (
                             <div className="drop-indicator">Drop cards to graveyard</div>
                         ) : (
@@ -156,7 +186,11 @@ const BattlefieldArea = ({
                     onDrop={(e) => handleDrop(e, 'exile')}
                 >
                     <h4>Exile</h4>
-                    <div className="zone-stack">
+                    <div
+                        className="zone-stack"
+                        onClick={() => gameState.exile.length > 0 && alert(`Exile contains ${gameState.exile.length} cards:\n${gameState.exile.map(c => c.name).join('\n')}`)}
+                        title={gameState.exile.length > 0 ? 'Click to view all cards in exile' : 'Exile is empty'}
+                    >
                         {gameState.exile.length === 0 ? (
                             <div className="drop-indicator">Drop cards to exile</div>
                         ) : (
