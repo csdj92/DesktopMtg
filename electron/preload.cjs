@@ -40,6 +40,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   collectionMarkCard: (cardId, collected) => ipcRenderer.invoke('collection-mark-card', cardId, collected),
   collectionClearAll: () => ipcRenderer.invoke('collection-clear-all'),
   collectionSync: () => ipcRenderer.invoke('collection-sync'),
+  collectionGetNames: () => ipcRenderer.invoke('collection-get-names'),
+  collectionDeleteByName: (collectionName) => ipcRenderer.invoke('collection-delete-by-name', collectionName),
   getDailyPrices: () => ipcRenderer.invoke('get-daily-prices'),
 
   // Deck Management

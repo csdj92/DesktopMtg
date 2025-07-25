@@ -342,6 +342,29 @@ ipcMain.handle('collection-clear-all', async () => {
   }
 });
 
+// Get collection names from user_collections table
+ipcMain.handle('collection-get-names', async () => {
+  try {
+    return await bulkDataService.getCollectionNames();
+  } catch (error) {
+    console.error('Error getting collection names:', error);
+    return [];
+  }
+});
+
+// Delete a specific collection from user_collections table
+ipcMain.handle('collection-delete-by-name', async (event, collectionName) => {
+  try {
+    return await bulkDataService.deleteCollection(collectionName);
+  } catch (error) {
+    console.error(`Error deleting collection "${collectionName}":`, error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+});
+
 // Deck Management
 // =================================================================
 

@@ -23,6 +23,15 @@ text {
   overflow: hidden;
 }
 
+/* Allow scrolling for stats page */
+.app.stats-active {
+  overflow: hidden;
+}
+
+.app.stats-active .app-content {
+  overflow: auto;
+}
+
 /* Header */
 .app-header {
   padding: 1rem;
@@ -92,6 +101,13 @@ text {
   background-color: var(--color-background, #f8f9fa);
 }
 
+/* Special handling for stats page - allow scrolling */
+.app-content.stats-mode {
+  flex: 1;
+  overflow: auto;
+  background-color: var(--color-background, #f8f9fa);
+}
+
 /* Hide footer when in simulator mode for cleaner layout */
 .app.simulator-active .app-footer {
   display: none;
@@ -134,6 +150,13 @@ text {
   align-items: center;
   gap: 8px;
   color: var(--color-text-secondary);
+}
+
+.file-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file-item:hover {
@@ -523,6 +546,176 @@ text {
   font-size: 0.9rem;
   color: var(--color-text-secondary);
   margin: 0;
+}
+
+/* Personal Collections Management */
+.personal-collections {
+  margin: 1rem 0;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.personal-collections-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.personal-collections-header h3 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.refresh-collections-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  color: var(--color-text-primary);
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
+}
+
+.refresh-collections-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.refresh-collections-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.collections-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+  padding: 1rem 0;
+}
+
+.collections-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.collection-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.2s ease;
+}
+
+.collection-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.collection-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.collection-name {
+  color: var(--color-text-primary);
+  font-weight: 500;
+  font-size: 1rem;
+}
+
+.collection-stats {
+  display: flex;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+}
+
+.card-count {
+  color: #4CAF50;
+  font-weight: 500;
+}
+
+.unique-count {
+  color: var(--color-text-secondary);
+}
+
+.delete-collection-btn {
+  background: rgba(244, 67, 54, 0.1);
+  border: 1px solid rgba(244, 67, 54, 0.3);
+  border-radius: 4px;
+  color: #f44336;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+/* Smaller delete button for file items */
+.file-item .delete-collection-btn {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  min-width: auto;
+  flex-shrink: 0;
+}
+
+.delete-collection-btn:hover:not(:disabled) {
+  background: rgba(244, 67, 54, 0.2);
+  border-color: rgba(244, 67, 54, 0.5);
+  color: #ff5722;
+}
+
+.delete-collection-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.deleting {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.no-collections {
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-style: italic;
+  padding: 1rem 0;
+}
+
+.no-collections p {
+  margin: 0;
+}
+
+/* Responsive design for personal collections */
+@media (max-width: 768px) {
+  .collection-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .delete-collection-btn {
+    align-self: flex-end;
+  }
+
+  .collection-stats {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
 }
 
 /* Collection Search */

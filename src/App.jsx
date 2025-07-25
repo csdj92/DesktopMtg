@@ -79,6 +79,37 @@ function App() {
     }
   }
 
+  const handleDeleteCollection = async (collectionName, event) => {
+    event.stopPropagation() // Prevent triggering the collection selection
+    
+    const confirmMessage = `Are you sure you want to delete the collection "${collectionName}"? This action cannot be undone.`
+    if (!confirm(confirmMessage)) {
+      return
+    }
+
+    try {
+      const result = await window.electronAPI.collectionDeleteByName(collectionName)
+      
+      if (result.success) {
+        console.log(`✅ Successfully deleted collection: ${collectionName}`)
+        // Remove from local state
+        setCardFiles(prev => prev.filter(file => file !== collectionName))
+        
+        // If this was the selected collection, clear the selection
+        if (selectedFile === collectionName) {
+          setSelectedFile(null)
+          setFileCards([])
+        }
+      } else {
+        console.error(`❌ Failed to delete collection: ${result.error}`)
+        alert(`Failed to delete collection: ${result.error}`)
+      }
+    } catch (error) {
+      console.error('Error deleting collection:', error)
+      alert('Failed to delete collection')
+    }
+  }
+
 
 
   const parseCardLine = (line) => {
@@ -658,7 +689,7 @@ function App() {
   );
 
   return (
-    <div className={`app ${activeTab === 'deckbuilder' ? 'deckbuilder-active' : ''} ${activeTab === 'hand-simulator' ? 'simulator-active' : ''}`}>
+    <div className={`app ${activeTab === 'deckbuilder' ? 'deckbuilder-active' : ''} ${activeTab === 'hand-simulator' ? 'simulator-active' : ''} ${activeTab === 'stats' ? 'stats-active' : ''}`}>
       {/* Card Detail Modal with Navigation */}
       {selectedCard && (
         <CardDetailModal
@@ -714,7 +745,7 @@ function App() {
         </div>
       </header>
 
-      <div className={`app-content ${activeTab === 'deckbuilder' ? 'deckbuilder-mode' : ''} ${activeTab === 'hand-simulator' ? 'simulator-mode' : ''}`}>
+      <div className={`app-content ${activeTab === 'deckbuilder' ? 'deckbuilder-mode' : ''} ${activeTab === 'hand-simulator' ? 'simulator-mode' : ''} ${activeTab === 'stats' ? 'stats-mode' : ''}`}>
         {activeTab === 'collections' ? (
           <div className="collections-view">
             <div className="sidebar">
@@ -738,7 +769,14 @@ function App() {
                     className={`file-item ${selectedFile === file && !isViewingCollection ? 'selected' : ''}`}
                     onClick={() => selectCollection(file)}
                   >
-                    📄 {file}
+                    <span className="file-name">📄 {file}</span>
+                    <button
+                      className="delete-collection-btn"
+                      onClick={(e) => handleDeleteCollection(file, e)}
+                      title={`Delete collection "${file}"`}
+                    >
+                      🗑️
+                    </button>
                   </div>
                 ))}
               </div>

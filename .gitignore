@@ -56,3 +56,7 @@ vectordb/magic_cards.lance/_transactions/*
 vectordb/magic_cards.lance/_versions/*
 cache/embeddings/*
 collection-stats-comparison-test.cjs
+test-collection-manager.cjs
+test-collection-stats-fallback.cjs
+test-helper-methods.cjs
+test-*

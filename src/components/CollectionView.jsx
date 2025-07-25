@@ -29,6 +29,64 @@ const CollectionView = React.memo(function CollectionView({
     const [selectedCard, setSelectedCard] = useState(null);
     const [navigationContext, setNavigationContext] = useState('collection');
 
+    // Collection management state
+    const [personalCollections, setPersonalCollections] = useState([]);
+    const [collectionsLoading, setCollectionsLoading] = useState(false);
+    const [deletingCollection, setDeletingCollection] = useState(null);
+
+    // Load personal collections
+    const loadPersonalCollections = useCallback(async () => {
+        setCollectionsLoading(true);
+        try {
+            const collections = await window.electronAPI.collectionGetNames();
+            setPersonalCollections(collections);
+        } catch (error) {
+            console.error('Error loading personal collections:', error);
+            setPersonalCollections([]);
+        } finally {
+            setCollectionsLoading(false);
+        }
+    }, []);
+
+    // Delete a personal collection
+    const handleDeleteCollection = useCallback(async (collectionName) => {
+        const collection = personalCollections.find(c => c.name === collectionName);
+        if (!collection) return;
+
+        const confirmMessage = `Are you sure you want to delete the collection "${collectionName}"? This will remove all ${collection.cardCount} cards from this collection and cannot be undone.`;
+
+        if (!window.confirm(confirmMessage)) {
+            return;
+        }
+
+        setDeletingCollection(collectionName);
+        try {
+            const result = await window.electronAPI.collectionDeleteByName(collectionName);
+
+            if (result.success) {
+                console.log(`✅ ${result.message}`);
+                // Refresh collections and main collection view
+                await loadPersonalCollections();
+                if (onRefreshCollection) {
+                    onRefreshCollection();
+                }
+            } else {
+                console.error(`❌ Failed to delete collection: ${result.error}`);
+                alert(`Failed to delete collection: ${result.error}`);
+            }
+        } catch (error) {
+            console.error('Error deleting collection:', error);
+            alert(`Error deleting collection: ${error.message}`);
+        } finally {
+            setDeletingCollection(null);
+        }
+    }, [personalCollections, onRefreshCollection, loadPersonalCollections]);
+
+    // Load collections on component mount
+    useEffect(() => {
+        loadPersonalCollections();
+    }, [loadPersonalCollections]);
+
     // Virtualization state
     const CARDS_PER_PAGE = 200;
     const [displayedCount, setDisplayedCount] = useState(CARDS_PER_PAGE);

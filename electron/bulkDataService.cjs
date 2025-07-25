@@ -329,6 +329,25 @@ class BulkDataService {
     }
 
     try {
+      // Primary: Check for user_collections table first
+      const hasUserCollections = await this.hasUserCollectionsTable();
+
+      if (hasUserCollections) {
+        console.log('[getCollectionStats] Using user_collections table as primary data source');
+        const userCollectionStats = await this.getCollectionStatsFromUserCollections();
+
+        if (userCollectionStats) {
+          return userCollectionStats;
+        } else {
+          console.log('[getCollectionStats] Failed to get stats from user_collections, falling back to cards.collected');
+        }
+      } else {
+        console.log('[getCollectionStats] user_collections table not available, using cards.collected fallback');
+      }
+
+      // Fallback: Use original cards.collected logic when user_collections unavailable
+      console.log('[getCollectionStats] Using cards.collected field as fallback data source');
+
       const totalCards = await this.db.get('SELECT COUNT(*) as count FROM cards');
       const collectedCards = await this.db.get('SELECT COUNT(*) as count FROM cards WHERE collected >= 1');
 
@@ -359,6 +378,100 @@ class BulkDataService {
       };
     } catch (error) {
       console.error('Error getting collection stats:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get collection statistics using user_collections table as primary data source
+   * Uses the same query logic as getRarityBreakdown() but returns data in the same format as getCollectionStats()
+   * @returns {Promise<Object|null>} Collection statistics or null if error/unavailable
+   */
+  async getCollectionStatsFromUserCollections() {
+    if (!this.db || !this.initialized) {
+      return null;
+    }
+
+    try {
+      // Check if user_collections table is available
+      const hasUserCollections = await this.hasUserCollectionsTable();
+      if (!hasUserCollections) {
+        console.log('user_collections table not available, cannot get stats from user_collections');
+        return null;
+      }
+
+      // Get total cards in database (unchanged from original method)
+      const totalCards = await this.db.get('SELECT COUNT(*) as count FROM cards');
+
+      // Get collected cards using the same JOIN logic as getRarityBreakdown()
+      const collectedCardsQuery = `
+        SELECT COUNT(*) as count
+        FROM cards c
+        JOIN (
+          SELECT 
+            cardName,
+            setCode,
+            collectorNumber
+          FROM user_collections 
+          GROUP BY cardName, setCode, collectorNumber
+        ) uc ON lower(uc.cardName) = lower(c.name) 
+           AND lower(uc.setCode) = lower(c.setCode) 
+           AND uc.collectorNumber = c.number
+      `;
+      const collectedCards = await this.db.get(collectedCardsQuery);
+
+      // Get collected by rarity using user_collections data
+      const rarityStatsQuery = `
+        SELECT 
+          c.rarity,
+          COUNT(*) as count
+        FROM cards c
+        JOIN (
+          SELECT 
+            cardName,
+            setCode,
+            collectorNumber
+          FROM user_collections 
+          GROUP BY cardName, setCode, collectorNumber
+        ) uc ON lower(uc.cardName) = lower(c.name) 
+           AND lower(uc.setCode) = lower(c.setCode) 
+           AND uc.collectorNumber = c.number
+        GROUP BY c.rarity
+      `;
+      const rarityStats = await this.db.all(rarityStatsQuery);
+
+      // Get collected by set (top 10) using user_collections data
+      const setStatsQuery = `
+        SELECT 
+          c.setCode,
+          COUNT(*) as count
+        FROM cards c
+        JOIN (
+          SELECT 
+            cardName,
+            setCode,
+            collectorNumber
+          FROM user_collections 
+          GROUP BY cardName, setCode, collectorNumber
+        ) uc ON lower(uc.cardName) = lower(c.name) 
+           AND lower(uc.setCode) = lower(c.setCode) 
+           AND uc.collectorNumber = c.number
+        GROUP BY c.setCode
+        ORDER BY count DESC 
+        LIMIT 10
+      `;
+      const setStats = await this.db.all(setStatsQuery);
+
+      // Return data in the same format as the original getCollectionStats()
+      return {
+        total_cards: totalCards.count,
+        collected_cards: collectedCards.count,
+        collection_percentage: totalCards.count > 0 ? ((collectedCards.count / totalCards.count) * 100).toFixed(2) : '0.00',
+        by_rarity: rarityStats,
+        by_set: setStats
+      };
+    } catch (error) {
+      console.error('Error getting collection stats from user_collections:', error);
       return null;
     }
   }
@@ -2678,6 +2791,290 @@ class BulkDataService {
     } catch (error) {
       console.error('Error getting mana curve data:', error);
       return null;
+    }
+  }
+
+  /**
+   * Check if user_collections table exists and has data available
+   * Includes caching mechanism to avoid repeated queries
+   * @returns {Promise<boolean>} True if table exists and has data
+   */
+  async hasUserCollectionsTable() {
+    // Use cached result if available and not expired (cache for 5 minutes)
+    const cacheKey = '_userCollectionsTableCache';
+    const cacheExpiry = '_userCollectionsTableCacheExpiry';
+    const now = Date.now();
+
+    if (this[cacheKey] !== undefined && this[cacheExpiry] && now < this[cacheExpiry]) {
+      return this[cacheKey];
+    }
+
+    if (!this.db || !this.initialized) {
+      this[cacheKey] = false;
+      this[cacheExpiry] = now + (5 * 60 * 1000); // Cache for 5 minutes
+      return false;
+    }
+
+    try {
+      // Check if table exists
+      const tableExists = await this.db.get(`
+        SELECT name FROM sqlite_master 
+        WHERE type='table' AND name='user_collections'
+      `);
+
+      if (!tableExists) {
+        this[cacheKey] = false;
+        this[cacheExpiry] = now + (5 * 60 * 1000);
+        return false;
+      }
+
+      // Check if table has data
+      const hasData = await this.db.get(`
+        SELECT COUNT(*) as count FROM user_collections LIMIT 1
+      `);
+
+      const result = hasData && hasData.count > 0;
+
+      // Cache the result
+      this[cacheKey] = result;
+      this[cacheExpiry] = now + (5 * 60 * 1000); // Cache for 5 minutes
+
+      return result;
+    } catch (error) {
+      console.error('Error checking user_collections table:', error);
+      this[cacheKey] = false;
+      this[cacheExpiry] = now + (5 * 60 * 1000);
+      return false;
+    }
+  }
+
+  /**
+   * Validate user_collections data integrity
+   * Checks for required columns and data consistency
+   * @returns {Promise<Object>} Validation result with status and details
+   */
+  async validateUserCollectionsData() {
+    if (!this.db || !this.initialized) {
+      return {
+        valid: false,
+        error: 'Database not initialized'
+      };
+    }
+
+    try {
+      // First check if table exists
+      const hasTable = await this.hasUserCollectionsTable();
+      if (!hasTable) {
+        return {
+          valid: false,
+          error: 'user_collections table does not exist or is empty'
+        };
+      }
+
+      // Check table schema - verify required columns exist
+      const columns = await this.db.all('PRAGMA table_info(user_collections)');
+      const columnNames = columns.map(col => col.name);
+
+      const requiredColumns = ['cardName', 'setCode', 'collectorNumber', 'quantity', 'foil'];
+      const missingColumns = requiredColumns.filter(col => !columnNames.includes(col));
+
+      if (missingColumns.length > 0) {
+        return {
+          valid: false,
+          error: `Missing required columns: ${missingColumns.join(', ')}`
+        };
+      }
+
+      // Check for data integrity issues
+      const integrityChecks = await this.db.all(`
+        SELECT 
+          COUNT(*) as total_records,
+          COUNT(CASE WHEN cardName IS NULL OR cardName = '' THEN 1 END) as missing_card_names,
+          COUNT(CASE WHEN setCode IS NULL OR setCode = '' THEN 1 END) as missing_set_codes,
+          COUNT(CASE WHEN collectorNumber IS NULL OR collectorNumber = '' THEN 1 END) as missing_collector_numbers,
+          COUNT(CASE WHEN quantity IS NULL OR quantity <= 0 THEN 1 END) as invalid_quantities,
+          COUNT(CASE WHEN foil NOT IN ('foil', 'normal') THEN 1 END) as invalid_foil_values
+        FROM user_collections
+      `);
+
+      const checks = integrityChecks[0];
+      const issues = [];
+
+      if (checks.missing_card_names > 0) {
+        issues.push(`${checks.missing_card_names} records with missing card names`);
+      }
+      if (checks.missing_set_codes > 0) {
+        issues.push(`${checks.missing_set_codes} records with missing set codes`);
+      }
+      if (checks.missing_collector_numbers > 0) {
+        issues.push(`${checks.missing_collector_numbers} records with missing collector numbers`);
+      }
+      if (checks.invalid_quantities > 0) {
+        issues.push(`${checks.invalid_quantities} records with invalid quantities`);
+      }
+      if (checks.invalid_foil_values > 0) {
+        issues.push(`${checks.invalid_foil_values} records with invalid foil values`);
+      }
+
+      return {
+        valid: issues.length === 0,
+        total_records: checks.total_records,
+        issues: issues.length > 0 ? issues : undefined,
+        error: issues.length > 0 ? `Data integrity issues found: ${issues.join('; ')}` : undefined
+      };
+
+    } catch (error) {
+      console.error('Error validating user_collections data:', error);
+      return {
+        valid: false,
+        error: `Validation failed: ${error.message}`
+      };
+    }
+  }
+
+  /**
+   * Get all distinct collection names from user_collections table
+   * @returns {Promise<Array>} Array of collection objects with name and count
+   */
+  async getCollectionNames() {
+    if (!this.db || !this.initialized) {
+      return [];
+    }
+
+    try {
+      const hasUserCollections = await this.hasUserCollectionsTable();
+      if (!hasUserCollections) {
+        console.log('user_collections table not available');
+        return [];
+      }
+
+      const collections = await this.db.all(`
+        SELECT 
+          collectionName,
+          COUNT(*) as cardCount,
+          COUNT(DISTINCT cardName || setCode || collectorNumber) as uniqueCards
+        FROM user_collections 
+        GROUP BY collectionName 
+        ORDER BY collectionName
+      `);
+
+      return collections.map(c => ({
+        name: c.collectionName,
+        cardCount: c.cardCount,
+        uniqueCards: c.uniqueCards
+      }));
+    } catch (error) {
+      console.error('Error getting collection names:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Delete a personal collection and all its associated cards from user_collections table
+   * Also clears the corresponding cards.collected flags for cards that were only in this collection
+   * @param {string} collectionName - Name of the collection to delete
+   * @returns {Promise<Object>} Result object with success status and details
+   */
+  async deleteCollection(collectionName) {
+    if (!this.db || !this.initialized) {
+      return {
+        success: false,
+        error: 'Database not initialized'
+      };
+    }
+
+    if (!collectionName || typeof collectionName !== 'string') {
+      return {
+        success: false,
+        error: 'Invalid collection name'
+      };
+    }
+
+    try {
+      const hasUserCollections = await this.hasUserCollectionsTable();
+      if (!hasUserCollections) {
+        return {
+          success: false,
+          error: 'user_collections table not available'
+        };
+      }
+
+      // Start transaction
+      await this.db.exec('BEGIN TRANSACTION');
+
+      // Get count of cards in this collection before deletion
+      const countResult = await this.db.get(
+        'SELECT COUNT(*) as count FROM user_collections WHERE collectionName = ?',
+        [collectionName]
+      );
+      const cardsToDelete = countResult.count;
+
+      if (cardsToDelete === 0) {
+        await this.db.exec('ROLLBACK');
+        return {
+          success: false,
+          error: `Collection "${collectionName}" not found or is empty`
+        };
+      }
+
+      // Get cards that will no longer be in any collection after this deletion
+      // These cards should have their collected flag cleared
+      const cardsToUncollect = await this.db.all(`
+        SELECT DISTINCT uc1.cardName, uc1.setCode, uc1.collectorNumber
+        FROM user_collections uc1
+        WHERE uc1.collectionName = ?
+        AND NOT EXISTS (
+          SELECT 1 FROM user_collections uc2 
+          WHERE uc2.cardName = uc1.cardName 
+          AND uc2.setCode = uc1.setCode 
+          AND uc2.collectorNumber = uc1.collectorNumber
+          AND uc2.collectionName != ?
+        )
+      `, [collectionName, collectionName]);
+
+      // Clear collected flags for cards that will no longer be in any collection
+      for (const card of cardsToUncollect) {
+        await this.db.run(`
+          UPDATE cards 
+          SET collected = 0 
+          WHERE lower(name) = lower(?) 
+          AND lower(setCode) = lower(?) 
+          AND number = ?
+        `, [card.cardName, card.setCode, card.collectorNumber]);
+      }
+
+      // Delete all cards from the specified collection
+      const deleteResult = await this.db.run(
+        'DELETE FROM user_collections WHERE collectionName = ?',
+        [collectionName]
+      );
+
+      // Commit transaction
+      await this.db.exec('COMMIT');
+
+      console.log(`✅ Successfully deleted collection "${collectionName}" with ${cardsToDelete} cards`);
+      console.log(`📝 Cleared collected flags for ${cardsToUncollect.length} cards that are no longer in any collection`);
+
+      return {
+        success: true,
+        deletedCards: cardsToDelete,
+        uncollectedCards: cardsToUncollect.length,
+        message: `Successfully deleted collection "${collectionName}" with ${cardsToDelete} cards`
+      };
+
+    } catch (error) {
+      // Rollback on error
+      try {
+        await this.db.exec('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('Error rolling back transaction:', rollbackError);
+      }
+
+      console.error(`Error deleting collection "${collectionName}":`, error);
+      return {
+        success: false,
+        error: `Failed to delete collection: ${error.message}`
+      };
     }
   }
 }
