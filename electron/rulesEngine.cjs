@@ -52,6 +52,7 @@ class MTGRulesEngine {
       sideboardSize: 0,
       requiresCommander: true,
       colorIdentityRestriction: true,
+      commanderCountsTowardDeckSize: true, // Commander counts toward the 100-card limit
       specialRules: {
         companionAllowed: false,
         planeswalkerCommanderAllowed: true,
@@ -429,7 +430,13 @@ class MTGRulesEngine {
     const warnings = [];
 
     // Check deck size
-    const totalCards = (deck.mainboard || []).reduce((sum, entry) => sum + (entry.quantity || 1), 0);
+    let totalCards = (deck.mainboard || []).reduce((sum, entry) => sum + (entry.quantity || 1), 0);
+    
+    // For Commander format, include commanders in the deck size count
+    if (format.toLowerCase() === 'commander' && formatRules.commanderCountsTowardDeckSize) {
+      totalCards += (deck.commanders || []).length;
+    }
+    
     if (totalCards < formatRules.minDeckSize) {
       errors.push(`Deck too small: ${totalCards} cards (minimum ${formatRules.minDeckSize})`);
     }

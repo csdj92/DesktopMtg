@@ -994,7 +994,7 @@ const DeckBuilder = () => {
     const mainboardCount = deck.mainboard.reduce((sum, entry) => sum + entry.quantity, 0);
     const commanderCount = deck.commanders.length;
     return mainboardCount + commanderCount;
-  }, [deck.mainboard, deck.commanders]);
+  }, [deck.mainboard, deck.commanders, format]);
 
   // Filter and sort cards based on commander rules and type filter
   const filteredSearchResults = useMemo(() => {
