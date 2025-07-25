@@ -3,7 +3,7 @@
   "description": "Desktop Magic The Gathering collection manager and deck builder",
   "author": "C.J Davis",
   "private": true,
-  "version": "1.12.0",
+  "version": "1.13.0",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
