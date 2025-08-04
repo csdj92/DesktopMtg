@@ -49,7 +49,7 @@
     "electron-updater": "^6.2.3",
     "framer-motion": "^12.18.1",
     "lodash.debounce": "^4.0.8",
-    "lucide-react": "^0.517.0",
+    "lucide-react": "^0.536.0",
     "onnxruntime-node": "^1.22.0-rev",
     "python-shell": "^5.0.0",
     "react": "^19.1.0",
