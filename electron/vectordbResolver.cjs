@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const fsp = require('fs').promises;
+const { spawnSync } = require('child_process');
 const { app } = require('electron');
 
 /**
@@ -20,6 +21,8 @@ async function resolveVectorDbPath() {
   // If the vector DB already exists in the user's writable directory, we're done.
   if (fs.existsSync(userVectorDbDir)) {
     console.log('[vectorDbResolver] Vector DB found in user data directory:', userVectorDbDir);
+    // Best-effort protection on Windows each startup
+    protectWindowsDirectory(userVectorDbDir);
     return userVectorDbDir;
   }
 
@@ -44,6 +47,8 @@ async function resolveVectorDbPath() {
     // Recursively copy the entire directory.
     await fsp.cp(sourceVectorDbDir, userVectorDbDir, { recursive: true });
     console.log('[vectorDbResolver] Successfully copied vector DB.');
+    // Best-effort protection on Windows
+    protectWindowsDirectory(userVectorDbDir);
     return userVectorDbDir;
   } catch (error) {
     console.error('[vectorDbResolver] CRITICAL: Failed to copy vector DB to writable location:', error);
@@ -57,22 +62,52 @@ async function resolveVectorDbPath() {
  * Checks multiple locations to handle packaged and development environments.
  */
 function findBundledVectorDbPath() {
+  // Prefer vectordb bundled inside app.asar (hidden from casual users)
   const candidates = [
-    // Packaged app location (e.g., extraResources)
-    path.join(process.resourcesPath, 'vectordb'),
-    // Development environment fallback
-    path.resolve(__dirname, '..', 'vectordb')
+    // app.asar root (when included via build.files)
+    path.resolve(__dirname, '..', 'vectordb'),
+    // Explicit asar path (some environments)
+    path.join(process.resourcesPath || '', 'app.asar', 'vectordb'),
+    // Legacy: extraResources at resources root (older builds)
+    path.join(process.resourcesPath || '', 'vectordb'),
+    // Development environment fallback (running from source)
+    path.resolve(__dirname, '..', '..', 'vectordb')
   ];
 
   for (const candidatePath of candidates) {
-    if (fs.existsSync(candidatePath)) {
-      console.log(`[vectorDbResolver] Found bundled vector DB at: ${candidatePath}`);
-      return candidatePath;
+    try {
+      if (fs.existsSync(candidatePath)) {
+        console.log(`[vectorDbResolver] Found bundled vector DB at: ${candidatePath}`);
+        return candidatePath;
+      }
+    } catch (_) {
+      // ignore
     }
   }
 
   console.warn('[vectorDbResolver] Bundled vector DB not found in any expected locations:', candidates);
   return null;
+}
+
+function protectWindowsDirectory(directoryPath) {
+  if (process.platform !== 'win32') return;
+
+  try {
+    // Hide the directory (obfuscation only)
+    spawnSync('attrib', ['+h', directoryPath], { stdio: 'ignore' });
+
+    // Tighten ACLs: remove inheritance and grant full control to current user only
+    const username = process.env.USERNAME;
+    const userdomain = process.env.USERDOMAIN;
+    const principal = userdomain ? `${userdomain}\\${username}` : `${username}`;
+
+    // Remove inherited permissions
+    spawnSync('icacls', [directoryPath, '/inheritance:r'], { stdio: 'ignore' });
+    // Reset explicit permissions to the current user
+    spawnSync('icacls', [directoryPath, '/grant:r', `${principal}:(OI)(CI)F`], { stdio: 'ignore' });
+  } catch (error) {
+    console.warn('[vectorDbResolver] Failed to set Windows directory protections (best-effort):', error?.message || error);
+  }
 }
 
 module.exports = { resolveVectorDbPath };

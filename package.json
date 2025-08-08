@@ -3,7 +3,7 @@
   "description": "Desktop Magic The Gathering collection manager and deck builder",
   "author": "C.J Davis",
   "private": true,
-  "version": "1.13.1",
+  "version": "1.14.0",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -100,6 +100,7 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "vectordb/**/*",
       "app-update.yml",
       "package.json"
     ],
@@ -107,10 +108,6 @@
       {
         "from": "Database",
         "to": "Database"
-      },
-      {
-        "from": "vectordb",
-        "to": "vectordb"
       },
       {
         "from": "app-update.yml",
