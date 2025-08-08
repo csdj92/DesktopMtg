@@ -25,6 +25,27 @@
   font-size: 1.3em;
 }
 
+.header-buttons {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.toggle-main-btn {
+  background: #059669;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9em;
+  transition: background-color 0.2s;
+}
+
+.toggle-main-btn:hover {
+  background: #047857;
+}
+
 .toggle-comparison-btn {
   background: #6366f1;
   color: white;
@@ -180,10 +201,34 @@
   border: 1px solid var(--border-color, #e0e0e0);
 }
 
-.strategy-stats h4 {
-  margin-top: 0;
+.stats-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 15px;
+  border-bottom: 2px solid var(--border-color, #e0e0e0);
+  padding-bottom: 8px;
+}
+
+.stats-header h4 {
+  margin: 0;
   color: var(--text-primary, #333);
+  font-size: 1.1em;
+}
+
+.toggle-stats-btn {
+  background: #6366f1;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8em;
+  transition: background-color 0.2s;
+}
+
+.toggle-stats-btn:hover {
+  background: #4f46e5;
 }
 
 .stats-grid {

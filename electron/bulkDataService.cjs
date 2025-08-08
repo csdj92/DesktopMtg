@@ -89,12 +89,16 @@ class BulkDataService {
       driver: sqlite3.Database
     });
 
-    // Set PRAGMAs for performance and to prevent locking issues.
+    // Set PRAGMAs for performance and to prevent locking issues (requirement 5.3)
     // WAL mode allows for one writer and multiple readers, which is perfect for Electron.
     await this.db.exec(`
       PRAGMA journal_mode = WAL;
-      PRAGMA busy_timeout = 5000;
+      PRAGMA busy_timeout = 10000;
       PRAGMA synchronous = NORMAL;
+      PRAGMA cache_size = -64000;
+      PRAGMA temp_store = MEMORY;
+      PRAGMA mmap_size = 268435456;
+      PRAGMA optimize;
     `);
 
     // Check if the cards table exists (it should already exist with the new database)
@@ -159,27 +163,94 @@ class BulkDataService {
     await this.db.exec('CREATE INDEX IF NOT EXISTS idx_cardRulings_uuid ON cardRulings(uuid)');
   }
 
+  /**
+   * Execute a database query with timeout handling (requirement 5.3)
+   * @param {Function} queryFn - Function that returns a Promise for the database query
+   * @param {number} timeoutMs - Timeout in milliseconds (default: 30 seconds)
+   * @param {string} queryName - Name of the query for logging
+   * @returns {Promise} Query result or throws timeout error
+   */
+  async executeWithTimeout(queryFn, timeoutMs = 30000, queryName = 'database query') {
+    return new Promise(async (resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject(new Error(`Query timeout: ${queryName} exceeded ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      try {
+        const result = await queryFn();
+        clearTimeout(timeoutId);
+        resolve(result);
+      } catch (error) {
+        clearTimeout(timeoutId);
+        console.error(`Query error in ${queryName}:`, error);
+        reject(error);
+      }
+    });
+  }
+
   async ensureOptimizedIndexes() {
-    // Create optimized indexes for fast card lookups
+    // Create optimized indexes for fast card lookups and JOIN operations
     const indexes = [
+      // Basic card lookup indexes
       'CREATE INDEX IF NOT EXISTS idx_cards_name ON cards(name)',
       'CREATE INDEX IF NOT EXISTS idx_cards_name_lower ON cards(lower(name))',
       'CREATE INDEX IF NOT EXISTS idx_cards_setcode ON cards(setCode)',
       'CREATE INDEX IF NOT EXISTS idx_cards_setcode_lower ON cards(lower(setCode))',
       'CREATE INDEX IF NOT EXISTS idx_cards_number ON cards(number)',
       'CREATE INDEX IF NOT EXISTS idx_cards_language ON cards(language)',
+
+      // Composite indexes for JOIN operations (requirement 5.1)
       'CREATE INDEX IF NOT EXISTS idx_cards_name_set_num ON cards(name, setCode, number)',
       'CREATE INDEX IF NOT EXISTS idx_cards_name_set_lower ON cards(lower(name), lower(setCode))',
+      'CREATE INDEX IF NOT EXISTS idx_cards_setcode_number ON cards(setCode, number)',
+      'CREATE INDEX IF NOT EXISTS idx_cards_name_setcode_number_lower ON cards(lower(name), lower(setCode), number)',
+
+      // Indexes for collection status and aggregation queries (requirement 5.2)
+      'CREATE INDEX IF NOT EXISTS idx_cards_collected ON cards(collected)',
+      'CREATE INDEX IF NOT EXISTS idx_cards_collected_rarity ON cards(collected, rarity)',
+      'CREATE INDEX IF NOT EXISTS idx_cards_collected_setcode ON cards(collected, setCode)',
+      'CREATE INDEX IF NOT EXISTS idx_cards_rarity ON cards(rarity)',
+
+      // Additional indexes for double-faced card handling
+      'CREATE INDEX IF NOT EXISTS idx_cards_layout ON cards(layout)',
+      'CREATE INDEX IF NOT EXISTS idx_cards_facename ON cards(faceName)',
     ];
 
+    // User collections table indexes for JOIN performance
+    const userCollectionIndexes = [
+      'CREATE INDEX IF NOT EXISTS idx_uc_cardname_setcode_number ON user_collections(cardName, setCode, collectorNumber)',
+      'CREATE INDEX IF NOT EXISTS idx_uc_cardname_setcode_number_lower ON user_collections(lower(cardName), lower(setCode), collectorNumber)',
+      'CREATE INDEX IF NOT EXISTS idx_uc_collection_card ON user_collections(collectionName, cardName)',
+      'CREATE INDEX IF NOT EXISTS idx_uc_quantity_aggregation ON user_collections(cardName, setCode, collectorNumber, foil, quantity)',
+    ];
+
+    // Create main card indexes
     for (const indexSql of indexes) {
       try {
         await this.db.exec(indexSql);
       } catch (error) {
-        console.warn(`Warning: Could not create index: ${error.message}`);
+        console.warn(`Warning: Could not create card index: ${error.message}`);
       }
     }
-    console.log('Optimized indexes ensured for fast card lookups');
+
+    // Create user_collections indexes if table exists
+    try {
+      const hasUserCollections = await this.hasUserCollectionsTable();
+      if (hasUserCollections) {
+        for (const indexSql of userCollectionIndexes) {
+          try {
+            await this.db.exec(indexSql);
+          } catch (error) {
+            console.warn(`Warning: Could not create user_collections index: ${error.message}`);
+          }
+        }
+        console.log('User collections indexes created for JOIN performance');
+      }
+    } catch (error) {
+      console.warn('Could not create user_collections indexes:', error.message);
+    }
+
+    console.log('Optimized indexes ensured for fast card lookups and JOIN operations');
   }
 
   async markCollected(cardId) {
@@ -206,6 +277,45 @@ class BulkDataService {
   }
 
   async getCollectedCards(options = {}) {
+    if (!this.db || !this.initialized) {
+      return [];
+    }
+
+    try {
+      // Primary: Check for user_collections table first
+      const hasUserCollections = await this.hasUserCollectionsTable();
+
+      if (hasUserCollections) {
+        console.log('[getCollectedCards] Using user_collections table as primary data source');
+        const userCollectionCards = await this.getCollectedCardsFromUserCollections(options);
+
+        if (userCollectionCards && userCollectionCards.length > 0) {
+          return userCollectionCards;
+        } else {
+          console.log('[getCollectedCards] No cards found in user_collections, falling back to cards.collected');
+        }
+      } else {
+        console.log('[getCollectedCards] user_collections table not available, using cards.collected fallback');
+      }
+
+      // Fallback: Use original cards.collected logic when user_collections unavailable
+      console.log('[getCollectedCards] Using cards.collected field as fallback data source');
+      return await this.getCollectedCardsFromCardsTable(options);
+
+    } catch (error) {
+      console.error('Error in getCollectedCards:', error);
+      // Final fallback to original method if everything fails
+      return await this.getCollectedCardsFromCardsTable(options);
+    }
+  }
+
+  /**
+   * Get collected cards using cards.collected field (fallback method)
+   * This is the original implementation for backward compatibility
+   * @param {Object} options - Query options
+   * @returns {Promise<Array>} Array of card objects
+   */
+  async getCollectedCardsFromCardsTable(options = {}) {
     const { search = '', limit = 1000, offset = 0 } = options;
 
     let query = `
@@ -241,10 +351,10 @@ class BulkDataService {
             WHERE dp2.uuid = c.uuid
           ) AS prices_json,
 
-          /* Aggregate quantities from user_collections */
-          COALESCE(uc.foil_quantity, 0) as foil_quantity,
-          COALESCE(uc.normal_quantity, 0) as normal_quantity,
-          COALESCE(uc.total_quantity, 0) as total_quantity
+          /* Default quantity values for backward compatibility */
+          0 as foil_quantity,
+          0 as normal_quantity,
+          0 as total_quantity
 
         FROM cards AS c
         LEFT JOIN cardIdentifiers   AS ci  ON ci.uuid       = c.uuid
@@ -252,23 +362,8 @@ class BulkDataService {
         LEFT JOIN sets              AS s   ON s.code        = c.setCode
         LEFT JOIN cardPurchaseUrls  AS cpu ON cpu.uuid      = c.uuid
         LEFT JOIN cardRelatedLinks  AS crl ON crl.uuid      = c.uuid
-        LEFT JOIN (
-          SELECT 
-            cardName,
-            setCode,
-            collectorNumber,
-            SUM(CASE WHEN foil = 'foil' THEN quantity ELSE 0 END) as foil_quantity,
-            SUM(CASE WHEN foil = 'normal' THEN quantity ELSE 0 END) as normal_quantity,
-            SUM(quantity) as total_quantity
-          FROM user_collections 
-          GROUP BY cardName, setCode, collectorNumber
-        ) uc ON lower(uc.cardName) = lower(c.name) 
-           AND lower(uc.setCode) = lower(c.setCode) 
-           AND uc.collectorNumber = c.number
 
         WHERE c.collected >= 1
-        
-
     `;
     const params = [];
 
@@ -284,18 +379,150 @@ class BulkDataService {
     return Promise.all(result.map(row => this.convertDbRowToCard(row)));
   }
 
+  /**
+   * Get collected cards using user_collections table as primary data source
+   * Uses efficient JOIN query with user_collections table and includes quantity information
+   * @param {Object} options - Query options
+   * @param {string} options.search - Search term for card name or set code
+   * @param {number} options.limit - Maximum number of results to return (default: 1000)
+   * @param {number} options.offset - Number of results to skip for pagination (default: 0)
+   * @returns {Promise<Array>} Array of card objects with quantity information
+   */
+  async getCollectedCardsFromUserCollections(options = {}) {
+    if (!this.db || !this.initialized) {
+      return [];
+    }
+
+    const { search = '', limit = 1000, offset = 0 } = options;
+
+    try {
+      // Build the main query using efficient JOIN with user_collections
+      // Handle double-faced cards by selecting one representative face per unique card (requirement 5.2)
+      let query = `
+        SELECT
+          c.*,
+          ci.scryfallId,
+          cl.alchemy,    cl.brawl,       cl.commander,     cl.duel,
+          cl.explorer,   cl.future,      cl.gladiator,     cl.historic,
+          cl.legacy,     cl.modern,      cl.oathbreaker,   cl.oldschool,
+          cl.pauper,     cl.paupercommander, cl.penny,     cl.pioneer,
+          cl.predh,      cl.premodern,   cl.standard,      cl.standardbrawl,
+          cl.timeless,   cl.vintage,
+          s.name       AS setName,
+          cpu.cardKingdom,
+          cpu.cardmarket,
+          cpu.tcgplayer,
+          crl.gatherer,
+          crl.edhrec,
+
+          /* JSON array of all price records for this card */
+          (
+            SELECT json_group_array(
+              json_object(
+                'vendor',           dp2.vendor,
+                'price',            dp2.price,
+                'transaction_type', dp2.transaction_type,
+                'card_type',        dp2.card_type,
+                'date',             dp2.date,
+                'currency',         dp2.currency
+              )
+            )
+            FROM daily_prices AS dp2
+            WHERE dp2.uuid = c.uuid
+          ) AS prices_json,
+
+          /* Quantity information from user_collections */
+          uc.foil_quantity,
+          uc.normal_quantity,
+          uc.total_quantity
+
+        FROM cards AS c
+        LEFT JOIN cardIdentifiers   AS ci  ON ci.uuid       = c.uuid
+        LEFT JOIN cardLegalities    AS cl  ON cl.uuid       = c.uuid
+        LEFT JOIN sets              AS s   ON s.code        = c.setCode
+        LEFT JOIN cardPurchaseUrls  AS cpu ON cpu.uuid      = c.uuid
+        LEFT JOIN cardRelatedLinks  AS crl ON crl.uuid      = c.uuid
+        JOIN (
+          SELECT 
+            cardName,
+            setCode,
+            collectorNumber,
+            SUM(CASE WHEN foil = 'foil' THEN quantity ELSE 0 END) as foil_quantity,
+            SUM(CASE WHEN foil = 'normal' THEN quantity ELSE 0 END) as normal_quantity,
+            SUM(quantity) as total_quantity
+          FROM user_collections 
+          WHERE quantity > 0
+          GROUP BY cardName, setCode, collectorNumber
+        ) uc ON lower(uc.cardName) = lower(c.name) 
+           AND lower(uc.setCode) = lower(c.setCode) 
+           AND uc.collectorNumber = c.number
+        WHERE 1=1
+      `;
+
+      const params = [];
+
+      // Add search filtering if provided
+      if (search) {
+        query += ' AND (lower(c.name) LIKE lower(?) OR lower(c.setCode) LIKE lower(?))';
+        params.push(`%${search}%`, `%${search}%`);
+      }
+
+      // Group by name, setCode, number to handle double-faced cards properly
+      query += ' GROUP BY c.name, c.setCode, c.number';
+
+      // Add ordering, pagination
+      query += ' ORDER BY c.name ASC LIMIT ? OFFSET ?';
+      params.push(limit, offset);
+
+      // Execute with timeout handling (requirement 5.3)
+      const result = await this.executeWithTimeout(
+        () => this.db.all(query, params),
+        25000,
+        'collected cards from user_collections'
+      );
+
+      return Promise.all(result.map(row => this.convertDbRowToCard(row)));
+
+    } catch (error) {
+      console.error('Error getting collected cards from user_collections:', error);
+      return [];
+    }
+  }
+
   async markCardCollected(cardId, collected = true) {
     if (!this.db || !this.initialized) {
       return false;
     }
 
     try {
-      const result = await this.db.run(
+      // Primary: Update user_collections table if available
+      const hasUserCollections = await this.hasUserCollectionsTable();
+      let userCollectionsSuccess = false;
+
+      if (hasUserCollections) {
+        console.log(`[markCardCollected] Updating user_collections for card ${cardId} to collected=${collected}`);
+        userCollectionsSuccess = await this.updateUserCollections(cardId, collected);
+      } else {
+        console.log('[markCardCollected] user_collections table not available, skipping user_collections update');
+      }
+
+      // Secondary: Always update cards.collected for backward compatibility
+      console.log(`[markCardCollected] Updating cards.collected for card ${cardId} to collected=${collected}`);
+      const cardsResult = await this.db.run(
         'UPDATE cards SET collected = ? WHERE uuid = ?',
         [collected ? 1 : 0, cardId]
       );
-      console.log(`Updated ${result.changes} card(s) with UUID ${cardId} to collected=${collected}`);
-      return result.changes > 0;
+
+      const cardsSuccess = cardsResult.changes > 0;
+      console.log(`Updated ${cardsResult.changes} card(s) in cards table with UUID ${cardId} to collected=${collected}`);
+
+      // Return true if either system was updated successfully
+      // If user_collections is available, both should succeed for full success
+      if (hasUserCollections) {
+        return userCollectionsSuccess && cardsSuccess;
+      } else {
+        return cardsSuccess;
+      }
     } catch (error) {
       console.error('Error marking card as collected:', error);
       return false;
@@ -308,9 +535,30 @@ class BulkDataService {
     }
 
     try {
-      const result = await this.db.run('UPDATE cards SET collected = 0 WHERE collected > 0');
-      console.log(`Cleared ${result.changes} collected card(s) from main database`);
-      return result.changes > 0;
+      // Primary: Clear user_collections table if available
+      const hasUserCollections = await this.hasUserCollectionsTable();
+      let userCollectionsSuccess = false;
+
+      if (hasUserCollections) {
+        console.log('[clearAllCollected] Clearing all data from user_collections table');
+        userCollectionsSuccess = await this.clearUserCollections();
+      } else {
+        console.log('[clearAllCollected] user_collections table not available, skipping user_collections clear');
+      }
+
+      // Secondary: Always clear cards.collected for backward compatibility
+      console.log('[clearAllCollected] Clearing all collected flags from cards table');
+      const cardsResult = await this.db.run('UPDATE cards SET collected = 0 WHERE collected > 0');
+      const cardsSuccess = cardsResult.changes > 0;
+      console.log(`Cleared ${cardsResult.changes} collected card(s) from cards table`);
+
+      // Return true if either system was cleared successfully
+      // If user_collections is available, both should succeed for full success
+      if (hasUserCollections) {
+        return userCollectionsSuccess && cardsSuccess;
+      } else {
+        return cardsSuccess;
+      }
     } catch (error) {
       console.error('Error clearing all collected cards:', error);
       return false;
@@ -400,67 +648,87 @@ class BulkDataService {
         return null;
       }
 
-      // Get total cards in database (unchanged from original method)
-      const totalCards = await this.db.get('SELECT COUNT(*) as count FROM cards');
+      // Get total cards in database with timeout (requirement 5.3)
+      const totalCards = await this.executeWithTimeout(
+        () => this.db.get('SELECT COUNT(*) as count FROM cards'),
+        15000,
+        'total cards count'
+      );
 
-      // Get collected cards using the same JOIN logic as getRarityBreakdown()
+      // Optimized collected cards query with proper indexing (requirement 5.2)
+      // Use DISTINCT to avoid counting double-faced cards twice
       const collectedCardsQuery = `
-        SELECT COUNT(*) as count
+        SELECT COUNT(DISTINCT c.name || '|' || c.setCode || '|' || c.number) as count
         FROM cards c
         JOIN (
-          SELECT 
+          SELECT DISTINCT
             cardName,
             setCode,
             collectorNumber
           FROM user_collections 
-          GROUP BY cardName, setCode, collectorNumber
+          WHERE quantity > 0
         ) uc ON lower(uc.cardName) = lower(c.name) 
            AND lower(uc.setCode) = lower(c.setCode) 
            AND uc.collectorNumber = c.number
       `;
-      const collectedCards = await this.db.get(collectedCardsQuery);
+      const collectedCards = await this.executeWithTimeout(
+        () => this.db.get(collectedCardsQuery),
+        20000,
+        'collected cards count'
+      );
 
-      // Get collected by rarity using user_collections data
+      // Optimized rarity stats query with aggregation optimization (requirement 5.2)
       const rarityStatsQuery = `
         SELECT 
           c.rarity,
-          COUNT(*) as count
+          COUNT(DISTINCT c.name || '|' || c.setCode || '|' || c.number) as count
         FROM cards c
         JOIN (
-          SELECT 
+          SELECT DISTINCT
             cardName,
             setCode,
             collectorNumber
           FROM user_collections 
-          GROUP BY cardName, setCode, collectorNumber
+          WHERE quantity > 0
         ) uc ON lower(uc.cardName) = lower(c.name) 
            AND lower(uc.setCode) = lower(c.setCode) 
            AND uc.collectorNumber = c.number
+        WHERE c.rarity IS NOT NULL
         GROUP BY c.rarity
+        ORDER BY count DESC
       `;
-      const rarityStats = await this.db.all(rarityStatsQuery);
+      const rarityStats = await this.executeWithTimeout(
+        () => this.db.all(rarityStatsQuery),
+        20000,
+        'rarity stats aggregation'
+      );
 
-      // Get collected by set (top 10) using user_collections data
+      // Optimized set stats query with aggregation optimization (requirement 5.2)
       const setStatsQuery = `
         SELECT 
           c.setCode,
-          COUNT(*) as count
+          COUNT(DISTINCT c.name || '|' || c.setCode || '|' || c.number) as count
         FROM cards c
         JOIN (
-          SELECT 
+          SELECT DISTINCT
             cardName,
             setCode,
             collectorNumber
           FROM user_collections 
-          GROUP BY cardName, setCode, collectorNumber
+          WHERE quantity > 0
         ) uc ON lower(uc.cardName) = lower(c.name) 
            AND lower(uc.setCode) = lower(c.setCode) 
            AND uc.collectorNumber = c.number
+        WHERE c.setCode IS NOT NULL
         GROUP BY c.setCode
         ORDER BY count DESC 
         LIMIT 10
       `;
-      const setStats = await this.db.all(setStatsQuery);
+      const setStats = await this.executeWithTimeout(
+        () => this.db.all(setStatsQuery),
+        20000,
+        'set stats aggregation'
+      );
 
       // Return data in the same format as the original getCollectionStats()
       return {
@@ -2425,10 +2693,11 @@ class BulkDataService {
     }
 
     try {
+      // Optimized query with proper indexing and double-faced card handling (requirements 5.1, 5.2)
       const query = `
         SELECT 
           c.rarity,
-          COUNT(*) as unique_count,
+          COUNT(DISTINCT c.name || '|' || c.setCode || '|' || c.number) as unique_count,
           SUM(uc.total_quantity) as total_quantity,
           SUM(uc.foil_quantity) as foil_quantity,
           SUM(uc.normal_quantity) as normal_quantity
@@ -2442,10 +2711,12 @@ class BulkDataService {
             SUM(CASE WHEN foil = 'normal' THEN quantity ELSE 0 END) as normal_quantity,
             SUM(quantity) as total_quantity
           FROM user_collections 
+          WHERE quantity > 0
           GROUP BY cardName, setCode, collectorNumber
         ) uc ON lower(uc.cardName) = lower(c.name) 
            AND lower(uc.setCode) = lower(c.setCode) 
            AND uc.collectorNumber = c.number
+        WHERE c.rarity IS NOT NULL
         GROUP BY c.rarity
         ORDER BY 
           CASE c.rarity 
@@ -2457,7 +2728,12 @@ class BulkDataService {
           END
       `;
 
-      const results = await this.db.all(query);
+      // Execute with timeout handling (requirement 5.3)
+      const results = await this.executeWithTimeout(
+        () => this.db.all(query),
+        20000,
+        'rarity breakdown aggregation'
+      );
 
       // Calculate totals for percentages
       const totalCards = results.reduce((sum, row) => sum + row.unique_count, 0);
@@ -2791,6 +3067,90 @@ class BulkDataService {
     } catch (error) {
       console.error('Error getting mana curve data:', error);
       return null;
+    }
+  }
+
+  /**
+   * Update user_collections table for a specific card
+   * @param {string} cardId - UUID of the card to update
+   * @param {boolean} collected - Whether the card should be marked as collected
+   * @returns {Promise<boolean>} True if operation was successful
+   */
+  async updateUserCollections(cardId, collected = true) {
+    if (!this.db || !this.initialized) {
+      return false;
+    }
+
+    try {
+      // Get card details from the main cards table
+      const card = await this.db.get(
+        'SELECT name, setCode, number FROM cards WHERE uuid = ?',
+        [cardId]
+      );
+
+      if (!card) {
+        console.error(`Card with UUID ${cardId} not found in cards table`);
+        return false;
+      }
+
+      if (collected) {
+        // Add card to user_collections with default collection name
+        // Use INSERT OR REPLACE to handle duplicates
+        const insertResult = await this.db.run(`
+          INSERT OR REPLACE INTO user_collections (
+            collectionName, cardName, setCode, collectorNumber, 
+            foil, quantity, condition, language
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          'My Collection',  // Default collection name
+          card.name,
+          card.setCode,
+          card.number,
+          'normal',         // Default to normal (non-foil)
+          1,                // Default quantity
+          'near_mint',      // Default condition
+          'en'              // Default language
+        ]);
+
+        console.log(`Added card ${card.name} (${card.setCode}) to user_collections`);
+        return insertResult.changes > 0;
+      } else {
+        // Remove card from user_collections
+        const deleteResult = await this.db.run(`
+          DELETE FROM user_collections 
+          WHERE cardName = ? AND setCode = ? AND collectorNumber = ?
+        `, [card.name, card.setCode, card.number]);
+
+        console.log(`Removed card ${card.name} (${card.setCode}) from user_collections (${deleteResult.changes} rows affected)`);
+        return deleteResult.changes > 0;
+      }
+    } catch (error) {
+      console.error('Error updating user_collections:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Clear all data from user_collections table
+   * @returns {Promise<boolean>} True if operation was successful
+   */
+  async clearUserCollections() {
+    if (!this.db || !this.initialized) {
+      return false;
+    }
+
+    try {
+      const deleteResult = await this.db.run('DELETE FROM user_collections');
+      console.log(`Cleared ${deleteResult.changes} entries from user_collections table`);
+
+      // Clear the cache since table state has changed
+      delete this._userCollectionsTableCache;
+      delete this._userCollectionsTableCacheExpiry;
+
+      return deleteResult.changes >= 0; // Return true even if 0 rows (table was already empty)
+    } catch (error) {
+      console.error('Error clearing user_collections table:', error);
+      return false;
     }
   }
 

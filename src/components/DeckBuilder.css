@@ -1008,7 +1008,9 @@
 }
 
 .command-zone .card-grid-item-deck {
+  width: 125px; /* Fix width to prevent hover-induced shrink from content changes */
   max-width: 125px;
+  min-width: 125px;
   flex-shrink: 0;
 }
 

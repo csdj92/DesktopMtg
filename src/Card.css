@@ -293,6 +293,11 @@ img.loading {
   opacity: 0.6;
 }
 
+/* Prevent image rescale on hover shrinking clickable area */
+.card-image-background {
+  transform: translateZ(0); /* Create new stacking context, reduce layout shifts */
+}
+
 /* Drag an
 d Drop Styles */
 .card-container.draggable {

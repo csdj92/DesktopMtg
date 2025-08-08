@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, useDeferredValue, Suspense, lazy } from 'react';
 import './DeckBuilder.css';
 import useImageCache from '../hooks/useImageCache';
 import Card from '../Card';
@@ -7,17 +7,32 @@ import DeckStatistics from './DeckStatistics';
 import SearchControls from './SearchControls';
 import SearchFunctions from './search';
 import { WidthProvider, Responsive } from "react-grid-layout";
+import useDeckValidation from '../hooks/useDeckValidation';
+import {
+  isCardCommander,
+  isBasicLand,
+  isCardLegalInFormat as isCardLegalInFormatUtil,
+  getCardTypes,
+  getPrimaryCardType,
+  groupCardsByType,
+  matchesTypeFilter,
+  sortCards,
+  getMaxCopiesAllowed as getMaxCopiesAllowedUtil,
+  isCardInColorIdentity as isCardInColorIdentityUtil,
+} from '../utils/cards';
+import { safeConfirm, safeAlert } from '../utils/dialogs';
+import { ToastProvider, useToast } from '../context/ToastContext';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import SpellbookExport from './SpellbookExport';
-import RecommendationSettings from './RecommendationSettings';
-import StrategyTester from './StrategyTester';
-import PatternAnalysis from './PatternAnalysis';
+const SpellbookExport = lazy(() => import('./SpellbookExport'));
+const RecommendationSettings = lazy(() => import('./RecommendationSettings'));
+const StrategyTester = lazy(() => import('./StrategyTester'));
+const PatternAnalysis = lazy(() => import('./PatternAnalysis'));
 import useCardNavigation from '../hooks/useCardNavigation';
 import { Plus, Save, Trash2, X, AlertTriangle, CheckCircle, Settings, Brain, XCircle } from 'lucide-react';
-import AIPanel from './AIPanel';
+// const AIPanel = lazy(() => import('./AIPanel'));
 
 // ===================================================================================
 // New: Centralized configuration for all available panels in the Deck Builder.
@@ -71,7 +86,9 @@ const generateResponsiveLayouts = (panels) => {
     return memo;
   }, {});
 
-  console.log('🎯 Generated bootstrap layouts:', layouts);
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('🎯 Generated bootstrap layouts:', layouts);
+  }
   return layouts;
 };
 
@@ -112,7 +129,7 @@ const getSynergyScoreLabel = (score) => {
 
 
 // --- DeckManager Component ---
-const DeckManager = ({ deck, format, currentDeckName, onSave, onLoad, onDelete, onNew }) => {
+const DeckManager = React.memo(function DeckManager({ deck, format, currentDeckName, onSave, onLoad, onDelete, onNew }) {
   const [savedDecks, setSavedDecks] = useState([]);
   const [deckFilename, setDeckFilename] = useState('');
 
@@ -135,7 +152,7 @@ const DeckManager = ({ deck, format, currentDeckName, onSave, onLoad, onDelete, 
 
   const handleSaveDeck = async () => {
     if (!deckFilename.trim()) {
-      alert('Please enter a name for the deck.');
+      safeAlert('Please enter a name for the deck.');
       return;
     }
     await onSave(deckFilename);
@@ -143,7 +160,7 @@ const DeckManager = ({ deck, format, currentDeckName, onSave, onLoad, onDelete, 
   };
 
   const handleDeleteDeck = async (filename) => {
-    if (window.confirm(`Are you sure you want to delete the deck "${filename}"?`)) {
+    if (safeConfirm(`Are you sure you want to delete the deck "${filename}"?`)) {
       await onDelete(filename);
       if (currentDeckName === filename) {
         onNew();
@@ -161,6 +178,7 @@ const DeckManager = ({ deck, format, currentDeckName, onSave, onLoad, onDelete, 
           value={deckFilename}
           onChange={(e) => setDeckFilename(e.target.value)}
           placeholder="Deck Name"
+          aria-label="Deck name"
         />
         <div className="button-group">
           <button onClick={handleSaveDeck}>Save</button>
@@ -187,7 +205,7 @@ const DeckManager = ({ deck, format, currentDeckName, onSave, onLoad, onDelete, 
       </div>
     </div>
   );
-};
+});
 
 // ===================================================================================
 // New: LayoutControls component
@@ -290,7 +308,7 @@ const LayoutControls = ({ panels, onAddPanel, onRemovePanel, onSaveLayout, onRes
 
 
 // --- Main DeckBuilder Component ---
-const DeckBuilder = () => {
+const DeckBuilderInner = () => {
   const [bulkDataStats, setBulkDataStats] = useState(null);
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -317,9 +335,9 @@ const DeckBuilder = () => {
   const [currentDeckName, setCurrentDeckName] = useState('');
 
   // ===================================================================================
-  // New: State for deck validation results
+  // New: Deck validation via hook
   // ===================================================================================
-  const [validationResults, setValidationResults] = useState({ valid: true, errors: [], warnings: [] });
+  const validationResults = useDeckValidation(deck, format, 500);
 
 
   // Navigation state - tracks which card list context we're navigating
@@ -356,28 +374,19 @@ const DeckBuilder = () => {
   const [layouts, setLayouts] = useState({});
   const [panels, setPanels] = useState([]);
 
-  // ===================================================================================
-  // New: useEffect for Deck Validation
-  // This hook runs whenever the deck or format changes, providing real-time feedback.
-  // ===================================================================================
-  useEffect(() => {
-    // Debounce validation to avoid excessive calls during rapid changes
-    const validationHandle = setTimeout(async () => {
-      if (deck.mainboard.length > 0 || deck.commanders.length > 0) {
-        const results = await window.electronAPI.deckValidate(deck, format);
-        setValidationResults(results);
-      } else {
-        // Reset to valid state if the deck is empty
-        setValidationResults({ valid: true, errors: [], warnings: [] });
-      }
-    }, 500); // 500ms debounce
+  // (previous inline validation effect replaced)
 
-    return () => clearTimeout(validationHandle);
-  }, [deck, format]);
+  // One-time effect guards (avoid duplicate work in React 18 StrictMode dev)
+  const restoredDraftRef = useRef(false);
+  const layoutInitRef = useRef(false);
+  const initialDataRef = useRef(false);
+  const ownedLoadedRef = useRef(false);
 
   // --- Auto-save draft deck to localStorage ---
   // 1) Restore any previous draft on first mount
   useEffect(() => {
+    if (restoredDraftRef.current) return;
+    restoredDraftRef.current = true;
     try {
       const raw = localStorage.getItem('deckBuilderAutosave');
       if (!raw) return;
@@ -388,7 +397,9 @@ const DeckBuilder = () => {
           setDeck(data.deck);
           if (data.format) setFormat(data.format);
           if (data.currentDeckName) setCurrentDeckName(data.currentDeckName);
-          console.log('💾 Restored autosaved deck draft.');
+          if (process.env.NODE_ENV !== 'production') {
+            console.log('💾 Restored autosaved deck draft.');
+          }
         }
       }
     } catch (err) {
@@ -401,6 +412,8 @@ const DeckBuilder = () => {
   // Bootstrap-style layout initialization
   // ===================================================================================
   useEffect(() => {
+    if (layoutInitRef.current) return;
+    layoutInitRef.current = true;
     try {
       const savedLayouts = localStorage.getItem('deckBuilderLayouts');
       const savedPanels = localStorage.getItem('deckBuilderPanels');
@@ -411,13 +424,17 @@ const DeckBuilder = () => {
         const parsedPanels = JSON.parse(savedPanels);
         setLayouts(parsedLayouts);
         setPanels(parsedPanels);
-        console.log('✅ Loaded saved layouts from localStorage:', parsedLayouts);
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('✅ Loaded saved layouts from localStorage:', parsedLayouts);
+        }
       } else {
         const defaultPanels = getDefaultPanels();
         const defaultLayouts = generateResponsiveLayouts(defaultPanels);
         setLayouts(defaultLayouts);
         setPanels(defaultPanels);
-        console.log('ℹ️ No saved layouts found, using bootstrap-style default:', defaultLayouts);
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('ℹ️ No saved layouts found, using bootstrap-style default:', defaultLayouts);
+        }
       }
     } catch (err) {
       console.error('Failed to load layouts from localStorage, using defaults.', err);
@@ -457,29 +474,6 @@ const DeckBuilder = () => {
     searchHelperRef.current = new SearchFunctions(ownedCards, setCollectionSearchResults, format, isCardLegalInFormat);
   }, [ownedCards, format]);
 
-  const isCardCommander = (card) => {
-    if (!card) return false;
-    const typeLine = (card.type || card.type_line || '').toLowerCase();
-    const oracleText = (card.text || card.oracle_text || '').toLowerCase();
-
-    // Standard rule: legendary creatures
-    if (typeLine.includes('legendary') && typeLine.includes('creature')) {
-      return true;
-    }
-
-    // Background commanders (special rule from CLB set)
-    if (typeLine.includes('legendary') && typeLine.includes('background')) {
-      return true;
-    }
-
-    // Any card explicitly stating it can be commander
-    if (oracleText.includes('can be your commander')) {
-      return true;
-    }
-
-    return false;
-  };
-
   const commanderColorIdentity = useMemo(() => {
     if (format !== 'commander' || deck.commanders.length === 0) {
       return null;
@@ -491,29 +485,10 @@ const DeckBuilder = () => {
     return colors;
   }, [deck.commanders, format]);
 
-  const isCardInColorIdentity = (card, commanderId) => {
-    if (!commanderId) return true; // Not in commander format or no commander selected
-    if (!card.color_identity || card.color_identity.length === 0) {
-      return true; // Colorless cards are always valid
-    }
-    return card.color_identity.every(color => commanderId.has(color));
-  };
-
-  const isBasicLand = (card) => {
-    if (!card) return false;
-    const typeLine = (card.type || card.type_line || '').toLowerCase();
-    return typeLine.includes('basic') && typeLine.includes('land');
-  };
+  const isCardInColorIdentity = (card, commanderId) => isCardInColorIdentityUtil(card, commanderId);
 
   // Helper function to get the maximum allowed copies of a card in the current format
-  const getMaxCopiesAllowed = (card) => {
-    if (format === 'commander') {
-      // Commander singleton rule: only basic lands can have multiple copies
-      return isBasicLand(card) ? 999 : 1; // Allow many basic lands, but only 1 of other cards
-    }
-    // Standard, Modern, Legacy, etc. allow up to 4 copies
-    return 4;
-  };
+  const getMaxCopiesAllowed = (card) => getMaxCopiesAllowedUtil(card, format);
 
   // Helper function to get the user's collection quantity for a card
   const getCollectionQuantity = (card) => {
@@ -565,184 +540,8 @@ const DeckBuilder = () => {
     return { canAdd: true };
   };
 
-  // Helper function to check if a card is legal in the current format
-  const isCardLegalInFormat = (card) => {
-    if (!card || !format) return true; // Default to true if we can't determine
-
-    // Check if the card has legality information
-    if (card.legalities && typeof card.legalities === 'object') {
-      const formatKey = format.toLowerCase();
-      const legality = card.legalities[formatKey];
-
-      // Return true only for legal or restricted cards
-      return legality === 'legal' || legality === 'restricted';
-    }
-
-    // If no legality data, default to false for safety (cards should have legality data)
-    return false;
-  };
-
-  // Helper to extract primary card types for filtering
-  const getCardTypes = (card) => {
-    if (!card) return [];
-    const typeLine = (card.type || card.type_line || '').toLowerCase();
-    const types = [];
-
-    // Check for main card types
-    if (typeLine.includes('creature')) types.push('creature');
-    if (typeLine.includes('land')) types.push('land');
-    if (typeLine.includes('instant')) types.push('instant');
-    if (typeLine.includes('sorcery')) types.push('sorcery');
-    if (typeLine.includes('enchantment')) types.push('enchantment');
-    if (typeLine.includes('artifact')) types.push('artifact');
-    if (typeLine.includes('planeswalker')) types.push('planeswalker');
-    if (typeLine.includes('battle')) types.push('battle');
-
-    return types;
-  };
-
-  // Helper to get the primary type for grouping
-  const getPrimaryCardType = (card) => {
-    if (!card) return 'Other';
-    const types = getCardTypes(card);
-
-    // Return the first type found, or 'Other' if none
-    if (types.length > 0) {
-      return types[0].charAt(0).toUpperCase() + types[0].slice(1) + 's'; // Pluralize
-    }
-    return 'Other';
-  };
-
-  // Helper to group deck cards by type
-  const groupCardsByType = (mainboard) => {
-    const groups = {};
-
-    mainboard.forEach(entry => {
-      const type = getPrimaryCardType(entry.card);
-      if (!groups[type]) {
-        groups[type] = [];
-      }
-      groups[type].push(entry);
-    });
-
-    // Sort each group by name
-    Object.keys(groups).forEach(type => {
-      groups[type].sort((a, b) => a.card.name.localeCompare(b.card.name));
-    });
-
-    // Define preferred order for card types
-    const typeOrder = ['Creatures', 'Lands', 'Instants', 'Sorceries', 'Enchantments', 'Artifacts', 'Planeswalkers', 'Battles', 'Other'];
-
-    // Return groups in preferred order
-    const orderedGroups = {};
-    typeOrder.forEach(type => {
-      if (groups[type]) {
-        orderedGroups[type] = groups[type];
-      }
-    });
-
-    return orderedGroups;
-  };
-
-  const matchesTypeFilter = (card, filter) => {
-    if (filter === 'all') return true;
-    const cardTypes = getCardTypes(card);
-    return cardTypes.includes(filter);
-  };
-
-  // Helper function for comprehensive card sorting
-  const sortCards = (cardList, sortBy, direction = 'asc') => {
-    const sorted = [...cardList];
-
-    switch (sortBy) {
-      case 'cmc':
-        sorted.sort((a, b) => {
-          const cardA = a.card || a;
-          const cardB = b.card || b;
-          const aVal = cardA.manaValue ?? cardA.cmc ?? cardA.mana_value ?? 0;
-          const bVal = cardB.manaValue ?? cardB.cmc ?? cardB.mana_value ?? 0;
-          if (aVal === bVal) return cardA.name.localeCompare(cardB.name);
-          return direction === 'asc' ? aVal - bVal : bVal - aVal;
-        });
-        break;
-
-      case 'power':
-        sorted.sort((a, b) => {
-          const cardA = a.card || a;
-          const cardB = b.card || b;
-          const aVal = cardA.power ? parseInt(cardA.power, 10) : (direction === 'asc' ? Infinity : -1);
-          const bVal = cardB.power ? parseInt(cardB.power, 10) : (direction === 'asc' ? Infinity : -1);
-          if (isNaN(aVal) && isNaN(bVal)) return cardA.name.localeCompare(cardB.name);
-          if (isNaN(aVal)) return 1;
-          if (isNaN(bVal)) return -1;
-          if (aVal === bVal) return cardA.name.localeCompare(cardB.name);
-          return direction === 'asc' ? aVal - bVal : bVal - aVal;
-        });
-        break;
-
-      case 'toughness':
-        sorted.sort((a, b) => {
-          const cardA = a.card || a;
-          const cardB = b.card || b;
-          const aVal = cardA.toughness ? parseInt(cardA.toughness, 10) : (direction === 'asc' ? Infinity : -1);
-          const bVal = cardB.toughness ? parseInt(cardB.toughness, 10) : (direction === 'asc' ? Infinity : -1);
-          if (isNaN(aVal) && isNaN(bVal)) return cardA.name.localeCompare(cardB.name);
-          if (isNaN(aVal)) return 1;
-          if (isNaN(bVal)) return -1;
-          if (aVal === bVal) return cardA.name.localeCompare(cardB.name);
-          return direction === 'asc' ? aVal - bVal : bVal - aVal;
-        });
-        break;
-
-      case 'rarity':
-        sorted.sort((a, b) => {
-          const cardA = a.card || a;
-          const cardB = b.card || b;
-          const rarityOrder = { 'mythic': 4, 'rare': 3, 'uncommon': 2, 'common': 1, 'special': 0 };
-          const aVal = rarityOrder[cardA.rarity?.toLowerCase()] ?? 0;
-          const bVal = rarityOrder[cardB.rarity?.toLowerCase()] ?? 0;
-          if (aVal === bVal) return cardA.name.localeCompare(cardB.name);
-          return direction === 'asc' ? aVal - bVal : bVal - aVal;
-        });
-        break;
-
-      case 'quantity':
-        sorted.sort((a, b) => {
-          const diff = direction === 'asc'
-            ? (a.quantity || 0) - (b.quantity || 0)
-            : (b.quantity || 0) - (a.quantity || 0);
-          if (diff !== 0) return diff;
-          const cardA = a.card || a;
-          const cardB = b.card || b;
-          return cardA.name.localeCompare(cardB.name);
-        });
-        break;
-
-      case 'synergy':
-        sorted.sort((a, b) => {
-          const cardA = a.card || a;
-          const cardB = b.card || b;
-          const aVal = cardA.synergy_score ?? 0;
-          const bVal = cardB.synergy_score ?? 0;
-          if (aVal === bVal) return cardA.name.localeCompare(cardB.name);
-          return direction === 'asc' ? aVal - bVal : bVal - aVal;
-        });
-        break;
-
-      case 'name':
-      default:
-        sorted.sort((a, b) => {
-          const cardA = a.card || a;
-          const cardB = b.card || b;
-          return direction === 'asc'
-            ? cardA.name.localeCompare(cardB.name)
-            : cardB.name.localeCompare(cardA.name);
-        });
-        break;
-    }
-
-    return sorted;
-  };
+  const isCardLegalInFormat = (card) => isCardLegalInFormatUtil(card, format);
+  // helpers replaced by utils imports
 
   const setCommander = (card) => {
     if (format === 'commander' && isCardCommander(card)) {
@@ -770,37 +569,56 @@ const DeckBuilder = () => {
   // Helper to aggregate collection counts by card name
   const buildCollectionCountMap = async () => {
     try {
-      // Use the same approach as the modal - get all unique card names and their quantities
       const collections = await window.electronAPI.collectionGetAll();
       const countMap = new Map();
-      
-      // Get all unique card names from all collections
+
+      // Fetch all collection records in parallel
+      const collectionRecordsArrays = await Promise.all(
+        (collections || []).map((coll) =>
+          window.electronAPI
+            .collectionGet(coll.collection_name, { limit: 10000, offset: 0 })
+            .catch((e) => {
+              console.error('Failed to load collection records for', coll.collection_name, e);
+              return [];
+            })
+        )
+      );
+
+      // Aggregate unique names
       const allCardNames = new Set();
-      for (const coll of collections) {
-        const records = await window.electronAPI.collectionGet(coll.collection_name, { limit: 10000, offset: 0 });
-        records.forEach(rec => {
-          if (rec.name) {
+      collectionRecordsArrays.forEach((records) => {
+        (records || []).forEach((rec) => {
+          if (rec?.name) {
             allCardNames.add(rec.name);
           }
         });
+      });
+
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`🔍 Building collection count map for ${allCardNames.size} unique card names`);
       }
-      
-      console.log(`🔍 Building collection count map for ${allCardNames.size} unique card names`);
-      
-      // Get quantities for each unique card name using the same API as the modal
-      for (const cardName of allCardNames) {
-        try {
-          const res = await window.electronAPI.collectionGetCardQuantity(cardName);
-          const totalQuantity = res?.total || 0;
-          if (totalQuantity > 0) {
-            countMap.set(cardName.toLowerCase(), totalQuantity);
+
+      // Query quantities with limited concurrency
+      const namesArray = Array.from(allCardNames);
+      const CONCURRENCY = 20;
+      for (let i = 0; i < namesArray.length; i += CONCURRENCY) {
+        const batch = namesArray.slice(i, i + CONCURRENCY);
+        const results = await Promise.allSettled(
+          batch.map((cardName) => window.electronAPI.collectionGetCardQuantity(cardName))
+        );
+        results.forEach((res, idx) => {
+          if (res.status === 'fulfilled') {
+            const totalQuantity = res.value?.total || 0;
+            if (totalQuantity > 0) {
+              countMap.set(batch[idx].toLowerCase(), totalQuantity);
+            }
           }
-        } catch (err) {
-          console.error(`Failed to get quantity for ${cardName}:`, err);
-        }
+        });
       }
-      
-      console.log(`✅ Collection count map built with ${countMap.size} cards`);
+
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`✅ Collection count map built with ${countMap.size} cards`);
+      }
       return countMap;
     } catch (err) {
       console.error('Unable to load collections from DB:', err);
@@ -811,13 +629,17 @@ const DeckBuilder = () => {
 
   // Load initial data on mount
   useEffect(() => {
+    if (initialDataRef.current) return;
+    initialDataRef.current = true;
     const loadInitialData = async () => {
       try {
         const stats = await window.electronAPI.bulkDataStats();
         setBulkDataStats(stats);
         const map = await buildCollectionCountMap();
         setCollectionCounts(map);
-        console.log(`📊 Collection counts loaded: ${map.size} cards`);
+        if (process.env.NODE_ENV !== 'production') {
+          console.log(`📊 Collection counts loaded: ${map.size} cards`);
+        }
       } catch (err) {
         console.error('Failed to load initial data', err);
       }
@@ -827,6 +649,8 @@ const DeckBuilder = () => {
 
   // Effect to load detailed info for owned cards
   useEffect(() => {
+    if (ownedLoadedRef.current) return;
+    ownedLoadedRef.current = true;
     const loadOwned = async () => {
       setOwnedLoading(true);
       try {
@@ -894,7 +718,7 @@ const DeckBuilder = () => {
 
     // Check if card is already a commander
     if (format === 'commander' && deck.commanders.some(commander => commander.id === card.id)) {
-      alert("This card is already your commander and cannot be added to the mainboard.");
+      safeAlert("This card is already your commander and cannot be added to the mainboard.");
       return;
     }
 
@@ -905,7 +729,7 @@ const DeckBuilder = () => {
         // Check if we can add more copies
         const canAdd = canAddMoreCopies(card, existingEntryById.quantity);
         if (!canAdd.canAdd) {
-          alert(canAdd.reason);
+          safeAlert(canAdd.reason);
           return prev; // Don't modify the deck
         }
 
@@ -922,14 +746,14 @@ const DeckBuilder = () => {
       const existingEntryByName = prev.mainboard.find(entry => entry.card.name === card.name);
       if (existingEntryByName) {
         if (format === 'commander' && !isBasicLand(card)) {
-          alert(`In Commander format, you can only have one copy of "${card.name}". You already have this card in your deck.`);
+          safeAlert(`In Commander format, you can only have one copy of "${card.name}". You already have this card in your deck.`);
           return prev; // Don't modify the deck
         }
 
         // For other formats, check if we can add more copies
         const canAdd = canAddMoreCopies(card, existingEntryByName.quantity);
         if (!canAdd.canAdd) {
-          alert(canAdd.reason);
+          safeAlert(canAdd.reason);
           return prev; // Don't modify the deck
         }
 
@@ -945,7 +769,7 @@ const DeckBuilder = () => {
       // Check if we can add this new card
       const canAdd = canAddMoreCopies(card, 0);
       if (!canAdd.canAdd) {
-        alert(canAdd.reason);
+        safeAlert(canAdd.reason);
         return prev; // Don't modify the deck
       }
 
@@ -1067,12 +891,15 @@ const DeckBuilder = () => {
   }, [ownedCards, deck.commanders, format, commanderColorIdentity, cardTypeFilter, collectionSort, sortDirection]);
 
   // NEW: apply inline search & sort on collection view
+  // Defer heavy inline search filtering to reduce UI blocking during fast typing
+  const deferredCollectionSearch = useDeferredValue(collectionSearch);
+
   const processedOwnedCards = useMemo(() => {
     let list = filteredOwnedCards;
 
     // Inline search filter by card attributes (name, type, oracle text). Supports multi-term matching.
-    if (collectionSearch.trim() !== '') {
-      const terms = collectionSearch.toLowerCase().split(/\s+/).filter(Boolean);
+    if (deferredCollectionSearch.trim() !== '') {
+      const terms = deferredCollectionSearch.toLowerCase().split(/\s+/).filter(Boolean);
       list = list.filter(entry => {
         const name = (entry.card.name || '').toLowerCase();
         const typeLine = (entry.card.type || entry.card.type_line || '').toLowerCase();
@@ -1103,6 +930,8 @@ const DeckBuilder = () => {
 
 
   // --- Deck Persistence Handlers ---
+  const toast = useToast();
+
   const handleSaveDeck = async (filename) => {
     const deckData = {
       mainboard: deck.mainboard,
@@ -1112,12 +941,12 @@ const DeckBuilder = () => {
     };
     const result = await window.electronAPI.deckSave(filename, deckData);
     if (result.success) {
-      alert(`Deck "${result.filename}" saved.`);
+      toast.success('Deck saved', `"${result.filename}"`);
       setCurrentDeckName(result.filename);
       // Clear the draft since the deck is now persisted under a real filename
       localStorage.removeItem('deckBuilderAutosave');
     } else {
-      alert(`Error saving deck: ${result.error}`);
+      toast.error('Error saving deck', result.error);
     }
   };
 
@@ -1136,18 +965,18 @@ const DeckBuilder = () => {
       setRecommendations([]);
       setDeckArchetype(null);
       setDeckAnalysis(null);
-      alert(`Deck "${filename}" loaded.`);
+      toast.success('Deck loaded', `"${filename}"`);
     } else {
-      alert(`Error loading deck: ${result.error}`);
+      toast.error('Error loading deck', result.error);
     }
   };
 
   const handleDeleteDeck = async (filename) => {
     const result = await window.electronAPI.deckDelete(filename);
     if (result.success) {
-      alert(`Deck "${filename}" deleted.`);
+      toast.info('Deck deleted', `"${filename}"`);
     } else {
-      alert(`Error deleting deck: ${result.error}`);
+      toast.error('Error deleting deck', result.error);
     }
   };
 
@@ -1484,7 +1313,7 @@ const DeckBuilder = () => {
   const handleAutoBuildCommander = useCallback(async () => {
     if (autoBuildLoading) return;
     if (format !== 'commander') {
-      alert('Auto build currently supports Commander format only.');
+      toast.warning('Not available', 'Auto build supports Commander only');
       return;
     }
     setAutoBuildLoading(true);
@@ -1506,12 +1335,12 @@ const DeckBuilder = () => {
       console.log('🛠️ Auto-built deck synergy score:', synergy?.toFixed?.(0));
     } catch (err) {
       console.error('Auto build error:', err);
-      alert('Auto build failed: ' + err.message);
+      toast.error('Auto build failed', err.message);
       setAutoBuildSynergy(null);
     } finally {
       setAutoBuildLoading(false);
     }
-  }, [autoBuildLoading, format]);
+  }, [autoBuildLoading, format, toast]);
 
   // ===================================================================================
   // New: Layout and Panel Management Functions
@@ -1539,11 +1368,11 @@ const DeckBuilder = () => {
 
   const handleSaveLayout = () => {
     persistLayoutToLocalStorage();
-    alert('✅ Layout saved!');
+    toast.success('Layout saved');
   };
 
   const handleResetLayout = () => {
-    if (window.confirm('Are you sure you want to reset the layout to default?')) {
+    if (safeConfirm('Are you sure you want to reset the layout to default?')) {
       const defaultPanels = getDefaultPanels();
       const defaultLayouts = generateResponsiveLayouts(defaultPanels);
 
@@ -1562,7 +1391,7 @@ const DeckBuilder = () => {
         console.error('Failed to persist reset layouts:', err);
       }
 
-      alert('Layout has been reset to bootstrap-style default.');
+      toast.info('Layout reset to default');
     }
   };
 
@@ -1580,7 +1409,7 @@ const DeckBuilder = () => {
     const panelTitle = ALL_PANELS_CONFIG[panelId]?.title || 'Panel';
 
     // Add confirmation to prevent accidental removals
-    if (window.confirm(`Are you sure you want to remove the "${panelTitle}" panel?`)) {
+    if (safeConfirm(`Are you sure you want to remove the "${panelTitle}" panel?`)) {
       // Remove from panels list
       const newPanels = panels.filter(p => p.id !== panelId);
       setPanels(newPanels);
@@ -1689,24 +1518,35 @@ const DeckBuilder = () => {
                     }}
                     className="remove-panel-button"
                     title="Remove Panel"
+                    aria-label={`Remove ${ALL_PANELS_CONFIG[panel.id]?.title || 'panel'}`}
                     onMouseDown={(e) => e.stopPropagation()}
                     onMouseUp={(e) => e.stopPropagation()}
                   >
                     <XCircle size={18} />
                   </button>
                 </div>
-                {renderPanelContent(panel)}
+                <Suspense fallback={<div style={{ padding: 12 }}>Loading…</div>}>{renderPanelContent(panel)}</Suspense>
               </div>
             ))}
           </ResponsiveGridLayout>
         )}
 
       {/* Recommendation Settings Modal */}
-      <RecommendationSettings
-        isOpen={showSettings}
-        onClose={() => setShowSettings(false)}
-      />
+      <Suspense fallback={<div style={{ padding: 12 }}>Loading settings…</div>}>
+        <RecommendationSettings
+          isOpen={showSettings}
+          onClose={() => setShowSettings(false)}
+        />
+      </Suspense>
     </div>
+  );
+};
+
+const DeckBuilder = () => {
+  return (
+    <ToastProvider>
+      <DeckBuilderInner />
+    </ToastProvider>
   );
 };
 
@@ -1715,7 +1555,7 @@ const DeckBuilder = () => {
 // These functional components render the content for each specific panel.
 // ===================================================================================
 
-const CollectionSearchPanel = (props) => {
+const CollectionSearchPanel = React.memo(function CollectionSearchPanel(props) {
   const { deck, format, filteredSearchResults, bulkDataStats, searchResults, searchLoading, deckBulkSearch, cardTypeFilter, setCardTypeFilter, collectionSort, setCollectionSort, sortDirection, setSortDirection, addCardToDeck, removeCardFromDeck, handleCardClick, ownedLoading, displayCollectionCards, searchHelperRef, getMaxCopiesAllowed, getCollectionQuantity, canAddMoreCopies } = props;
   const [activeView, setActiveView] = useState('collection'); // 'collection' | 'search'
 
@@ -1905,9 +1745,9 @@ const CollectionSearchPanel = (props) => {
       )}
     </>
   );
-};
+});
 
-const DeckViewPanel = (props) => {
+const DeckViewPanel = React.memo(function DeckViewPanel(props) {
   const { deck, format, setFormat, currentDeckName, handleCardClick, removeCommander, mainboardCount, groupedMainboard, expandedCategories, toggleCategory, expandAllCategories, collapseAllCategories, incrementQty, decrementQty, removeCardFromDeck, setCommander, isCardCommander, isBasicLand } = props;
 
   return (
@@ -1956,7 +1796,19 @@ const DeckViewPanel = (props) => {
             const totalCards = cards.reduce((sum, entry) => sum + entry.quantity, 0);
             return (
               <div key={categoryName} className="card-type-category">
-                <div className={`category-header ${isExpanded ? 'expanded' : ''}`} onClick={() => toggleCategory(categoryName)}>
+                <div
+                  className={`category-header ${isExpanded ? 'expanded' : ''}`}
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={isExpanded}
+                  onClick={() => toggleCategory(categoryName)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      toggleCategory(categoryName);
+                    }
+                  }}
+                >
                   <div className="category-title"><span>{categoryName}</span><span className="category-count">{totalCards}</span></div>
                   <span className={`category-toggle ${isExpanded ? 'expanded' : ''}`}>▶</span>
                 </div>
@@ -1981,9 +1833,9 @@ const DeckViewPanel = (props) => {
       </div>
     </>
   );
-};
+});
 
-const DeckInfoPanel = (props) => {
+const DeckInfoPanel = React.memo(function DeckInfoPanel(props) {
   const { deck, format, currentDeckName, handleSaveDeck, handleLoadDeck, handleDeleteDeck, handleNewDeck, validationResults } = props;
   return (
     <div className="deck-info-view">
@@ -1991,9 +1843,9 @@ const DeckInfoPanel = (props) => {
       <DeckManager deck={deck} format={format} currentDeckName={currentDeckName} onSave={handleSaveDeck} onLoad={handleLoadDeck} onDelete={handleDeleteDeck} onNew={handleNewDeck} />
     </div>
   );
-};
+});
 
-const RecommendationsPanel = (props) => {
+const RecommendationsPanel = React.memo(function RecommendationsPanel(props) {
   const { deck, recoLoading, handleGetRecommendations, displayRecommendations, deckArchetype, cardTypeFilter, setCardTypeFilter, recommendationsSort, setRecommendationsSort, recommendationsSortDirection, setRecommendationsSortDirection, handleCardClick, addCardToDeck, removeCardFromDeck, showSettings, setShowSettings, strategyComparison, availableStrategies, activeStrategy, handleStrategyChange, showPatternAnalysis, setShowPatternAnalysis } = props;
   return (
     <div className="recommendations-view">
@@ -2015,6 +1867,7 @@ const RecommendationsPanel = (props) => {
             alignItems: 'center',
             gap: '4px'
           }}
+          aria-haspopup="dialog"
         >
           <Settings size={16} />
           Settings
@@ -2084,13 +1937,13 @@ const RecommendationsPanel = (props) => {
       </div>
     </div>
   );
-};
+});
 
 // ===================================================================================
 // New: DeckValidation Component
 // Displays legality errors and warnings for the current deck.
 // ===================================================================================
-const DeckValidation = ({ results }) => {
+const DeckValidation = React.memo(function DeckValidation({ results }) {
   if (!results || (results.errors.length === 0 && results.warnings.length === 0)) {
     return (
       <div className="deck-validation-widget valid">
@@ -2120,10 +1973,10 @@ const DeckValidation = ({ results }) => {
       </ul>
     </div>
   );
-};
+});
 
 
-const TokenSuggestionsPanel = (props) => {
+const TokenSuggestionsPanel = React.memo(function TokenSuggestionsPanel(props) {
   const { deck, tokenLoading, handleGetTokenSuggestions, filteredTokenSuggestions, handleCardClick, addCardToDeck, removeCardFromDeck } = props;
   return (
     <div className="recommendations-view">
@@ -2146,9 +1999,9 @@ const TokenSuggestionsPanel = (props) => {
       </div>
     </div>
   );
-};
+});
 
-const AutoBuildPanel = (props) => {
+const AutoBuildPanel = React.memo(function AutoBuildPanel(props) {
   const { format, autoBuildLoading, handleAutoBuildCommander, autoBuildSynergy, deck } = props;
 
   const canAutoBuild = format === 'commander';
@@ -2216,9 +2069,9 @@ const AutoBuildPanel = (props) => {
       )}
     </div>
   );
-};
+});
 
-const DeckStatsPanel = (props) => {
+const DeckStatsPanel = React.memo(function DeckStatsPanel(props) {
   const { deck, format, deckAnalysis } = props;
 
   return (
@@ -2228,9 +2081,9 @@ const DeckStatsPanel = (props) => {
       </div>
     </div>
   );
-};
+});
 
-const SpellbookExportPanel = (props) => {
+const SpellbookExportPanel = React.memo(function SpellbookExportPanel(props) {
   const { deck } = props;
 
   return (
@@ -2239,7 +2092,7 @@ const SpellbookExportPanel = (props) => {
       <SpellbookExport deck={deck} />
     </div>
   );
-};
+});
 
 // const AIPanelComponent = (props) => {
 //   const {

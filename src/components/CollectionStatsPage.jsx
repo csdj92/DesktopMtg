@@ -3,6 +3,9 @@ import './CollectionStatsPage.css';
 import StatsOverview from './StatsOverview';
 import RarityBreakdown from './RarityBreakdown';
 import CardTypeAnalysis from './CardTypeAnalysis';
+import CollectionValueMetrics from './CollectionValueMetrics';
+import FormatLegality from './FormatLegality';
+import TribalAnalysis from './TribalAnalysis';
 
 const CollectionStatsPage = ({ collectionCards, collectionStats, onRefreshStats }) => {
     return (
@@ -28,16 +31,11 @@ const CollectionStatsPage = ({ collectionCards, collectionStats, onRefreshStats 
 
                 <CardTypeAnalysis />
 
-                <div className="stats-placeholder">
-                    <p>More detailed statistics will be implemented in future tasks...</p>
-                    <ul>
-                        <li>Mana curve analysis</li>
-                        <li>Format legality</li>
-                        <li>Collection value metrics</li>
-                        <li>Tribal analysis</li>
-                        <li>And much more!</li>
-                    </ul>
-                </div>
+                <CollectionValueMetrics collectionCards={collectionCards} />
+
+                <FormatLegality collectionCards={collectionCards} />
+
+                <TribalAnalysis collectionCards={collectionCards} />
             </div>
         </div>
     );

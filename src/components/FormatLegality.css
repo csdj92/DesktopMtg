@@ -1,0 +1,114 @@
+.format-legality {
+  background: #1f1f1f;
+  border: 1px solid #3a3a3a;
+  border-radius: 10px;
+  padding: 20px;
+}
+
+.fl-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.fl-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.fl-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.fl-card {
+  background: #262626;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+}
+
+.fl-value {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #60a5fa;
+}
+
+.fl-label {
+  margin-top: 4px;
+  font-size: 0.85rem;
+  color: #bdbdbd;
+}
+
+.fl-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fl-row {
+  display: grid;
+  grid-template-columns: 120px 1fr 170px;
+  gap: 10px;
+  align-items: center;
+}
+
+.fl-status {
+  text-transform: capitalize;
+}
+
+.fl-bar {
+  background: #2f2f2f;
+  border-radius: 999px;
+  height: 12px;
+  overflow: hidden;
+}
+
+.fl-bar-fill {
+  height: 100%;
+}
+
+.fl-count {
+  text-align: right;
+  color: #d1d5db;
+}
+
+.fl-table {
+  margin-top: 14px;
+  overflow-x: auto;
+}
+
+.fl-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.fl-table thead th {
+  text-align: left;
+  font-weight: 600;
+  color: #d1d5db;
+  border-bottom: 1px solid #3a3a3a;
+  padding: 8px;
+}
+
+.fl-table tbody td {
+  padding: 8px;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.fl-table tbody tr.active {
+  background: #242b36;
+}
+
+@media (max-width: 800px) {
+  .fl-row {
+    grid-template-columns: 100px 1fr 130px;
+  }
+}
+
+
